@@ -15,6 +15,8 @@ A [release](https://github.com/VulpesNexus/freelab-script-suite/releases) holds 
 
 *Set Up FreeLab* (*windows/freelab_setup.py*) adds FreeLab's block to FontLab's startup script, the one thing a dropped folder cannot do by itself, and starts it at once. The block arranges the *Scripts > FreeLab* menu, starts tab docking, and applies dark mode at launch when it was left on; until it is there, the tools open from the menu but are listed in file order, and neither tab docking nor dark mode starts with FontLab. It is the block the installer writes, to the letter, under the same rules (below), so either way of installing can follow the other.
 
+Dark mode makes FontLab slower, noticeably so even on a fast desktop (tab switches two to five times as long as in light mode), and more on a modest computer. It is off until you switch it on, *Mixed* keeps the canvases (its costliest part) as FontLab draws them, and switching it off needs no restart: [DARKMODE.md](DARKMODE.md#cost).
+
 To update, quit FontLab and unpack the newer archive over the folder. To remove FreeLab, switch dark mode off, choose *Set Up FreeLab* again and *Remove*, restart FontLab, and delete the *FreeLab* folder; the installer's `-Uninstall` does the same from a copy of the repository, and also removes FreeLab's settings.
 
 The native libraries are in the folder's *bin*; the tools take the ones the installer built in *%LOCALAPPDATA%\FreeLab\bin* first, where there are any. They are not signed: a virus scanner that objects to them leaves dark mode working with flipped hues in the widgets FontLab paints itself, but Auto Kerning, Auto Spacing, Kerning Check, and Glyph Compose need theirs, and installing from the source builds both on your own computer.

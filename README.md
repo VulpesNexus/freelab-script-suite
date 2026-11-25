@@ -10,6 +10,8 @@ It all started because I had wanted a dark theme for FontLab for ages. I was so 
 
 *Dark Mode*: FontLab 7 as it comes (left) and with FreeLab's dark mode (right), switched without a restart.
 
+> **Dark mode makes FontLab slower.** FontLab 7 has no dark theme of its own, so dark mode redraws much of the interface through its own color mapping. On a fast desktop, switching tabs takes two to five times as long as in light mode (230 to 610 ms against 55 to 120), and scrolling a Font window or editing on a canvas maps each new picture again (40 to 60 ms for a full canvas). On a slower computer this will be felt more. *Mixed* in *Dark Mode Settings* keeps FontLab's light canvases, which are the costliest part, and switching dark mode off needs no restart: [docs/DARKMODE.md](docs/DARKMODE.md#cost).
+
 | | |
 |---|---|
 | ![Font Check listing the languages a font covers, script by script, and the missing glyphs that would complete the most languages](docs/images/font-check.png) | ![Auto Kerning listing suggested values for Cyrillic pairs by four methods, with one pair previewed at each value](docs/images/auto-kerning.png) |

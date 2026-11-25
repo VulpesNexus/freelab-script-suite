@@ -900,6 +900,41 @@ class ReviewOfNovember24Tests(unittest.TestCase):
         for (y, x, pill_x) in ((7, 10, 7), (12, 16, 7), (7, 34, 37), (12, 25, 21)):
             self.assertGreater(sum(out[y][x]), sum(out[y][pill_x]) + 150, "the name lighter than its pill at %d,%d" % (x, y))
 
+    def test_a_name_on_a_pill_over_the_baseline_stays_light_below_it(self):
+        """The owner, November 25: names on the pills along the baseline were still muddled. The pill over the
+        canvas' white above the baseline and its band below is two warm grays 10 apart per channel, the letters
+        below the line faint; a dashed sidebearing line, one pixel wide, was taken for a pill; and a glyph's
+        slanted contour under a stem ended the walk down."""
+        above, below, line = (240, 240, 240), (217, 217, 217), (75, 73, 69)
+        pill_above, pill_below, side = (176, 174, 170), (166, 164, 160), (184, 184, 181)
+        name_above, name_below, fringe = (239, 238, 238), (201, 200, 198), (190, 188, 185)
+        rows = []
+        for y in range(40):
+            ground = above if y < 20 else below
+            row = [ground] * 60
+            if 12 <= y < 32:
+                for x in range(6, 54):
+                    row[x] = pill_above if y < 20 else pill_below
+            if y == 20:
+                row = [line] * 60  # the baseline, under the pill
+            if 16 <= y < 25:
+                for x in (14, 22, 30, 38):  # stems, a pixel wide, with a fringe on their right
+                    if y != 20:
+                        row[x] = name_above if y < 20 else name_below
+                        row[x + 1] = fringe if y > 20 else row[x + 1]
+            if 25 <= y < 40:
+                row[30 + (y - 25) // 3] = line  # a glyph's slanted contour, from under a stem's foot down
+            rows.append(row)
+        for row in rows:  # dashed sidebearing lines: a pixel wide, two shades, frequent
+            for x in (2, 58):
+                row[x] = side
+        for _ in range(4):
+            rows.append([below] * 2 + [side] + [below] * 54 + [side] + [below] * 2)
+        out = self.map(rows, 1, 1.0)
+        for (y, x, pill_x) in ((17, 14, 18), (23, 22, 18), (23, 23, 18), (23, 30, 26), (24, 30, 26), (23, 38, 42)):
+            self.assertGreater(sum(out[y][x]), sum(out[y][pill_x]) + 60,
+                               "the name lighter than its pill at %d,%d" % (x, y))
+
     def test_a_colored_lines_smoothing_fades_to_the_paper_on_a_canvas(self):
         """The owner, 2026-11-25: every colored contour had a jagged edge. A line's full pixels were kept, light
         and red, and its smoothing, judged pixel by pixel, was turned over to a dark red: steps and dots."""

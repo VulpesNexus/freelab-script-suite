@@ -164,11 +164,82 @@ ISLAND_NAMES = frozenset((
 # had the dark palette's light text, which the island's mapping then turned as dark as the list).
 ISLAND_TEXT = {("YSelectableTree", "itemsList"): u"QTreeWidget{color:#000000;}"}
 # The tool bar's checked tool: FontLab draws its blue icon on a light chip, and mapped with the bar, the icon's
-# edges came out in light dots and gray (the owner, 2026-11-25: "selected tools look weird"). Its chip is made
-# dark here, and the checked button drawn as painted, over the bar's mapping (draw_checked_tools): the blue icon
-# FontLab gives a checked tool reads on it as it is.
-CHECKED_TOOL_RULE = (u"QToolButton:checked{background-color: #3a3c40; border: 1px solid #4a4d52;"
-                     u" border-radius: 5px;}")
+# edges came out in light dots and gray (the owner, 2026-11-25: "selected tools look weird"). Over the bar's
+# mapping, dark mode paints a dark chip of its own and the icon FontLab gives a checked tool, blue, as it is
+# (draw_checked_tools). Not through the bar's stylesheet: a chip given there had edges, and moved the slant
+# tool's icon up as it was checked (the owner, the same evening). Only the bar's tool buttons, which have its
+# margin; the round buttons below have their own look.
+CHECKED_TOOL_CHIP = "#3a3c40"
+CHECKED_TOOL_ICON_SPREAD = 80  # a checked tool's icon pixel: strongly colored (FontLab's blue)
+
+
+# A document tab's close cross: FontLab draws it, while the mouse is over the tab, as a character in the application
+# palette's text color, taken when the palette changes, not from the tab bar's own: the dark palette's light gray,
+# on the tabs' white, came out nearly the tab's dark (the owner, November 25). Over the bar's mapping, dark mode
+# draws a light cross centered where FontLab drew its own, found in the bar as drawn (draw_tab_crosses).
+TAB_CROSS_COLOR = "#d4d4d4"
+TAB_CROSS_FROM = 4  # pixels from a tab's left edge: where FontLab's cross may start (its own: 8 to 17, 9 across)
+TAB_CROSS_SPAN = 16  # (the name starts at 18 at the nearest, the tab's padding)
+TAB_CROSS_HALF = 3.6  # pixels from the center to each arm's end
+TAB_CROSS_WIDTH = 1.7
+TAB_CROSS_STEP = 3  # mean of the channels: FontLab's faint cross against its tab's ground
+TAB_CROSS_MIN_PIXELS = 8
+TAB_CROSS_SIZES = (5, 12)  # pixels: the cross' box, across and down, square within 2
+
+
+def _faint_mark_center(image):
+    """The center of a small square mark set off from the box's most frequent color (FontLab's faint tab cross),
+    in the image's coordinates, or None. Never raises."""
+    try:
+        QColor = _gui("QColor")
+        width, height = image.width(), image.height()
+        values = [[0] * width for _ in range(height)]
+        counts = {}
+        for y in range(height):
+            for x in range(width):
+                color = QColor.fromRgb(image.pixel(x, y))
+                value = (color.red() + color.green() + color.blue()) // 3
+                values[y][x] = value
+                counts[value] = counts.get(value, 0) + 1
+        ground = max(counts, key=lambda v: counts[v])
+        left = top = right = bottom = None
+        marked = 0
+        for y in range(height):
+            for x in range(width):
+                if abs(values[y][x] - ground) >= TAB_CROSS_STEP:
+                    marked += 1
+                    left = x if left is None or x < left else left
+                    right = x if right is None or x > right else right
+                    top = y if top is None or y < top else top
+                    bottom = y if bottom is None or y > bottom else bottom
+        if marked < TAB_CROSS_MIN_PIXELS:
+            return None
+        across, down = right - left + 1, bottom - top + 1
+        low, high = TAB_CROSS_SIZES
+        if not (low <= across <= high and low <= down <= high) or abs(across - down) > 2:
+            return None
+        return ((left + right + 1) / 2.0, (top + bottom + 1) / 2.0)
+    except Exception:
+        return None
+
+
+def _colored_box(image):
+    """(left, top) of the opaque, strongly colored pixels of a small QImage, or None. Never raises."""
+    try:
+        QColor = _gui("QColor")
+        left = top = None
+        for y in range(image.height()):
+            for x in range(image.width()):
+                color = QColor.fromRgba(image.pixel(x, y))
+                if color.alpha() < 128:
+                    continue
+                if max(color.red(), color.green(), color.blue()) - min(color.red(), color.green(), color.blue()) \
+                        >= CHECKED_TOOL_ICON_SPREAD:
+                    left = x if left is None or x < left else left
+                    top = y if top is None or y < top else top
+        return None if left is None else (left, top)
+    except Exception:
+        return None
 CHECKED_TOOL_ISLANDS = ("ToolbarPanel",)
 CHECKED_TOOL_MARGIN = 5  # px left and right: the bar's buttons' own margin (QToolButton{margin:0 5 0 5;})
 MARGIN_PARENTS = ("CodeEditor",)  # an unnamed narrow QWidget child is the line-number margin
@@ -235,7 +306,7 @@ SWEEP_MS = 500  # how often to look for widgets FontLab created or showed (750 w
 FULL_SWEEP_EVERY = 60  # every Nth sweep revisits every widget (replaced stylesheets, new icons): every 30 s
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 133
+NATIVE_VERSION = 137
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -2074,6 +2145,9 @@ def _effect_classes():
                         keep_pictures(self, painter, pixmap, offset)
                     if kind == "island" and _class_name(self.freelab_widget) in CHECKED_TOOL_ISLANDS:
                         draw_checked_tools(self, painter, pixmap, offset)
+                    if kind == "island" and self.freelab_widget.inherits("QTabBar") \
+                            and _prop(self.freelab_widget, "tabsClosable"):
+                        draw_tab_crosses(self, painter, pixmap, offset)
                 except Exception as exc:
                     _note_error("effect", exc)
                     self.drawSource(painter)
@@ -2220,30 +2294,76 @@ def _effect_classes():
                 painter.drawPixmap(area.topLeft(), pixmap, local)
 
         def draw_checked_tools(effect, painter, pixmap, offset):
-            """The checked tool buttons of the bar drawn as painted (their chip dark, see CHECKED_TOOL_RULE),
-            clipped to the chip, over the bar's mapping."""
-            QPainterPath, QToolButton = _gui("QPainterPath"), _gui("QToolButton")
+            """Each checked tool button of the bar: a dark chip, and its checked icon as FontLab gives it, over the
+            bar's mapping (see CHECKED_TOOL_CHIP)."""
+            QPainterPath, QToolButton, QIcon, QColor = (_gui("QPainterPath"), _gui("QToolButton"), _gui("QIcon"),
+                                                        _gui("QColor"))
+            QPainter = _gui("QPainter")
             owner = effect.freelab_widget
             for button in owner.findChildren(QToolButton):
                 try:
-                    if not button.isVisible() or not button.isChecked():
+                    if not button.isVisible() or not button.isChecked() or u"margin" not in (_prop(button, "styleSheet") or u""):
                         continue
                     corner = button.mapTo(owner, QPoint(0, 0))
-                    local = QRect(corner.x() + CHECKED_TOOL_MARGIN, corner.y(),
-                                  _prop(button, "width") - 2 * CHECKED_TOOL_MARGIN, _prop(button, "height"))
+                    width, height = _prop(button, "width"), _prop(button, "height")
+                    local = QRect(corner.x() + CHECKED_TOOL_MARGIN, corner.y(), width - 2 * CHECKED_TOOL_MARGIN, height)
                     if local.width() <= 0:
                         continue
                     area = local.translated(offset)
                     path = QPainterPath()
                     path.addRoundedRect(_core("QRectF")(area), 5.0, 5.0)
+                    size = _prop(button, "iconSize")
+                    icon = _prop(button, "icon")
                     painter.save()
                     try:
-                        painter.setClipPath(path, Qt.IntersectClip)
-                        painter.drawPixmap(area.topLeft(), pixmap, local)
+                        painter.setRenderHint(QPainter.Antialiasing, True)
+                        painter.fillPath(path, QColor(CHECKED_TOOL_CHIP))
+                        if icon is not None and not icon.isNull():
+                            picture = icon.pixmap(size, QIcon.Normal, QIcon.On)
+                            x = corner.x() + offset.x() + (width - picture.width()) // 2
+                            y = corner.y() + offset.y() + (height - picture.height()) // 2
+                            # where FontLab drew it: its colored pixels in the button as painted (the slant tool's
+                            # picture, 16 by 17, is scaled and placed a pixel off from plain centering, so the icon
+                            # moved as it was checked: the owner, November 25)
+                            drawn = _colored_box(pixmap.copy(QRect(corner.x(), corner.y(), width, height)).toImage())
+                            own = _colored_box(picture.toImage())
+                            if drawn is not None and own is not None:
+                                x = corner.x() + offset.x() + drawn[0] - own[0]
+                                y = corner.y() + offset.y() + drawn[1] - own[1]
+                            painter.drawPixmap(QPoint(x, y), picture)
                     finally:
                         painter.restore()
                 except Exception as exc:
                     _note_error("checked tool", exc)
+
+        def draw_tab_crosses(effect, painter, pixmap, offset):
+            """A document tab's close cross, light, over the bar's mapping, where FontLab drew its own (see
+            TAB_CROSS_COLOR)."""
+            QColor, QPainter, QPointF = _gui("QColor"), _gui("QPainter"), _core("QPointF")
+            bar = effect.freelab_widget
+            for k in range(bar.count):
+                try:
+                    tab = bar.tabRect(k)
+                    box = QRect(tab.x() + TAB_CROSS_FROM, tab.y() + 2, TAB_CROSS_SPAN, tab.height() - 4)
+                    if box.width() <= 0 or box.height() <= 0 or box.right() >= pixmap.width():
+                        continue
+                    center = _faint_mark_center(pixmap.copy(box).toImage())
+                    if center is None:
+                        continue
+                    cx, cy = box.x() + offset.x() + center[0], box.y() + offset.y() + center[1]
+                    pen = _gui("QPen")(QColor(TAB_CROSS_COLOR))
+                    pen.setWidthF(TAB_CROSS_WIDTH)
+                    half = TAB_CROSS_HALF
+                    painter.save()
+                    try:
+                        painter.setRenderHint(QPainter.Antialiasing, True)
+                        painter.setPen(pen)
+                        painter.drawLine(QPointF(cx - half, cy - half), QPointF(cx + half, cy + half))
+                        painter.drawLine(QPointF(cx - half, cy + half), QPointF(cx + half, cy - half))
+                    finally:
+                        painter.restore()
+                except Exception as exc:
+                    _note_error("tab cross", exc)
 
         def keep_pictures(effect, painter, pixmap, offset):
             """The pictures of the glyphs a canvas shows, drawn as they are over its mapping (see
@@ -3049,16 +3169,53 @@ CURSOR_GLOW_L = 0.5  # a glow's pixel: this light (HLS), and neither clear nor o
 CURSOR_MAX_SIDE = 128
 
 
+CURSOR_GRAY_SPREAD = 30  # an opaque pixel of the arrow itself: low color (a tool's red mark is kept)
+CURSOR_INNER_MIN = 4  # pixels inside the shape (opaque all around) enough to tell its fill
+CURSOR_REVISION = 3  # raised when glow_to_shadow changes: the cursors an earlier one made are let go
+
+
 def glow_to_shadow(image):
-    """A cursor's picture with its light glow made dark, in place: True when a pixel changed."""
+    """A cursor's picture made for the dark canvas, in place: its light glow made dark, and a dark shape (the
+    arrow: black with white edges) turned over, white with black edges, as dark interfaces draw theirs (only the
+    glow turned, the black arrow kept its white edges, which looked jagged: the owner, November 25). A shape
+    already light inside (a white arrow with a black outline) is kept: turned over, it came out black. Dark or
+    light by its inner pixels (opaque all around), or by all its pixels for a thin one (the magnifier's
+    outline). True when a pixel changed."""
     QColor = _gui("QColor")
+    width, height = image.width(), image.height()
+    colors = [[QColor.fromRgba(image.pixel(x, y)) for x in range(width)] for y in range(height)]
+
+    def gray(color):
+        return color.alpha() == 255 and \
+            max(color.red(), color.green(), color.blue()) - min(color.red(), color.green(), color.blue()) <= CURSOR_GRAY_SPREAD
+
+    def dark(color):
+        return _lightness(color.red(), color.green(), color.blue()) < 0.5
+
+    inner = [0, 0]
+    every = [0, 0]
+    for y in range(height):
+        for x in range(width):
+            color = colors[y][x]
+            if not gray(color):
+                continue
+            every[dark(color)] += 1
+            if 0 < x < width - 1 and 0 < y < height - 1 and all(
+                    colors[y + dy][x + dx].alpha() == 255 for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))):
+                inner[dark(color)] += 1
+    counts = inner if inner[0] + inner[1] >= CURSOR_INNER_MIN else every
+    turn = counts[1] > counts[0]
     changed = False
-    for y in range(image.height()):
-        for x in range(image.width()):
-            color = QColor.fromRgba(image.pixel(x, y))
+    for y in range(height):
+        for x in range(width):
+            color = colors[y][x]
             alpha = color.alpha()
-            if 0 < alpha < 255 and _lightness(color.red(), color.green(), color.blue()) >= CURSOR_GLOW_L:
+            red, green, blue = color.red(), color.green(), color.blue()
+            if 0 < alpha < 255 and _lightness(red, green, blue) >= CURSOR_GLOW_L:
                 image.setPixelColor(x, y, QColor(0, 0, 0, alpha))
+                changed = True
+            elif turn and gray(color):
+                image.setPixelColor(x, y, QColor(255 - red, 255 - green, 255 - blue, alpha))
                 changed = True
     return changed
 
@@ -3538,8 +3695,6 @@ def _make_island(widget):
     fill_rule = _chart_fill_rule(widget)
     if fill_rule:
         combined = (combined + u"\n" + fill_rule).strip()
-    if _class_name(widget) in CHECKED_TOOL_ISLANDS:
-        combined = (combined + u"\n" + CHECKED_TOOL_RULE).strip()
     if combined != own:
         widget.setProperty(SHEET_PROP, own)
         widget.setProperty(DARK_SHEET_PROP, combined)
@@ -4680,6 +4835,10 @@ def apply_dark():
         raise RuntimeError("No Qt application is running.")
     state = _state()
     _forget_map_cache()  # (mapped for another shade, or by an earlier module)
+    if state.get("cursor_revision") != CURSOR_REVISION:  # (cursors made by an earlier glow_to_shadow)
+        state.pop("cursors", None)
+        state.pop("cursor_keys", None)
+        state["cursor_revision"] = CURSOR_REVISION
     if state.get("hooked"):  # an earlier version's native engine, on in this FontLab session
         restore()  # (takes its hooks out with everything else: the script engine starts from scratch)
     if state["saved"] is None:

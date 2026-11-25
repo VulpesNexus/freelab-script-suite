@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 133
+#define FREELAB_PIXELS_VERSION 137
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -576,6 +576,8 @@ EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, con
 #define GLYPH_BADGE_MIN_LIGHT 4 /* light pixels in a shape's box: a badge's letters, */
 #define GLYPH_BADGE_LIGHT_SHARE 0.04 /* as a share of the shape's own pixels */
 #define GLYPH_TILE_FILL 85 /* percent of its box a tile fills, its dark ground and light letters together */
+#define GLYPH_TILE_LETTER_HLS 0.45 /* a tile's letters this light at least: Malayalam's and Tamil's are mid-gray */
+#define GLYPH_TILE_GROW_HLS 0.2 /* the flood goes through a tile's letters this light: their ClearType edges too, not its black border */
 #define GLYPH_SOLID_SHARE 0.7 /* a shape filling this much of its box is a block, not a glyph */
 #define GLYPH_ICON_NEAR 4 /* per channel: a pixel of the shape's color (premultiplied rounding of translucent text) */
 #define GLYPH_ICON_GROW 24 /* per channel: the shape goes on through its blends with a translucent fill (a flag's tint) */
@@ -2075,42 +2077,43 @@ static int find_bands(const uint32_t *p, int64_t count, int64_t width)
 
 static int near_rgb(uint32_t a, uint32_t b, int tolerance);
 
-#define LIGHT_CORE_REACH 2
-#define LIGHT_CORE_HLS 0.75
-#define LIGHT_CORE_SPREAD 30
-#define LIGHT_CORE_PAPER_NEAR 12 /* per channel: the paper, smoothed faintly toward a colored shape beside it */
-static int light_core_near(const uint32_t *p, int64_t i, int64_t width, int64_t count)
+#define BAND_BLEND_RESIDUE 14 /* per channel: how far from the line between band and paper a blend may lie */
+static int band_paper_blend(const uint8_t *v, uint32_t band)
 {
-    int64_t x = i % width, dx, dy;
-    int found = 0;
-    uint32_t paper = anchor_count > 0 && anchors[0].surface ? pack(anchors[0].r, anchors[0].g, anchors[0].b) : 0x1000000U;
-    for (dy = -LIGHT_CORE_REACH; dy <= LIGHT_CORE_REACH; dy++) {
-        for (dx = -LIGHT_CORE_REACH; dx <= LIGHT_CORE_REACH; dx++) {
-            int64_t at = i + dy * width + dx;
-            const uint8_t *q;
-            if (x + dx < 0 || x + dx >= width || at < 0 || at >= count)
-                continue;
-            q = (const uint8_t *)&p[at];
-            if (q[3] < ANCHOR_MIN_ALPHA)
-                continue;
-            /* The main paper this near: the pixel is the paper's edge between two colored shapes (red text on the
-             * Preview panel's white kept a white speck where the Q's tail meets its bowl), not text on a band, which
-             * the band encloses (the Fonts panel's letters on their discs: a core of the selected row's light blue,
-             * another surface, is a core). */
-            if (paper <= 0xffffffU && (dx == 0 || dy == 0) && dx + dy >= -1 && dx + dy <= 1
-                && near_rgb(paper, p[at] & 0xffffffU, LIGHT_ON_COLOR_PAPER_NEAR))
-                return 0; /* (beside it: a letter on a disc has the disc around it, the paper beyond) */
-            if (spread_of(q) <= LIGHT_CORE_SPREAD && lightness(q[2], q[1], q[0]) >= LIGHT_CORE_HLS)
-                found = 1;
+    int a, ch;
+    double b[3], c[3];
+    b[0] = (double)((band >> 16) & 255U); b[1] = (double)((band >> 8) & 255U); b[2] = (double)(band & 255U);
+    c[0] = v[2]; c[1] = v[1]; c[2] = v[0];
+    for (a = 0; a < anchor_count; a++) {
+        double w[3], dot = 0.0, len = 0.0, t, worst = 0.0;
+        if (!anchors[a].surface || !anchors[a].mapped)
+            continue;
+        w[0] = anchors[a].r; w[1] = anchors[a].g; w[2] = anchors[a].b;
+        for (ch = 0; ch < 3; ch++) {
+            dot += (c[ch] - b[ch]) * (w[ch] - b[ch]);
+            len += (w[ch] - b[ch]) * (w[ch] - b[ch]);
         }
+        if (len <= 0.0)
+            continue;
+        t = dot / len;
+        if (t <= 0.0 || t > 1.05)
+            continue;
+        for (ch = 0; ch < 3; ch++) {
+            double d = c[ch] - (b[ch] + t * (w[ch] - b[ch]));
+            d = d < 0.0 ? -d : d;
+            worst = d > worst ? d : worst;
+        }
+        if (worst <= BAND_BLEND_RESIDUE)
+            return 1;
     }
-    return found;
+    return 0;
 }
 
 static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int64_t count)
 {
     int64_t x, y, rows;
     int dir, have = 0, hits = 0, thick = 0, sides;
+    uint32_t band = 0;
     double hr = 0.0, hg = 0.0, hb = 0.0;
     const uint8_t *self = (const uint8_t *)&p[i];
     if (width <= 0 || lightness(self[2], self[1], self[0]) < LIGHT_ON_COLOR_TEST_HLS)
@@ -2129,11 +2132,6 @@ static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int6
                 && near_rgb(pack(anchors[a].r, anchors[a].g, anchors[a].b), own, LIGHT_ON_COLOR_PAPER_NEAR))
                 return 0;
         }
-        /* Nor is the smoothing between a thin colored line and the paper (an overlaid font's red outlines in a
-         * Font window cell, crossed slantwise where they curve): kept as drawn, it dotted the outlines light
-         * (the owner, 2026-11-25). Light text has a light core of low color near it, lighter than a cell's gray. */
-        if (!light_core_near(p, i, width, count))
-            return 0;
     }
     x = i % width;
     y = i / width;
@@ -2163,6 +2161,7 @@ static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int6
                     hg = q[1] - m;
                     hb = q[0] - m;
                     have = 1;
+                    band = *(const uint32_t *)q & 0xffffffU;
                 }
                 for (t = 1; t < LIGHT_ON_COLOR_THICK; t++) { /* a band, not an outline */
                     const uint8_t *r;
@@ -2184,7 +2183,13 @@ static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int6
         if (!found)
             return 0;
     }
-    return hits >= 2 && thick >= 1;
+    if (hits < 2 || thick < 1)
+        return 0;
+    /* Nor is a blend of the band and a paper text: the smoothing between a thin colored line and the paper (an
+     * overlaid font's red outlines in a Font window cell, crossed slantwise where they curve) and the paper
+     * between two colored letters (red text on the Preview panel's white, where the Q's tail meets its bowl)
+     * were kept light (the owner, 2026-11-25). Light text lies between the band and its own light color. */
+    return !band_paper_blend(self, band);
 }
 
 /* Ink mode: a white pixel with only colored pixels around it, besides white ones (a check box's tick
@@ -2334,7 +2339,10 @@ static int badge_count;
  * rules: their badges are flat. Checked on every capture of the session's probes: only canvases with pills
  * change. */
 #define BADGE_PILL_MAX_HLS 0.8
-#define BADGE_SHADE 6
+#define BADGE_SHADE 12 /* (the pill over the canvas' white above the baseline and its band below: 10 per channel
+                        * apart, and the letters below the line came out dark: the owner, November 25) */
+#define BADGE_PILL_MIN_RUN 2.0 /* a pill's gray runs both ways: a dashed sidebearing line, one pixel wide, was taken
+                                * for a pill, and its shades took in the names' fringes */
 #define BADGE_TINT 3 /* red above blue by this much at least: a tinted (warm) gray */
 #define BADGE_PILL_STROKE 5 /* px: on a pill, a name drawn pale over a glyph's fill has its smoothing within the
                              * stroke's lightness, and an "n"'s stems ran 4 pixels across (the owner, 2026-11-25:
@@ -2365,7 +2373,8 @@ static void find_badge_colors(int mode, double dark_l, double light_l, double ke
         px[0] = (uint8_t)a->b;
         hls = lightness(px[2], px[1], px[0]);
         if (spread_of(px) >= WHITE_MARK_SPREAD || hls < BADGE_MIN_HLS || hls > (badge_pill ? BADGE_PILL_MAX_HLS : BADGE_MAX_HLS)
-            || (a->hrun < SURFACE_RUN && a->vrun < SURFACE_RUN))
+            || (a->hrun < SURFACE_RUN && a->vrun < SURFACE_RUN)
+            || (badge_pill && (a->hrun < BADGE_PILL_MIN_RUN || a->vrun < BADGE_PILL_MIN_RUN)))
             continue;
         badge_colors[badge_count] = rgb;
         badge_text_count[badge_count] = 0;
@@ -2450,7 +2459,7 @@ static int near_rgb(uint32_t a, uint32_t b, int tolerance);
 static int light_on_gray_badge(const uint32_t *p, int64_t i, int64_t width, int64_t count)
 {
     int64_t x, y, rows, k;
-    int dir, badge = -1, run[4], nearest = 0, nearest_k = BADGE_REACH_ACROSS + 1, crossed = 0, stroke;
+    int dir, badge = -1, run[4], nearest = 0, nearest_k = BADGE_REACH_ACROSS + 1, crossed = 0, stroke, blocked = 0;
     double own;
     if (!badge_count || width <= 0 || !badge_near[i])
         return 0;
@@ -2488,8 +2497,14 @@ static int light_on_gray_badge(const uint32_t *p, int64_t i, int64_t width, int6
                     nearest = dir << 5 | (int)k;
                 }
             } else if (l < BADGE_LIGHT_HLS) {
-                if (!badge_pill || ++dark_run > BADGE_CROSS_LINE)
+                if (!badge_pill || ++dark_run > BADGE_CROSS_LINE) {
+                    if (badge_pill && sy && !blocked) {
+                        blocked = 1; /* (a glyph's slanted contour under the pill runs on below a stem: one way
+                                      * up or down, the other reaching the pill: the owner, November 25) */
+                        break;
+                    }
                     return 0; /* dark before the gray: no badge around the pixel */
+                }
                 crossed = 1; /* (a line under a translucent pill: see BADGE_CROSS_LINE) */
                 same = 0;
                 continue;
@@ -2497,6 +2512,11 @@ static int light_on_gray_badge(const uint32_t *p, int64_t i, int64_t width, int6
             dark_run = 0;
             same = same && l >= own - BADGE_SAME_HLS && spread_of(q) <= WHITE_MARK_PURE_SPREAD;
             run[dir] += same && !found; /* the pixel's own stroke, up to its fringe or the badge */
+        }
+        if (!found && blocked == 1) {
+            blocked = 2; /* (once: the other way must reach the pill) */
+            crossed = 1;
+            continue;
         }
         if (!found)
             return 0;
@@ -2823,7 +2843,7 @@ static int find_glyph_icons(const uint32_t *p, int64_t count, int64_t width)
     for (i = 0; i < count; i++)
         icon_px[i] = 0;
     for (i = 0; i < count; i++) {
-        int64_t head = 0, tail = 0, k, x0, x1, y0, y1, x, y, light = 0, on_row = 0;
+        int64_t head = 0, tail = 0, k, x0, x1, y0, y1, x, y, light = 0, on_row = 0, letters = 0;
         uint32_t rgb = 0;
         const Anchor *a = NULL;
         int verdict, hole = 0, bare = 0;
@@ -2862,7 +2882,7 @@ static int find_glyph_icons(const uint32_t *p, int64_t count, int64_t width)
                          * pieces by their letters, each piece too small for a badge, came out light: the owner,
                          * 2026-11-25); a glyph icon drawn on nothing has no opaque light pixel on it */
                         || ((p[m] >> 24) == 255 && !light_row_pixel(m)
-                            && lightness((uint8_t)(p[m] >> 16), (uint8_t)(p[m] >> 8), (uint8_t)p[m]) >= GLYPH_ICON_LIGHT_HLS))) {
+                            && lightness((uint8_t)(p[m] >> 16), (uint8_t)(p[m] >> 8), (uint8_t)p[m]) >= GLYPH_TILE_GROW_HLS))) {
                     icon_px[m] = 2;
                     queue[tail++] = (int32_t)m;
                 }
@@ -2892,10 +2912,20 @@ static int find_glyph_icons(const uint32_t *p, int64_t count, int64_t width)
                 uint32_t v = p[at];
                 if ((v >> 24) >= ANCHOR_MIN_ALPHA && light_row_pixel(at))
                     on_row++;
-                else if ((v >> 24) >= ANCHOR_MIN_ALPHA
-                    && lightness((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v) >= GLYPH_ICON_LIGHT_HLS)
-                    light++;
+                else if ((v >> 24) >= ANCHOR_MIN_ALPHA) {
+                    double l = lightness((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v);
+                    light += l >= GLYPH_ICON_LIGHT_HLS;
+                    letters += l >= GLYPH_TILE_LETTER_HLS;
+                }
             }
+        }
+        /* A tile (see the flood above): its box filled, letters on it of middle lightness at least (Malayalam's and
+         * Tamil's, mid-gray, came out on a light tile): as drawn. */
+        if (letters >= GLYPH_BADGE_MIN_LIGHT && on_row == 0 && tail * 100 >= GLYPH_TILE_FILL * (x1 - x0 + 1) * (y1 - y0 + 1)
+            && x1 - x0 >= 7 && y1 - y0 >= 7 && letters < tail) {
+            for (k = 0; k < tail; k++)
+                icon_px[queue[k]] = 3;
+            continue;
         }
         /* light letters on it: a badge; a light pixel or two (a tag's hole): an icon. A shape whose box
          * holds more of a light row than of other light pixels is text on that row, its smoothing toward
@@ -3146,6 +3176,104 @@ static uint32_t colored_cleartype_color(uint32_t c, uint32_t t, int mode, double
     return pack(out[0], out[1], out[2]);
 }
 
+/* Ink: colored text a list draws with ClearType on its light rows (Overlay Fonts' samples, "AaGg123" in each
+ * layer's color, on white and on the light blue of the selected row). Kept as drawn, the text's edges, of
+ * every hue but its own, stayed around it: dark edges, a gray and purple patch in each G (the owner,
+ * 2026-11-25). A pixel with a strongly colored anchor (the text's color) and a light paper of low color
+ * within COLORED_TEXT_REACH, its channels between the two, is drawn with one coverage, the mean of its
+ * channels', from the paper as it comes out toward the text as it comes out. */
+#define COLORED_TEXT_REACH 2
+#define COLORED_TEXT_MIN_SPREAD 80   /* the text's color: strongly colored */
+#define COLORED_TEXT_MIN_COUNT 12    /* and frequent (an anchor of the image) */
+#define COLORED_TEXT_NEAR 16         /* per channel: a pixel this near the text's color is the text */
+#define COLORED_TEXT_PAPER_HLS 0.85
+#define COLORED_TEXT_PAPER_SPREAD 30
+#define COLORED_TEXT_MIN_DISTANCE 150 /* channels' sum between paper and text */
+#define COLORED_TEXT_MAX 8
+#define COLORED_TEXT_OVERSHOOT 90 /* per channel past the text's color, toward away from the paper */
+static uint32_t colored_text[COLORED_TEXT_MAX];
+static int colored_text_count;
+
+static void colored_text_anchors(int on)
+{
+    int j;
+    colored_text_count = 0;
+    for (j = 0; on && j < anchor_count && colored_text_count < COLORED_TEXT_MAX; j++) {
+        uint8_t q[3];
+        q[2] = (uint8_t)anchors[j].r;
+        q[1] = (uint8_t)anchors[j].g;
+        q[0] = (uint8_t)anchors[j].b;
+        if (spread_of(q) >= COLORED_TEXT_MIN_SPREAD && anchors[j].count >= COLORED_TEXT_MIN_COUNT)
+            colored_text[colored_text_count++] = pack(anchors[j].r, anchors[j].g, anchors[j].b);
+    }
+}
+
+static int colored_text_on_light(const uint32_t *p, int64_t i, int64_t width, int64_t count, int mode, double dark_l,
+                                 double light_l, double keep_tint, uint32_t *out)
+{
+    int64_t x = i % width, dx, dy;
+    const uint8_t *v = (const uint8_t *)&p[i];
+    uint32_t text = 0x1000000U, paper = 0x1000000U, c = p[i] & 0xffffffU, mt, mp;
+    double paper_l = 0.0, sum = 0.0, cov, o[3];
+    int ch, valid = 0, k;
+    if (!colored_text_count || spread_of(v) < 12)
+        return 0; /* (gray pixels: the paper, gray text) */
+    for (dy = -COLORED_TEXT_REACH; dy <= COLORED_TEXT_REACH; dy++) {
+        for (dx = -COLORED_TEXT_REACH; dx <= COLORED_TEXT_REACH; dx++) {
+            int64_t at = i + dy * width + dx;
+            const uint8_t *q;
+            double l;
+            if (x + dx < 0 || x + dx >= width || at < 0 || at >= count)
+                continue;
+            q = (const uint8_t *)&p[at];
+            if (q[3] < ANCHOR_MIN_ALPHA)
+                continue;
+            for (k = 0; k < colored_text_count && text > 0xffffffU; k++)
+                if (near_rgb(colored_text[k], p[at] & 0xffffffU, COLORED_TEXT_NEAR))
+                    text = colored_text[k];
+            l = lightness(q[2], q[1], q[0]);
+            if (spread_of(q) <= COLORED_TEXT_PAPER_SPREAD && l >= COLORED_TEXT_PAPER_HLS && l > paper_l) {
+                paper_l = l;
+                paper = p[at] & 0xffffffU;
+            }
+        }
+    }
+    if (text > 0xffffffU || paper > 0xffffffU || near_rgb(text, c, COLORED_TEXT_NEAR))
+        return 0; /* (the text itself: as the mapping keeps it) */
+    {
+        int distance = 0;
+        for (ch = 0; ch < 3; ch++) {
+            int d = (int)rgb_channel(text, ch) - (int)rgb_channel(paper, ch);
+            distance += d < 0 ? -d : d;
+        }
+        if (distance < COLORED_TEXT_MIN_DISTANCE)
+            return 0;
+    }
+    for (ch = 0; ch < 3; ch++) {
+        double t = rgb_channel(text, ch), w = rgb_channel(paper, ch), value = rgb_channel(c, ch);
+        double lo = t < w ? t : w, hi = t < w ? w : t;
+        /* (past the text's own color, ClearType's contrast overshoots: a bold sample's edges darker than its green,
+         * kept as drawn, ringed it dark) */
+        if (value < lo - (t < w ? COLORED_TEXT_OVERSHOOT : COLORED_CT_LEEWAY)
+            || value > hi + (t > w ? COLORED_TEXT_OVERSHOOT : COLORED_CT_LEEWAY))
+            return 0; /* not between the two: another color */
+        if (hi - lo >= COLORED_CT_MIN_CONTRAST) {
+            double one = (w - value) / (w - t);
+            sum += one < 0.0 ? 0.0 : one > 1.0 ? 1.0 : one;
+            valid++;
+        }
+    }
+    if (!valid)
+        return 0;
+    cov = sum / valid;
+    mt = text; /* (ink keeps colored text as drawn; mapped alone, a repainted row's green came out dark) */
+    mp = resolve(paper, 0, 0U, mode, dark_l, light_l, keep_tint, 0.0) & 0xffffffU;
+    for (ch = 0; ch < 3; ch++)
+        o[ch] = rgb_channel(mp, ch) + cov * (rgb_channel(mt, ch) - rgb_channel(mp, ch));
+    *out = pack(o[0], o[1], o[2]);
+    return 1;
+}
+
 /* A strongly colored mark with a white halo (the Scoreboard's orange word, drawn for a light canvas, shown in
  * a window of its own with the ink effect): ink, with no anchor to map, turns the halo's whites dark as
  * stray whites, and the blends between the mark and its halo, kept as drawn, ringed the word in light dots
@@ -3318,13 +3446,18 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
             badge_text_count[badge - 1]++;
         }
     }
+    colored_text_anchors(white_marks);
     for (i = 0; white_marks && i < count; i++) {
-        uint32_t v = p[i];
+        uint32_t v = p[i], blended;
         double l = lightness((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v);
         white_mark[i] = 0;
         if ((v >> 24) < ANCHOR_MIN_ALPHA)
             continue;
-        if (l >= WHITE_MARK_TEST_HLS && white_on_colored(p, i, width, count))
+        if (colored_text_on_light(p, i, width, count, mode, dark_l, light_l, keep_tint, &blended)) {
+            white_mark[i] = COLORED_CT_MARK;
+            colored_out[i] = blended | (v & 0xff000000U);
+        }
+        else if (l >= WHITE_MARK_TEST_HLS && white_on_colored(p, i, width, count))
             white_mark[i] = 1;
         else if (l >= BADGE_LIGHT_HLS && (badge = light_on_gray_badge(p, i, width, count)) > 0)
         {
@@ -3443,7 +3576,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
             have_last = 0;
             continue;
         }
-        if (fringes && white_mark[i] == COLORED_CT_MARK) {
+        if ((fringes || white_marks) && white_mark[i] == COLORED_CT_MARK) {
             have_last = 0;
             if (colored_out[i] != v) {
                 changed++;

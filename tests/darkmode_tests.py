@@ -257,29 +257,91 @@ class ShadeAndPickerTests(DarkModeCase):
                 return self.rgba[2]
 
         class Picture(object):
-            def __init__(self, pixels):
-                self.pixels = pixels
+            def __init__(self, rows):
+                self.rows = [list(row) for row in rows]
 
             def width(self):
-                return len(self.pixels)
+                return len(self.rows[0])
 
             def height(self):
-                return 1
+                return len(self.rows)
 
             def pixel(self, x, y):
-                return self.pixels[x]
+                return self.rows[y][x]
 
             def setPixelColor(self, x, y, color):
                 r, g, b, a = color.rgba
-                self.pixels[x] = (a << 24) | (r << 16) | (g << 8) | b
+                self.rows[y][x] = (a << 24) | (r << 16) | (g << 8) | b
 
         self.patch("_gui", lambda name: Color if name == "QColor" else None)
-        clear, white, black, glow, edge = 0x00000000, 0xffffffff, 0xff000000, 0x60ffffff, 0x80101010
-        picture = Picture([clear, white, black, glow, edge])
+        clear, white, black, glow, edge, red = 0x00000000, 0xffffffff, 0xff000000, 0x60ffffff, 0x80101010, 0xffe02020
+
+        def shape(fill, rim):  # a 3 by 3 fill inside a rim, a glow around it, a smoothed pixel and a red mark
+            rows = [[glow] * 7]
+            rows += [[glow, rim, rim, rim, rim, rim, glow]]
+            rows += [[glow, rim, fill, fill, fill, rim, glow] for _ in range(3)]
+            rows += [[glow, rim, rim, rim, rim, rim, glow]]
+            rows += [[clear, edge, red, clear, clear, clear, clear]]
+            return rows
+
+        picture = Picture(shape(black, white))
         self.assertTrue(dm.glow_to_shadow(picture))
-        self.assertEqual(picture.pixels, [clear, white, black, 0x60000000, edge],
-                         "the glow black at the opacity it had; the arrow, its outline, and the outline's own smoothing as drawn")
-        self.assertFalse(dm.glow_to_shadow(Picture([clear, white, black, edge])), "no glow: nothing to make")
+        self.assertEqual(picture.rows, [[0x60000000 if c == glow else c for c in row] for row in shape(white, black)],
+                         "FontLab's black arrow white with black edges (the owner, November 25: the black arrow's "
+                         "white edges looked jagged); the glow black at the opacity it had; the outline's smoothing "
+                         "and a tool's red as drawn")
+        picture = Picture(shape(white, black))
+        self.assertTrue(dm.glow_to_shadow(picture))
+        self.assertEqual(picture.rows, [[0x60000000 if c == glow else c for c in row] for row in shape(white, black)],
+                         "a white arrow with a black outline kept: turned over, it came out black")
+        thin = Picture([[clear, black, clear], [black, clear, black], [clear, black, white]])
+        self.assertTrue(dm.glow_to_shadow(thin))
+        self.assertEqual(thin.rows[0][1], white, "a thin dark outline (the magnifier's) turned over by all its pixels")
+        self.assertFalse(dm.glow_to_shadow(Picture([[clear, edge, red]])), "nothing to make")
+
+    def test_a_tabs_faint_close_cross_is_found_at_its_center(self):
+        """The owner, November 25: a document tab's close cross was nearly invisible. FontLab draws it faint on the
+        tab as drawn (220 on 226); dark mode finds it there and draws a light one centered on it."""
+        class Color(object):
+            def __init__(self, value):
+                self.value = value
+
+            @staticmethod
+            def fromRgb(value):
+                return Color(value)
+
+            def red(self):
+                return (self.value >> 16) & 255
+
+            def green(self):
+                return (self.value >> 8) & 255
+
+            def blue(self):
+                return self.value & 255
+
+        class Picture(object):
+            def __init__(self, marks, width=16, height=18):
+                self.marks, self.w, self.h = marks, width, height
+
+            def width(self):
+                return self.w
+
+            def height(self):
+                return self.h
+
+            def pixel(self, x, y):
+                return 0xffdcdcdc if (x, y) in self.marks else 0xffe2e2e2
+
+        self.patch("_gui", lambda name: Color if name == "QColor" else None)
+        cross = set()
+        for k in range(9):  # FontLab's: 9 across, two pixels thick, from column 4 and row 5
+            for d in (0, 1):
+                cross.add((4 + k, 5 + min(8, k + d)))
+                cross.add((12 - k, 5 + min(8, k + d)))
+        self.assertEqual(dm._faint_mark_center(Picture(cross)), (8.5, 9.5))
+        self.assertIsNone(dm._faint_mark_center(Picture(set())), "no cross: the mouse is not over the tab")
+        name = set((x, y) for x in range(4, 16) for y in (8, 9))  # a name's start: wide, not square
+        self.assertIsNone(dm._faint_mark_center(Picture(name)))
 
     def test_a_canvas_pictures_are_found_where_fontlab_draws_them(self):
         """The owner, November 25: a picture in a glyph came out as its negative. Its place comes from FontLab:
