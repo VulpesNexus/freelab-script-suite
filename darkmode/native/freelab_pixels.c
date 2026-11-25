@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 140
+#define FREELAB_PIXELS_VERSION 144
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -3457,23 +3457,58 @@ EXPORT int64_t freelab_reground(const uint8_t *orig, uint8_t *out, int64_t count
     if (!npapers)
         return 0;
     rgb_of(papers[0], main_paper);
-    for (k = 0; k < REGROUND_TABLE && ntexts < REGROUND_TEXTS; k++) {
-        int c[3];
-        double color[3];
-        uint8_t q[4];
-        if (!reground_keys[k] || reground_counts[k] < REGROUND_TEXT_COUNT)
-            continue;
-        rgb_of(reground_keys[k] & 0xffffffU, c);
-        q[2] = (uint8_t)c[0];
-        q[1] = (uint8_t)c[1];
-        q[0] = (uint8_t)c[2];
-        if ((c[0] > c[1] ? (c[0] > c[2] ? c[0] : c[2]) : (c[1] > c[2] ? c[1] : c[2]))
-                - (c[0] < c[1] ? (c[0] < c[2] ? c[0] : c[2]) : (c[1] < c[2] ? c[1] : c[2])) < REGROUND_TEXT_SPREAD)
-            continue;
-        if (reground_unmix(q, main_paper, color) < REGROUND_TEXT_SHARE)
-            continue;
-        texts[ntexts++] = reground_keys[k] & 0xffffffU;
+    /* the text colors, most frequent first; a color on the line from the paper to one already taken is that
+     * one's smoothing (a dark color's shades are strong and frequent too: taken in the table's order, they
+     * filled the list, and runs of the text itself had no core near them: light pixels at its edges) */
+    while (ntexts < REGROUND_TEXTS) {
+        int64_t best = -1;
+        for (k = 0; k < REGROUND_TABLE; k++) {
+            int c[3], m, on_line = 0;
+            double color[3];
+            uint8_t q[4];
+            if (!reground_keys[k] || reground_counts[k] < REGROUND_TEXT_COUNT
+                || (best >= 0 && reground_counts[k] <= reground_counts[best]))
+                continue;
+            rgb_of(reground_keys[k] & 0xffffffU, c);
+            q[2] = (uint8_t)c[0];
+            q[1] = (uint8_t)c[1];
+            q[0] = (uint8_t)c[2];
+            if ((c[0] > c[1] ? (c[0] > c[2] ? c[0] : c[2]) : (c[1] > c[2] ? c[1] : c[2]))
+                    - (c[0] < c[1] ? (c[0] < c[2] ? c[0] : c[2]) : (c[1] < c[2] ? c[1] : c[2])) < REGROUND_TEXT_SPREAD)
+                continue;
+            if (reground_unmix(q, main_paper, color) < REGROUND_TEXT_SHARE)
+                continue;
+            for (m = 0; m < ntexts && !on_line; m++) {
+                int t[3], ch;
+                double dot = 0.0, len = 0.0, share, fit = 0.0;
+                rgb_of(texts[m], t);
+                for (ch = 0; ch < 3; ch++) {
+                    dot += (double)(c[ch] - main_paper[ch]) * (double)(t[ch] - main_paper[ch]);
+                    len += (double)(t[ch] - main_paper[ch]) * (double)(t[ch] - main_paper[ch]);
+                }
+                if (len <= 0.0 || (reground_keys[k] & 0xffffffU) == texts[m]) {
+                    on_line = (reground_keys[k] & 0xffffffU) == texts[m];
+                    continue;
+                }
+                share = dot / len;
+                share = share < 0.0 ? 0.0 : share > 1.0 ? 1.0 : share;
+                for (ch = 0; ch < 3; ch++) {
+                    double d = (double)(c[ch] - main_paper[ch]) - share * (double)(t[ch] - main_paper[ch]);
+                    fit += d * d;
+                }
+                on_line = fit <= 3.0 * REGROUND_FIT * REGROUND_FIT;
+            }
+            if (!on_line)
+                best = k;
+        }
+        if (best < 0)
+            break;
+        texts[ntexts++] = reground_keys[best] & 0xffffffU;
+        reground_counts[best] = -reground_counts[best]; /* (taken: out of the next rounds) */
     }
+    for (k = 0; k < REGROUND_TABLE; k++)
+        if (reground_counts[k] < 0)
+            reground_counts[k] = -reground_counts[k];
     if (!ntexts)
         return 0;
     for (i = 0; i < count && !have_ground; i++) {
@@ -3486,14 +3521,45 @@ EXPORT int64_t freelab_reground(const uint8_t *orig, uint8_t *out, int64_t count
     }
     if (!have_ground)
         return 0;
+    /* a core: a pixel on a text color's line from the main paper, at half its share at least (the text's own
+     * pixels are not all of one color: a lighter shade along a G's bar, four pixels from the nearest of the exact
+     * color, came out light) */
     for (i = 0; i < count; i++) {
-        uint32_t c = p[i] & 0xffffffU;
+        int paper_pixel = 0;
         reground_core[i] = 0;
         if ((p[i] >> 24) < ANCHOR_MIN_ALPHA)
             continue;
-        for (k = 0; k < ntexts; k++)
-            if (c == texts[k])
-                reground_core[i] = 1;
+        for (k = 0; k < npapers; k++)
+            paper_pixel |= (p[i] & 0xffffffU) == papers[k];
+        if (paper_pixel)
+            continue;
+        if (i > 0 && p[i] == p[i - 1]) {
+            reground_core[i] = reground_core[i - 1]; /* (the pixel before's answer: runs of one color) */
+            continue;
+        }
+        for (k = 0; k < ntexts && !reground_core[i]; k++) {
+            int t[3], v[3], ch;
+            double dot = 0.0, len = 0.0, share, fit = 0.0;
+            rgb_of(texts[k], t);
+            v[0] = (int)orig[4 * i + 2] - main_paper[0];
+            v[1] = (int)orig[4 * i + 1] - main_paper[1];
+            v[2] = (int)orig[4 * i] - main_paper[2];
+            for (ch = 0; ch < 3; ch++) {
+                dot += (double)v[ch] * (double)(t[ch] - main_paper[ch]);
+                len += (double)(t[ch] - main_paper[ch]) * (double)(t[ch] - main_paper[ch]);
+            }
+            if (len <= 0.0)
+                continue;
+            share = dot / len;
+            if (share < REGROUND_TEXT_SHARE)
+                continue;
+            share = share > 1.0 ? 1.0 : share;
+            for (ch = 0; ch < 3; ch++) {
+                double d = (double)v[ch] - share * (double)(t[ch] - main_paper[ch]);
+                fit += d * d;
+            }
+            reground_core[i] = fit <= 3.0 * REGROUND_FIT * REGROUND_FIT;
+        }
     }
     for (i = 0; i < count; i++) {
         int64_t x = i % width, y = i / width, xx, yy, nearest = -1;
@@ -3578,8 +3644,23 @@ EXPORT int64_t freelab_reground(const uint8_t *orig, uint8_t *out, int64_t count
             written++;
         } else {
             double color[3], share = reground_unmix(orig + 4 * i, paper, color);
-            if (share <= 0.0 || reground_spread(color) < REGROUND_TEXT_SPREAD)
+            if (share <= 0.0)
                 continue;
+            if (reground_spread(color) < REGROUND_TEXT_SPREAD) {
+                /* a pixel beside a text color's core that neither fits its line nor is a color of its own (a
+                 * shade's smoothing over another ground): left to the mapping, it came out a light pixel at the
+                 * text's edge (the owner, 2026-11-25: "white pixels bleeding"); drawn on that line instead */
+                int t[3];
+                if (best_text < 0)
+                    continue;
+                rgb_of(texts[best_text], t);
+                for (ch = 0; ch < 3; ch++) {
+                    double o = (double)ground[ch] + best_share * (double)(t[ch] - ground[ch]);
+                    out[4 * i + 2 - ch] = (uint8_t)(o < 0.0 ? 0.0 : o > 255.0 ? 255.0 : o + 0.5);
+                }
+                written++;
+                continue;
+            }
             for (ch = 0; ch < 3; ch++) {
                 double o = (double)ground[ch] + share * (color[ch] - (double)ground[ch]);
                 out[4 * i + 2 - ch] = (uint8_t)(o < 0.0 ? 0.0 : o > 255.0 ? 255.0 : o + 0.5);
@@ -3624,6 +3705,9 @@ static int band_text_reaches(const uint32_t *p, int64_t i, int64_t width, int64_
     return 1;
 }
 
+#define BAND_TEXT_MAX_ROWS 65536
+static int32_t band_rows_before[BAND_TEXT_MAX_ROWS + 1]; /* rows above y holding a band pixel: a prefix count */
+
 EXPORT int64_t freelab_band_text(const uint8_t *orig, uint8_t *out, int64_t count, int64_t width)
 {
     const uint32_t *p = (const uint32_t *)orig;
@@ -3633,6 +3717,8 @@ EXPORT int64_t freelab_band_text(const uint8_t *orig, uint8_t *out, int64_t coun
     if (count <= 0 || width <= 0)
         return 0;
     rows = count / width;
+    if (rows > BAND_TEXT_MAX_ROWS)
+        return 0;
     for (y = 0; y < rows && nbands < BAND_TEXT_COLORS; y++) {
         int64_t run = 1;
         for (x = 1; x <= width && nbands < BAND_TEXT_COLORS; x++) {
@@ -3657,9 +3743,27 @@ EXPORT int64_t freelab_band_text(const uint8_t *orig, uint8_t *out, int64_t coun
     }
     if (!nbands)
         return 0;
+    /* only rows with a band pixel, and one within reach above and below, are looked at: walked from every
+     * pixel, a cell chart took 115 ms, more than its mapping (the owner, 2026-11-25: FontLab stopped answering
+     * as a color was dragged in Overlay Fonts, both Font windows repainting at each step) */
+    band_rows_before[0] = 0;
+    for (y = 0; y < rows; y++) {
+        int has = 0;
+        for (x = 0; x < width && !has; x++)
+            for (k = 0; k < nbands && !has; k++)
+                has = (p[y * width + x] & 0xffffffU) == bands[k];
+        band_rows_before[y + 1] = band_rows_before[y] + has;
+    }
     for (i = 0; i < count; i++) {
         uint32_t c = p[i] & 0xffffffU;
         int r = (int)((c >> 16) & 255U), g = (int)((c >> 8) & 255U), b = (int)(c & 255U), on = -1;
+        int64_t row = i / width, up = row - BAND_TEXT_REACH < 0 ? 0 : row - BAND_TEXT_REACH;
+        int64_t down = row + BAND_TEXT_REACH + 1 > rows ? rows : row + BAND_TEXT_REACH + 1;
+        if (band_rows_before[row + 1] == band_rows_before[row] || band_rows_before[row] == band_rows_before[up]
+            || band_rows_before[down] == band_rows_before[row + 1]) {
+            i = (row + 1) * width - 1; /* (the rest of the row) */
+            continue;
+        }
         if ((p[i] >> 24) < ANCHOR_MIN_ALPHA)
             continue;
         for (k = 0; k < nbands && on < 0; k++)

@@ -58,6 +58,8 @@ How each tool came to work as it does: what it did before, what it does now, and
   - The checked slant tool's icon is drawn where FontLab draws it unchecked (FontLab moves it a pixel up, in its light look too).
   - Native helpers 138 to 140: *Overlay Fonts* keeps each font's color (its colored text drawn again over the mapped paper, from the color and share each pixel was drawn with); a selected cell's name is drawn from its coverage; an anchor's pill is drawn again whole, so that nothing under it shows across its name.
   - The Python wrapper of those three passes compared two sizes with `!=`, which PythonQt answers by identity, and skipped every call: the native tests passed, and a live probe showed nothing written.
+  - Dragging a color in *Overlay Fonts* made FontLab stop answering until it was closed (the owner, with two Font windows open). The selected-name pass walked from every pixel of each cell chart, 115 ms a paint, more than the mapping, at each step for both windows; it now looks only at rows with the band's color and the band within reach above and below: 8 ms (native helper 141).
+  - Some colors in *Overlay Fonts* still had light pixels at their edges: a dark color's smoothing shades, strong and frequent too, filled the list of text colors, and a shade of the text itself counted as no core. The text colors are now taken most frequent first, leaving out a color on the line of one taken, and a core is any pixel on a text color's line at half its share or more (native helpers 142 to 144).
 
 ## Auto Kerning and Kerning Check
 
