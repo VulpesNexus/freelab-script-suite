@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 137
+#define FREELAB_PIXELS_VERSION 140
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -3318,6 +3318,597 @@ static int halo_blend(uint8_t *px, double dark_l, double light_l)
     px[1] = (uint8_t)(k->g + t * ((double)white[1] - k->g) + 0.5);
     px[0] = (uint8_t)(k->b + t * ((double)white[0] - k->b) + 0.5);
     return 1;
+}
+
+/* Colored text drawn on a light paper, kept in its own color over the mapped paper (Overlay Fonts' sample
+ * rows and preview: each font in the color the owner picks for it). Mapped, a dark red came out pink and
+ * its edges in light dots, and as the color was dragged the mess changed with it (the owner, 2026-11-25:
+ * "a different approach entirely that leaves colored text intact"). Over a paper, a smoothed pixel is the
+ * text's color mixed with the paper's. The picture's text colors are its frequent strong colors (cores); a
+ * pixel near a core is put on the line from its paper (the nearest pixel of a paper color) to the text color
+ * that fits it best, and drawn again at that share between the paper as mapped (that same pixel's, mapped)
+ * and the text's own color. A pixel no single text color fits (two fonts overlapping) is followed from its
+ * paper through the pixel to the edge of the RGB cube instead, which gives a color and its share. Black text's
+ * ClearType fringes give strong colors too, but no core; neutral content (gray, black, white on gray) keeps the
+ * mapping. `orig` is the picture as drawn, `out` the same picture mapped; returns how many pixels were drawn
+ * again. */
+#define REGROUND_TABLE 16384
+#define REGROUND_PAPERS 4
+#define REGROUND_PAPER_HLS 0.75 /* a paper: this light at least, */
+#define REGROUND_PAPER_SHARE 0.05 /* and this share of the picture's pixels at least (rows alternate two) */
+#define REGROUND_TEXTS 8
+#define REGROUND_TEXT_COUNT 40 /* a text color: a pixel color this frequent, */
+#define REGROUND_TEXT_SPREAD 40 /* this strong (its channels this far apart), */
+#define REGROUND_TEXT_SHARE 0.5 /* and this far from white, followed to the cube's edge (a pill's gray and its
+                                 * name's fringes: 0.25 to 0.45) */
+#define REGROUND_FIT 24.0 /* per channel, root mean square: a pixel on a text color's line */
+#define REGROUND_MIN_STEP 3 /* per channel: a pixel this near its paper is paper */
+#define REGROUND_REACH 2 /* a core this near */
+#define REGROUND_PAPER_REACH 4 /* a paper pixel this near (else the main paper) */
+static uint32_t reground_keys[REGROUND_TABLE];
+static int64_t reground_counts[REGROUND_TABLE];
+static uint8_t reground_core[MAX_INDEXED];
+
+static double reground_unmix(const uint8_t *q, const int paper[3], double color[3])
+{
+    int v[3], ch, moved = 0;
+    double t = 1e9;
+    v[0] = (int)q[2] - paper[0];
+    v[1] = (int)q[1] - paper[1];
+    v[2] = (int)q[0] - paper[2];
+    for (ch = 0; ch < 3; ch++)
+        if (v[ch] >= REGROUND_MIN_STEP || v[ch] <= -REGROUND_MIN_STEP)
+            moved = 1;
+    if (!moved)
+        return 0.0;
+    for (ch = 0; ch < 3; ch++) {
+        double limit;
+        if (v[ch] < 0)
+            limit = (double)paper[ch] / (double)(-v[ch]);
+        else if (v[ch] > 0)
+            limit = (double)(255 - paper[ch]) / (double)v[ch];
+        else
+            continue;
+        if (limit < t)
+            t = limit;
+    }
+    if (t < 1.0)
+        t = 1.0;
+    for (ch = 0; ch < 3; ch++) {
+        double c = (double)paper[ch] + t * (double)v[ch];
+        color[ch] = c < 0.0 ? 0.0 : c > 255.0 ? 255.0 : c;
+    }
+    return 1.0 / t;
+}
+
+static double reground_spread(const double color[3])
+{
+    double hi = color[0], lo = color[0];
+    int ch;
+    for (ch = 1; ch < 3; ch++) {
+        if (color[ch] > hi)
+            hi = color[ch];
+        if (color[ch] < lo)
+            lo = color[ch];
+    }
+    return hi - lo;
+}
+
+static void rgb_of(uint32_t rgb, int c[3])
+{
+    c[0] = (int)((rgb >> 16) & 255U);
+    c[1] = (int)((rgb >> 8) & 255U);
+    c[2] = (int)(rgb & 255U);
+}
+
+EXPORT int64_t freelab_reground(const uint8_t *orig, uint8_t *out, int64_t count, int64_t width)
+{
+    const uint32_t *p = (const uint32_t *)orig;
+    uint32_t papers[REGROUND_PAPERS], texts[REGROUND_TEXTS];
+    int npapers = 0, ntexts = 0, k, j, main_paper[3], main_ground[3], have_ground = 0;
+    int64_t i, rows, written = 0, opaque = 0;
+    if (count <= 0 || width <= 0 || count > MAX_INDEXED)
+        return 0;
+    rows = count / width;
+    for (k = 0; k < REGROUND_TABLE; k++) {
+        reground_keys[k] = 0;
+        reground_counts[k] = 0;
+    }
+    for (i = 0; i < count; i++) {
+        uint32_t key, h;
+        int probe;
+        if ((p[i] >> 24) < ANCHOR_MIN_ALPHA)
+            continue;
+        opaque++;
+        key = (p[i] & 0xffffffU) | 0x1000000U;
+        h = (uint32_t)(key * 2654435761U) >> 18;
+        for (probe = 0; probe < REGROUND_TABLE; probe++, h = (h + 1) & (REGROUND_TABLE - 1)) {
+            if (reground_keys[h] == key) {
+                reground_counts[h]++;
+                break;
+            }
+            if (reground_keys[h] == 0) {
+                reground_keys[h] = key;
+                reground_counts[h] = 1;
+                break;
+            }
+        }
+    }
+    /* the papers, most frequent first, and the text colors */
+    for (j = 0; j < REGROUND_PAPERS; j++) {
+        int64_t best = -1;
+        for (k = 0; k < REGROUND_TABLE; k++) {
+            int c[3], m, taken = 0;
+            if (!reground_keys[k] || (best >= 0 && reground_counts[k] <= reground_counts[best]))
+                continue;
+            if ((double)reground_counts[k] < REGROUND_PAPER_SHARE * (double)opaque)
+                continue;
+            for (m = 0; m < npapers; m++)
+                taken |= papers[m] == (reground_keys[k] & 0xffffffU);
+            rgb_of(reground_keys[k] & 0xffffffU, c);
+            if (taken || lightness((uint8_t)c[0], (uint8_t)c[1], (uint8_t)c[2]) < REGROUND_PAPER_HLS)
+                continue;
+            best = k;
+        }
+        if (best < 0)
+            break;
+        papers[npapers++] = reground_keys[best] & 0xffffffU;
+    }
+    if (!npapers)
+        return 0;
+    rgb_of(papers[0], main_paper);
+    for (k = 0; k < REGROUND_TABLE && ntexts < REGROUND_TEXTS; k++) {
+        int c[3];
+        double color[3];
+        uint8_t q[4];
+        if (!reground_keys[k] || reground_counts[k] < REGROUND_TEXT_COUNT)
+            continue;
+        rgb_of(reground_keys[k] & 0xffffffU, c);
+        q[2] = (uint8_t)c[0];
+        q[1] = (uint8_t)c[1];
+        q[0] = (uint8_t)c[2];
+        if ((c[0] > c[1] ? (c[0] > c[2] ? c[0] : c[2]) : (c[1] > c[2] ? c[1] : c[2]))
+                - (c[0] < c[1] ? (c[0] < c[2] ? c[0] : c[2]) : (c[1] < c[2] ? c[1] : c[2])) < REGROUND_TEXT_SPREAD)
+            continue;
+        if (reground_unmix(q, main_paper, color) < REGROUND_TEXT_SHARE)
+            continue;
+        texts[ntexts++] = reground_keys[k] & 0xffffffU;
+    }
+    if (!ntexts)
+        return 0;
+    for (i = 0; i < count && !have_ground; i++) {
+        if ((p[i] >> 24) >= ANCHOR_MIN_ALPHA && (p[i] & 0xffffffU) == papers[0]) {
+            main_ground[0] = out[4 * i + 2];
+            main_ground[1] = out[4 * i + 1];
+            main_ground[2] = out[4 * i];
+            have_ground = 1;
+        }
+    }
+    if (!have_ground)
+        return 0;
+    for (i = 0; i < count; i++) {
+        uint32_t c = p[i] & 0xffffffU;
+        reground_core[i] = 0;
+        if ((p[i] >> 24) < ANCHOR_MIN_ALPHA)
+            continue;
+        for (k = 0; k < ntexts; k++)
+            if (c == texts[k])
+                reground_core[i] = 1;
+    }
+    for (i = 0; i < count; i++) {
+        int64_t x = i % width, y = i / width, xx, yy, nearest = -1;
+        int near = 0, ch, paper[3], ground[3], best_text = -1, is_paper = 0, dist = 1 << 30;
+        double best_fit = 1e18, best_share = 0.0;
+        uint32_t c = p[i] & 0xffffffU;
+        if ((p[i] >> 24) < ANCHOR_MIN_ALPHA)
+            continue;
+        for (k = 0; k < npapers; k++)
+            is_paper |= c == papers[k];
+        if (is_paper)
+            continue;
+        for (yy = y - REGROUND_REACH; yy <= y + REGROUND_REACH && !near; yy++)
+            for (xx = x - REGROUND_REACH; xx <= x + REGROUND_REACH && !near; xx++)
+                if (xx >= 0 && xx < width && yy >= 0 && yy < rows && reground_core[yy * width + xx])
+                    near = 1;
+        if (!near)
+            continue;
+        /* its paper: the nearest pixel of a paper color, mapped as that pixel was */
+        for (yy = y - REGROUND_PAPER_REACH; yy <= y + REGROUND_PAPER_REACH; yy++)
+            for (xx = x - REGROUND_PAPER_REACH; xx <= x + REGROUND_PAPER_REACH; xx++) {
+                int64_t n;
+                int d;
+                if (xx < 0 || xx >= width || yy < 0 || yy >= rows)
+                    continue;
+                n = yy * width + xx;
+                if ((p[n] >> 24) < ANCHOR_MIN_ALPHA)
+                    continue;
+                d = (int)((xx - x) * (xx - x) + (yy - y) * (yy - y));
+                if (d >= dist)
+                    continue;
+                for (k = 0; k < npapers; k++)
+                    if ((p[n] & 0xffffffU) == papers[k]) {
+                        dist = d;
+                        nearest = n;
+                    }
+            }
+        if (nearest >= 0) {
+            rgb_of(p[nearest] & 0xffffffU, paper);
+            ground[0] = out[4 * nearest + 2];
+            ground[1] = out[4 * nearest + 1];
+            ground[2] = out[4 * nearest];
+        } else {
+            for (ch = 0; ch < 3; ch++) {
+                paper[ch] = main_paper[ch];
+                ground[ch] = main_ground[ch];
+            }
+        }
+        /* the text color whose line from the paper passes nearest the pixel */
+        for (k = 0; k < ntexts; k++) {
+            int t[3], v[3];
+            double dot = 0.0, len = 0.0, share, fit = 0.0;
+            rgb_of(texts[k], t);
+            v[0] = (int)orig[4 * i + 2] - paper[0];
+            v[1] = (int)orig[4 * i + 1] - paper[1];
+            v[2] = (int)orig[4 * i] - paper[2];
+            for (ch = 0; ch < 3; ch++) {
+                dot += (double)v[ch] * (double)(t[ch] - paper[ch]);
+                len += (double)(t[ch] - paper[ch]) * (double)(t[ch] - paper[ch]);
+            }
+            if (len <= 0.0)
+                continue;
+            share = dot / len;
+            share = share < 0.0 ? 0.0 : share > 1.0 ? 1.0 : share;
+            for (ch = 0; ch < 3; ch++) {
+                double d = (double)v[ch] - share * (double)(t[ch] - paper[ch]);
+                fit += d * d;
+            }
+            if (fit < best_fit) {
+                best_fit = fit;
+                best_text = k;
+                best_share = share;
+            }
+        }
+        if (best_text >= 0 && best_fit <= 3.0 * REGROUND_FIT * REGROUND_FIT) {
+            int t[3];
+            rgb_of(texts[best_text], t);
+            for (ch = 0; ch < 3; ch++) {
+                double o = (double)ground[ch] + best_share * (double)(t[ch] - ground[ch]);
+                out[4 * i + 2 - ch] = (uint8_t)(o < 0.0 ? 0.0 : o > 255.0 ? 255.0 : o + 0.5);
+            }
+            written++;
+        } else {
+            double color[3], share = reground_unmix(orig + 4 * i, paper, color);
+            if (share <= 0.0 || reground_spread(color) < REGROUND_TEXT_SPREAD)
+                continue;
+            for (ch = 0; ch < 3; ch++) {
+                double o = (double)ground[ch] + share * (color[ch] - (double)ground[ch]);
+                out[4 * i + 2 - ch] = (uint8_t)(o < 0.0 ? 0.0 : o > 255.0 ? 255.0 : o + 0.5);
+            }
+            written++;
+        }
+    }
+    return written;
+}
+
+/* Light text on a band of a strong color, on a canvas (a selected cell's name, white on the selection's blue):
+ * ClearType's colored edges were kept, and the mapping turned a few of the letters' pixels dark (the owner,
+ * 2026-11-25: "degree" fringed, with a black pixel in its g). Each pixel with the band's color within reach on
+ * its four sides, and lighter than the band, is drawn again from its coverage: its channels' mean share of the
+ * way from the band's color to white, in gray between the two. A band color: a strong color (BAND_TEXT_SPREAD)
+ * in runs of BAND_TEXT_RUN pixels along a row. `orig` is the picture as drawn, `out` the same picture mapped;
+ * returns how many pixels were drawn again. */
+#define BAND_TEXT_COLORS 4
+#define BAND_TEXT_SPREAD 60
+#define BAND_TEXT_RUN 24
+#define BAND_TEXT_REACH_ACROSS 48
+#define BAND_TEXT_REACH 10
+#define BAND_TEXT_STEP 0.05 /* HLS: the text lighter than its band by this much at least */
+
+static int band_text_reaches(const uint32_t *p, int64_t i, int64_t width, int64_t rows, uint32_t band)
+{
+    int64_t x = i % width, y = i / width, k;
+    int dir;
+    for (dir = 0; dir < 4; dir++) {
+        int64_t sx = dir == 0 ? 1 : dir == 1 ? -1 : 0, sy = dir == 2 ? 1 : dir == 3 ? -1 : 0;
+        int64_t reach = sx ? BAND_TEXT_REACH_ACROSS : BAND_TEXT_REACH;
+        int found = 0;
+        for (k = 1; k <= reach && !found; k++) {
+            int64_t xx = x + sx * k, yy = y + sy * k;
+            if (xx < 0 || xx >= width || yy < 0 || yy >= rows)
+                break;
+            found = (p[yy * width + xx] & 0xffffffU) == band;
+        }
+        if (!found)
+            return 0;
+    }
+    return 1;
+}
+
+EXPORT int64_t freelab_band_text(const uint8_t *orig, uint8_t *out, int64_t count, int64_t width)
+{
+    const uint32_t *p = (const uint32_t *)orig;
+    uint32_t bands[BAND_TEXT_COLORS];
+    int nbands = 0, k;
+    int64_t i, y, x, rows, written = 0;
+    if (count <= 0 || width <= 0)
+        return 0;
+    rows = count / width;
+    for (y = 0; y < rows && nbands < BAND_TEXT_COLORS; y++) {
+        int64_t run = 1;
+        for (x = 1; x <= width && nbands < BAND_TEXT_COLORS; x++) {
+            uint32_t prev = p[y * width + x - 1];
+            if (x < width && p[y * width + x] == prev) {
+                run++;
+                continue;
+            }
+            if (run >= BAND_TEXT_RUN && (prev >> 24) >= ANCHOR_MIN_ALPHA) {
+                uint8_t q[3];
+                int known = 0;
+                q[0] = (uint8_t)prev;
+                q[1] = (uint8_t)(prev >> 8);
+                q[2] = (uint8_t)(prev >> 16);
+                for (k = 0; k < nbands; k++)
+                    known |= bands[k] == (prev & 0xffffffU);
+                if (!known && spread_of(q) >= BAND_TEXT_SPREAD)
+                    bands[nbands++] = prev & 0xffffffU;
+            }
+            run = 1;
+        }
+    }
+    if (!nbands)
+        return 0;
+    for (i = 0; i < count; i++) {
+        uint32_t c = p[i] & 0xffffffU;
+        int r = (int)((c >> 16) & 255U), g = (int)((c >> 8) & 255U), b = (int)(c & 255U), on = -1;
+        if ((p[i] >> 24) < ANCHOR_MIN_ALPHA)
+            continue;
+        for (k = 0; k < nbands && on < 0; k++)
+            if (c != bands[k] && band_text_reaches(p, i, width, rows, bands[k]))
+                on = k;
+        if (on < 0)
+            continue;
+        {
+            uint32_t band = bands[on];
+            int br = (int)((band >> 16) & 255U), bg = (int)((band >> 8) & 255U), bb = (int)(band & 255U);
+            double t = 0.0, o[3];
+            int ch;
+            if (lightness((uint8_t)r, (uint8_t)g, (uint8_t)b) < lightness((uint8_t)br, (uint8_t)bg, (uint8_t)bb) + BAND_TEXT_STEP)
+                continue;
+            t += br < 255 ? ((double)r - br) / (255.0 - br) : 1.0;
+            t += bg < 255 ? ((double)g - bg) / (255.0 - bg) : 1.0;
+            t += bb < 255 ? ((double)b - bb) / (255.0 - bb) : 1.0;
+            t /= 3.0;
+            t = t < 0.0 ? 0.0 : t > 1.0 ? 1.0 : t;
+            o[0] = br + t * (255.0 - br);
+            o[1] = bg + t * (255.0 - bg);
+            o[2] = bb + t * (255.0 - bb);
+            for (ch = 0; ch < 3; ch++)
+                out[4 * i + 2 - ch] = (uint8_t)(o[ch] + 0.5);
+            written++;
+        }
+    }
+    return written;
+}
+
+/* An anchor's pill on a canvas, drawn again whole over the mapping: its gray as mapped, plain, and its name
+ * from its coverage. The pill is translucent, and what runs under it (the baseline, a guide, a glyph's
+ * contour, its fill) showed through it and across its name, which the pixel rules could not tell from the
+ * letters (the owner, 2026-11-25: "anything that overlaps with contours or other elements makes it a mess").
+ * A pill: pieces of one warm gray shade each (PILL_SHADE_STEP), the pill's two halves over the canvas' two
+ * grounds and the pieces a line cuts it into, joined when they touch; PILL_MIN_HEIGHT to PILL_MAX_HEIGHT rows,
+ * wider than tall. In each of its rows, between its first and last pixel of a shade, a pixel lighter than its
+ * shade (PILL_TEXT_STEP) is the name, drawn from its share of the way from the shade to white; any other is
+ * the pill. `orig` is the picture as drawn, `out` the same picture mapped; returns how many pills. */
+#define PILL_MAX_PIECES 4096
+#define PILL_SHADE_STEP 3 /* per channel: a piece's pixels, against its first */
+#define PILL_JOIN_GAP 3 /* pixels: pieces this near are one pill */
+#define PILL_JOIN_SHADES 16 /* per channel: and their shades this near */
+#define PILL_MIN_HEIGHT 9
+#define PILL_MAX_HEIGHT 26
+#define PILL_MIN_WIDTH 16
+#define PILL_PIECE_MIN_WIDTH 6
+#define PILL_PIECE_FILL 0.4 /* a piece fills its box this much at least (the name's letters are holes in it) */
+#define PILL_TEXT_STEP 0.06 /* HLS */
+#define PILL_REF_REACH 48
+
+typedef struct {
+    int x0, y0, x1, y1, parent, keep;
+    int64_t n, first;
+    uint32_t color;
+} PillPiece;
+
+static int32_t pill_label[MAX_INDEXED]; /* the piece a pixel is in, + 1 (0: none) */
+static int32_t pill_stack[MAX_INDEXED];
+static PillPiece pill_pieces[PILL_MAX_PIECES];
+
+static int pill_shade(uint32_t px)
+{
+    int r = (int)((px >> 16) & 255U), g = (int)((px >> 8) & 255U), b = (int)(px & 255U);
+    double l;
+    if ((px >> 24) < ANCHOR_MIN_ALPHA || r < g || g < b || r - b < 3 || r - b > 14)
+        return 0;
+    l = lightness((uint8_t)r, (uint8_t)g, (uint8_t)b);
+    return l >= 0.55 && l <= 0.8;
+}
+
+static int pill_near(uint32_t a, uint32_t b, int step)
+{
+    int ch;
+    for (ch = 0; ch < 3; ch++) {
+        int d = (int)((a >> (8 * ch)) & 255U) - (int)((b >> (8 * ch)) & 255U);
+        if (d > step || d < -step)
+            return 0;
+    }
+    return 1;
+}
+
+static int pill_root(int k)
+{
+    while (pill_pieces[k].parent != k)
+        k = pill_pieces[k].parent = pill_pieces[pill_pieces[k].parent].parent;
+    return k;
+}
+
+EXPORT int64_t freelab_pills(const uint8_t *orig, uint8_t *out, int64_t count, int64_t width)
+{
+    const uint32_t *p = (const uint32_t *)orig;
+    int64_t i, rows, pills = 0;
+    int npieces = 0, a, b;
+    if (count <= 0 || width <= 0 || count > MAX_INDEXED)
+        return 0;
+    rows = count / width;
+    for (i = 0; i < count; i++)
+        pill_label[i] = 0;
+    /* pieces: 4-connected pixels of one shade */
+    for (i = 0; i < count && npieces < PILL_MAX_PIECES; i++) {
+        int64_t top = 0;
+        PillPiece *pc;
+        if (pill_label[i] || !pill_shade(p[i]))
+            continue;
+        pc = &pill_pieces[npieces];
+        pc->x0 = pc->x1 = (int)(i % width);
+        pc->y0 = pc->y1 = (int)(i / width);
+        pc->n = 0;
+        pc->first = i;
+        pc->color = p[i] & 0xffffffU;
+        pc->parent = npieces;
+        pc->keep = 0;
+        pill_label[i] = npieces + 1;
+        pill_stack[top++] = (int32_t)i;
+        while (top > 0) {
+            int64_t j = pill_stack[--top], x = j % width, y = j / width;
+            int dir;
+            pc->n++;
+            if (x < pc->x0) pc->x0 = (int)x;
+            if (x > pc->x1) pc->x1 = (int)x;
+            if (y < pc->y0) pc->y0 = (int)y;
+            if (y > pc->y1) pc->y1 = (int)y;
+            for (dir = 0; dir < 4; dir++) {
+                int64_t xx = x + (dir == 0 ? 1 : dir == 1 ? -1 : 0), yy = y + (dir == 2 ? 1 : dir == 3 ? -1 : 0), q;
+                if (xx < 0 || xx >= width || yy < 0 || yy >= rows)
+                    continue;
+                q = yy * width + xx;
+                if (pill_label[q] || !pill_shade(p[q]) || !pill_near(p[q] & 0xffffffU, pc->color, PILL_SHADE_STEP))
+                    continue;
+                pill_label[q] = npieces + 1;
+                pill_stack[top++] = (int32_t)q;
+            }
+        }
+        npieces++;
+    }
+    for (a = 0; a < npieces; a++) {
+        PillPiece *pc = &pill_pieces[a];
+        int w = pc->x1 - pc->x0 + 1, h = pc->y1 - pc->y0 + 1;
+        pc->keep = w >= PILL_PIECE_MIN_WIDTH && h <= PILL_MAX_HEIGHT && (double)pc->n >= PILL_PIECE_FILL * w * h;
+    }
+    for (a = 0; a < npieces; a++)
+        for (b = a + 1; b < npieces; b++) {
+            PillPiece *pa = &pill_pieces[a], *pb = &pill_pieces[b];
+            if (!pa->keep || !pb->keep)
+                continue;
+            if (pb->y0 - pa->y1 > PILL_JOIN_GAP || pa->y0 - pb->y1 > PILL_JOIN_GAP
+                || pb->x0 - pa->x1 > PILL_JOIN_GAP || pa->x0 - pb->x1 > PILL_JOIN_GAP
+                || !pill_near(pa->color, pb->color, PILL_JOIN_SHADES))
+                continue;
+            pill_pieces[pill_root(b)].parent = pill_root(a);
+        }
+    for (a = 0; a < npieces; a++) {
+        int x0 = 1 << 30, y0 = 1 << 30, x1 = -1, y1 = -1, main = -1, y;
+        int64_t main_n = 0;
+        uint8_t ground[3];
+        if (!pill_pieces[a].keep || pill_root(a) != a)
+            continue;
+        for (b = 0; b < npieces; b++) {
+            PillPiece *pb = &pill_pieces[b];
+            if (!pb->keep || pill_root(b) != a)
+                continue;
+            if (pb->x0 < x0) x0 = pb->x0;
+            if (pb->y0 < y0) y0 = pb->y0;
+            if (pb->x1 > x1) x1 = pb->x1;
+            if (pb->y1 > y1) y1 = pb->y1;
+            if (pb->n > main_n) {
+                main_n = pb->n;
+                main = b;
+            }
+        }
+        if (main < 0 || y1 - y0 + 1 < PILL_MIN_HEIGHT || y1 - y0 + 1 > PILL_MAX_HEIGHT || x1 - x0 + 1 < PILL_MIN_WIDTH
+            || x1 - x0 < y1 - y0)
+            continue;
+        ground[0] = out[4 * pill_pieces[main].first];
+        ground[1] = out[4 * pill_pieces[main].first + 1];
+        ground[2] = out[4 * pill_pieces[main].first + 2];
+        for (y = y0; y <= y1; y++) {
+            int left = -1, right = -1, x, s, ends[3][2];
+            /* the row's span: its own pill pixels, widened to the rows above and below where both reach
+             * further (a line along the row, under the pill's end: the anchor's own line, the baseline) */
+            for (s = 0; s < 3; s++) {
+                int yy = y - 1 + s;
+                ends[s][0] = 1 << 30;
+                ends[s][1] = -1;
+                if (yy < y0 || yy > y1)
+                    continue;
+                for (x = x0; x <= x1; x++) {
+                    int32_t l = pill_label[(int64_t)yy * width + x];
+                    if (l && pill_pieces[l - 1].keep && pill_root(l - 1) == a) {
+                        if (x < ends[s][0])
+                            ends[s][0] = x;
+                        ends[s][1] = x;
+                    }
+                }
+            }
+            left = ends[1][0];
+            right = ends[1][1];
+            if (ends[0][1] >= 0 && ends[2][1] >= 0) {
+                int reach_left = ends[0][0] > ends[2][0] ? ends[0][0] : ends[2][0];
+                int reach_right = ends[0][1] < ends[2][1] ? ends[0][1] : ends[2][1];
+                if (right < 0 || reach_left < left)
+                    left = reach_left;
+                if (right < 0 || reach_right > right)
+                    right = reach_right;
+            }
+            if (right < 0 || left > right)
+                continue;
+            for (x = left; x <= right; x++) {
+                int64_t j = (int64_t)y * width + x;
+                uint32_t v = p[j];
+                int32_t l = pill_label[j];
+                uint32_t ref = pill_pieces[main].color;
+                int ch, k;
+                double t = 0.0;
+                if (!(l && pill_pieces[l - 1].keep && pill_root(l - 1) == a)) {
+                    /* the shade under the pixel: the nearest of the pill's pixels along its row */
+                    for (k = 1; k <= PILL_REF_REACH; k++) {
+                        int found = 0, s;
+                        for (s = -1; s <= 1 && !found; s += 2) {
+                            int xx = x + s * k;
+                            int32_t m;
+                            if (xx < x0 || xx > x1)
+                                continue;
+                            m = pill_label[(int64_t)y * width + xx];
+                            if (m && pill_pieces[m - 1].keep && pill_root(m - 1) == a) {
+                                ref = pill_pieces[m - 1].color;
+                                found = 1;
+                            }
+                        }
+                        if (found)
+                            break;
+                    }
+                    if (lightness((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v)
+                        >= lightness((uint8_t)(ref >> 16), (uint8_t)(ref >> 8), (uint8_t)ref) + PILL_TEXT_STEP) {
+                        for (ch = 0; ch < 3; ch++) {
+                            double c = (double)((v >> (8 * ch)) & 255U), r = (double)((ref >> (8 * ch)) & 255U);
+                            t += (r < 255.0 ? (c - r) / (255.0 - r) : 1.0) / 3.0;
+                        }
+                        t = t < 0.0 ? 0.0 : t > 1.0 ? 1.0 : t;
+                    }
+                }
+                for (ch = 0; ch < 3; ch++)
+                    out[4 * j + ch] = (uint8_t)((double)ground[ch] + t * (255.0 - (double)ground[ch]) + 0.5);
+            }
+        }
+        pills++;
+    }
+    return pills;
 }
 
 /* Dark text ClearType drew on a light ground, in an island of the interface (the Fonts panel's names, black

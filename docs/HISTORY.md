@@ -52,6 +52,12 @@ How each tool came to work as it does: what it did before, what it does now, and
   - Native helper 137: the names on the anchors' pills along the baseline came out muddled. The translucent pill is two warm grays, 10 apart per channel, over the canvas' white above the baseline and its band below; only one counted as the pill, so the letters below the line came out darker than it. A dashed sidebearing line, a pixel wide, counted as a pill color, and its shades took in the names' fringes; and a glyph's slanted contour under a stem ended the search for the pill below it.
   - A document tab's close cross came out nearly the tab's own dark. FontLab draws it, while the mouse is over the tab, in the application palette's text color as of the last palette change, not the tab bar's own, so no rule on the bar reaches it; dark mode now finds FontLab's faint cross in the bar as drawn and draws a light one centered on it, at the tab's left end, where FontLab's light look has it.
   - FontLab's black canvas arrow kept its white edges, which looked jagged on the dark canvas. A cursor dark inside is now turned over, white with black edges, as the owner asked; one already light inside (FontLab's white arrow with a black outline) is kept as it is.
+- 2026-11-25: The owner's review that evening (images 118 to 131, and two videos):
+  - The tab cross drawn by dark mode where FontLab's was found came out halved or missing as FontLab faded its own, and stayed at the look of the moment the tab was entered. FontLab's own cross is now kept and made stronger, pixel by pixel; the bar follows the mouse, and the cross is dimmer on the tab, brighter on the cross, and smaller on a lighter square while held, as the owner liked FontLab's.
+  - The cursor kept light in the middle had a gray seam between its black outline and the glow made dark: it goes dark with the glow.
+  - The checked slant tool's icon is drawn where FontLab draws it unchecked (FontLab moves it a pixel up, in its light look too).
+  - Native helpers 138 to 140: *Overlay Fonts* keeps each font's color (its colored text drawn again over the mapped paper, from the color and share each pixel was drawn with); a selected cell's name is drawn from its coverage; an anchor's pill is drawn again whole, so that nothing under it shows across its name.
+  - The Python wrapper of those three passes compared two sizes with `!=`, which PythonQt answers by identity, and skipped every call: the native tests passed, and a live probe showed nothing written.
 
 ## Auto Kerning and Kerning Check
 

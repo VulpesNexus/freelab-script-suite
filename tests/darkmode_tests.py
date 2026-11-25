@@ -294,14 +294,23 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertTrue(dm.glow_to_shadow(picture))
         self.assertEqual(picture.rows, [[0x60000000 if c == glow else c for c in row] for row in shape(white, black)],
                          "a white arrow with a black outline kept: turned over, it came out black")
+        seam = 0xff9f9f9f  # the outline's smoothing into the glow, on a white arrow's right side
+        rows = shape(white, black)
+        rows[3][6] = seam
+        picture = Picture(rows)
+        dm.glow_to_shadow(picture)
+        self.assertEqual(picture.rows[3][6], black, "the gray seam beside the glow made black with it (the owner, "
+                                                    "November 25: edges of mixed black and white)")
+        self.assertEqual(picture.rows[3][3], white, "the arrow's inside kept")
         thin = Picture([[clear, black, clear], [black, clear, black], [clear, black, white]])
         self.assertTrue(dm.glow_to_shadow(thin))
         self.assertEqual(thin.rows[0][1], white, "a thin dark outline (the magnifier's) turned over by all its pixels")
         self.assertFalse(dm.glow_to_shadow(Picture([[clear, edge, red]])), "nothing to make")
 
-    def test_a_tabs_faint_close_cross_is_found_at_its_center(self):
-        """The owner, November 25: a document tab's close cross was nearly invisible. FontLab draws it faint on the
-        tab as drawn (220 on 226); dark mode finds it there and draws a light one centered on it."""
+    def test_a_tabs_faint_close_cross_is_made_stronger_as_fontlab_draws_it(self):
+        """The owner, November 25: a document tab's close cross was nearly invisible, then, drawn by dark mode where
+        FontLab's was found, halved or missing as FontLab faded it. FontLab's own is kept: each pixel's share of the
+        way from its tab's ground to the cross' color, on a selected tab (220 on 226) and on another (220 on 203)."""
         class Color(object):
             def __init__(self, value):
                 self.value = value
@@ -320,28 +329,30 @@ class ShadeAndPickerTests(DarkModeCase):
                 return self.value & 255
 
         class Picture(object):
-            def __init__(self, marks, width=16, height=18):
-                self.marks, self.w, self.h = marks, width, height
+            def __init__(self, marks, ground):
+                self.marks, self.ground = marks, ground
 
             def width(self):
-                return self.w
+                return 14
 
             def height(self):
-                return self.h
+                return 22
 
             def pixel(self, x, y):
-                return 0xffdcdcdc if (x, y) in self.marks else 0xffe2e2e2
+                value = self.marks.get((x, y), self.ground)
+                return 0xff000000 | (value << 16) | (value << 8) | value
 
         self.patch("_gui", lambda name: Color if name == "QColor" else None)
-        cross = set()
-        for k in range(9):  # FontLab's: 9 across, two pixels thick, from column 4 and row 5
-            for d in (0, 1):
-                cross.add((4 + k, 5 + min(8, k + d)))
-                cross.add((12 - k, 5 + min(8, k + d)))
-        self.assertEqual(dm._faint_mark_center(Picture(cross)), (8.5, 9.5))
-        self.assertIsNone(dm._faint_mark_center(Picture(set())), "no cross: the mouse is not over the tab")
-        name = set((x, y) for x in range(4, 16) for y in (8, 9))  # a name's start: wide, not square
-        self.assertIsNone(dm._faint_mark_center(Picture(name)))
+        for ground in (226, 203):
+            half = (ground + 220) // 2
+            marks = {(5, 9): 220, (6, 10): half, (7, 11): 220, (2, 3): 80}  # the cross, its smoothing, a darker mark
+            shares = dict(((x, y), share) for x, y, share in dm._tab_cross_shares(Picture(marks, ground), 220))
+            self.assertEqual(shares[(5, 9)], 1.0, "the cross at full strength")
+            self.assertAlmostEqual(shares[(6, 10)], 0.5, delta=0.1, msg="its smoothing, or a fading cross, part way")
+            self.assertNotIn((2, 3), shares, "past the cross' color: something else")
+            self.assertEqual(len(shares), 3)
+        self.assertEqual(dm._tab_cross_shares(Picture({}, 226), 220), [], "no cross: the mouse is not over the tab")
+        self.assertEqual(dm._tab_cross_shares(Picture({(5, 9): 221}, 221), 220), [], "a ground as light as the cross")
 
     def test_a_canvas_pictures_are_found_where_fontlab_draws_them(self):
         """The owner, November 25: a picture in a glyph came out as its negative. Its place comes from FontLab:

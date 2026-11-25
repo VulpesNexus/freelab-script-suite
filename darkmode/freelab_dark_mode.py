@@ -171,56 +171,74 @@ ISLAND_TEXT = {("YSelectableTree", "itemsList"): u"QTreeWidget{color:#000000;}"}
 # margin; the round buttons below have their own look.
 CHECKED_TOOL_CHIP = "#3a3c40"
 CHECKED_TOOL_ICON_SPREAD = 80  # a checked tool's icon pixel: strongly colored (FontLab's blue)
+CHECKED_TOOL_FIND_PER_PAINT = 4  # unchecked tools whose icon's place is found in one paint of the bar
+CHECKED_TOOL_ICON_L = 0.6  # an unchecked tool's icon pixel, on the bar as drawn: this dark at most (HLS)
+
+
+def _dark_box(image):
+    """(left, top) of the opaque pixels of a small QImage darker than CHECKED_TOOL_ICON_L, or None. Never raises."""
+    try:
+        QColor = _gui("QColor")
+        left = top = None
+        for y in range(image.height()):
+            for x in range(image.width()):
+                color = QColor.fromRgba(image.pixel(x, y))
+                if color.alpha() < 128 or _lightness(color.red(), color.green(), color.blue()) >= CHECKED_TOOL_ICON_L:
+                    continue
+                left = x if left is None or x < left else left
+                top = y if top is None or y < top else top
+        return None if left is None else (left, top)
+    except Exception:
+        return None
 
 
 # A document tab's close cross: FontLab draws it, while the mouse is over the tab, as a character in the application
 # palette's text color, taken when the palette changes, not from the tab bar's own: the dark palette's light gray,
-# on the tabs' white, came out nearly the tab's dark (the owner, November 25). Over the bar's mapping, dark mode
-# draws a light cross centered where FontLab drew its own, found in the bar as drawn (draw_tab_crosses).
-TAB_CROSS_COLOR = "#d4d4d4"
-TAB_CROSS_FROM = 4  # pixels from a tab's left edge: where FontLab's cross may start (its own: 8 to 17, 9 across)
-TAB_CROSS_SPAN = 16  # (the name starts at 18 at the nearest, the tab's padding)
-TAB_CROSS_HALF = 3.6  # pixels from the center to each arm's end
-TAB_CROSS_WIDTH = 1.7
-TAB_CROSS_STEP = 3  # mean of the channels: FontLab's faint cross against its tab's ground
-TAB_CROSS_MIN_PIXELS = 8
-TAB_CROSS_SIZES = (5, 12)  # pixels: the cross' box, across and down, square within 2
+# on the tabs' white, came out nearly the tab's dark (the owner, November 25). A cross of dark mode's own, drawn where
+# FontLab's was found, lagged FontLab's fading and its highlight under the mouse, and came out halved or missing (the
+# owner's video, the same evening). So FontLab's own drawing is kept and made stronger: over the bar's mapping, each
+# pixel of a tab's cross box gets the light color at the share of the way it goes from its tab's ground to the
+# cross' color (draw_tab_crosses): the shape, its place, its fading, all FontLab's.
+TAB_CROSS_COLOR = (212, 212, 212)  # the mouse on the cross
+TAB_CROSS_DIM = (140, 140, 140)  # the mouse elsewhere on the tab: dimmer, as the owner liked FontLab's
+TAB_CROSS_HIT = 7  # pixels from the cross' center: the mouse on it
+TAB_CROSS_CENTER = 13  # pixels from a tab's left edge to its cross' center, as FontLab draws it
+TAB_CROSS_PRESSED = (88, 88, 90)  # held down: a lighter rounded square under the cross
+TAB_CROSS_SQUARE = 16
+TAB_CROSS_PRESSED_SCALE = 0.8
+TAB_CROSS_FROM = 4  # pixels from a tab's left edge: the box FontLab's cross is drawn in (its own: 8 to 17)
+TAB_CROSS_SPAN = 14  # (the name starts at 18 at the nearest, the tab's padding)
+TAB_CROSS_MIN_STEP = 3  # the cross' color this far from the tab's ground at least (mean of the channels)
+TAB_CROSS_SLACK = 3  # a pixel past the cross' color by more is something else (FontLab's highlight under the mouse)
 
 
-def _faint_mark_center(image):
-    """The center of a small square mark set off from the box's most frequent color (FontLab's faint tab cross),
-    in the image's coordinates, or None. Never raises."""
+def _tab_cross_shares(image, cross):
+    """Each pixel of a tab's cross box as [x, y, share]: how far it goes from the box's most frequent value (the
+    tab's ground) toward `cross`, the cross' value (mean of the channels), for the pixels on the way. Empty when
+    the box holds no cross. Never raises."""
     try:
         QColor = _gui("QColor")
         width, height = image.width(), image.height()
-        values = [[0] * width for _ in range(height)]
+        values = []
         counts = {}
         for y in range(height):
             for x in range(width):
                 color = QColor.fromRgb(image.pixel(x, y))
                 value = (color.red() + color.green() + color.blue()) // 3
-                values[y][x] = value
+                values.append((x, y, value))
                 counts[value] = counts.get(value, 0) + 1
         ground = max(counts, key=lambda v: counts[v])
-        left = top = right = bottom = None
-        marked = 0
-        for y in range(height):
-            for x in range(width):
-                if abs(values[y][x] - ground) >= TAB_CROSS_STEP:
-                    marked += 1
-                    left = x if left is None or x < left else left
-                    right = x if right is None or x > right else right
-                    top = y if top is None or y < top else top
-                    bottom = y if bottom is None or y > bottom else bottom
-        if marked < TAB_CROSS_MIN_PIXELS:
-            return None
-        across, down = right - left + 1, bottom - top + 1
-        low, high = TAB_CROSS_SIZES
-        if not (low <= across <= high and low <= down <= high) or abs(across - down) > 2:
-            return None
-        return ((left + right + 1) / 2.0, (top + bottom + 1) / 2.0)
+        step = cross - ground
+        if abs(step) < TAB_CROSS_MIN_STEP:
+            return []
+        shares = []
+        for x, y, value in values:
+            share = float(value - ground) / step
+            if 0.0 < share <= 1.0 + float(TAB_CROSS_SLACK) / abs(step):
+                shares.append([x, y, min(share, 1.0)])
+        return shares
     except Exception:
-        return None
+        return []
 
 
 def _colored_box(image):
@@ -306,7 +324,7 @@ SWEEP_MS = 500  # how often to look for widgets FontLab created or showed (750 w
 FULL_SWEEP_EVERY = 60  # every Nth sweep revisits every widget (replaced stylesheets, new icons): every 30 s
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 137
+NATIVE_VERSION = 140
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -798,7 +816,20 @@ def _native():
                     if gray_ct is not None:
                         gray_ct.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
                         gray_ct.restype = ctypes.c_int64
-                    state["native"] = (mapper, stats, collect, keyed, anchors, defringe, darkest, gray_ct)
+                    reground = getattr(lib, "freelab_reground", None)  # optional, as defringe is
+                    if reground is not None:
+                        reground.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
+                        reground.restype = ctypes.c_int64
+                    band_text = getattr(lib, "freelab_band_text", None)  # optional, as defringe is
+                    if band_text is not None:
+                        band_text.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
+                        band_text.restype = ctypes.c_int64
+                    pills = getattr(lib, "freelab_pills", None)  # optional, as defringe is
+                    if pills is not None:
+                        pills.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
+                        pills.restype = ctypes.c_int64
+                    state["native"] = (mapper, stats, collect, keyed, anchors, defringe, darkest, gray_ct, reground,
+                                       band_text, pills)
                 else:
                     _note_error("native", "version mismatch")
             except Exception as exc:
@@ -856,6 +887,68 @@ def map_image(image, min_l=0.0, keys=None, ink_below=-1.0, keep_tint=0.0, light_
     if anchors in ("all", "icon", "subpixel", "syntax") or (not anchors and min_l <= 0.0 and not keys):
         image.invertPixels()
     return image
+
+
+def _redraw_from(index, name, drawn, mapped):
+    """`mapped` (a Format_ARGB32 QImage, the mapping of `drawn`) passed with `drawn` through the native helper's
+    function at `index`, which draws some of its pixels again from `drawn`. Without it, `mapped` as it is."""
+    native = _native()
+    if native is None or len(native) <= index or native[index] is None:
+        return mapped
+    try:
+        QImage = _gui("QImage")
+        # copies of their own: an image converted to the format it has is shared with the one it came from, and
+        # the helper's writes went to a buffer of the moment, not to the image returned (seen live, November 25)
+        drawn = drawn.convertToFormat(QImage.Format_ARGB32).copy()
+        mapped = mapped.convertToFormat(QImage.Format_ARGB32).copy()
+        if drawn.width() != mapped.width() or drawn.height() != mapped.height():  # (ints: PythonQt's QSize has no
+            return mapped                                                       # !=, and two always differed)
+        native[index](_address(drawn), _address(mapped), mapped.width() * mapped.height(), mapped.width())
+    except Exception as exc:
+        _note_error(name, exc)
+    return mapped
+
+
+def reground_image(drawn, mapped):
+    """`mapped` with the colored text of `drawn` drawn again in its own colors over the mapped paper (see
+    freelab_reground)."""
+    return _redraw_from(8, "reground", drawn, mapped)
+
+
+def pills_image(drawn, mapped):
+    """`mapped` with each anchor's pill of `drawn` drawn again whole: its gray as mapped, plain, and its name from
+    its coverage, so that nothing under the translucent pill shows across the name (see freelab_pills)."""
+    return _redraw_from(10, "pills", drawn, mapped)
+
+
+def band_text_image(drawn, mapped):
+    """`mapped` with the light text on a strong color's band (a selected cell's name) drawn again from its
+    coverage, in gray between the band and white (see freelab_band_text)."""
+    return _redraw_from(9, "band text", drawn, mapped)
+
+
+# Overlay Fonts' window (FontLab's ActionOverlay): each font's sample rows and preview in the color picked for it.
+# Mapped, the colors changed (a dark red came out pink) and their edges broke into dots (the owner, November 25);
+# its widgets' colored text is drawn again in its own colors over the mapping (reground_image).
+REGROUND_WINDOWS = ("ActionOverlay",)
+
+
+def _regrounds(effect):
+    """Whether an effect's widget is in a window whose colored text keeps its colors (REGROUND_WINDOWS), asked once
+    per effect. Never raises."""
+    known = getattr(effect, "freelab_reground", None)
+    if known is not None:
+        return known
+    try:
+        window = effect.freelab_widget.window()
+        known = window is not None and _class_name(window) in REGROUND_WINDOWS
+    except Exception:
+        known = False
+    try:
+        effect.freelab_reground = known
+    except Exception:
+        pass
+    return known
 
 
 def gray_cleartype_image(image):
@@ -1166,7 +1259,32 @@ def _darken_sheet(widget):
         widget.setStyleSheet(dark)
 
 
-WATCHER_REVISION = 2  # raised when the filter below learns another event: a session that loaded an older one
+WATCHER_REVISION = 3  # raised when the filter below learns another event: a session that loaded an older one
+TAB_MOUSE_EVENTS = (2, 3, 5, 10, 11, 127, 128, 129)  # press, release, move, enter, leave, and the hover ones
+
+
+def _on_tab_mouse(bar, kind):
+    """A tab bar's mouse moved, entered, left, or was pressed: the bar repainted when the mouse comes onto a tab's
+    close cross or leaves it, or presses it (see draw_tab_crosses). FontLab repaints a tab as the mouse enters
+    it, not as it moves onto the cross within, so the cross kept the look of the moment the tab was entered.
+    Never raises."""
+    try:
+        record = _record(bar)
+        hot = None
+        if kind not in (11, 128):  # (leave)
+            mouse = bar.mapFromGlobal(_gui("QCursor").pos())
+            k = bar.tabAt(mouse)
+            if k >= 0:
+                tab = bar.tabRect(k)
+                cx, cy = tab.x() + TAB_CROSS_CENTER, tab.y() + tab.height() / 2.0
+                on = abs(mouse.x() - cx) <= TAB_CROSS_HIT and abs(mouse.y() - cy) <= TAB_CROSS_HIT
+                held = on and bool(int(_qt()[0].instance().mouseButtons()) & int(_core("Qt").LeftButton))
+                hot = (k, on, held)
+        if record.get("cross_hot") != hot:
+            record["cross_hot"] = hot
+            bar.update()
+    except Exception as exc:
+        _note_error("tab mouse", exc)
 
 
 def _watcher():
@@ -1195,6 +1313,10 @@ def _watcher():
                         module = _module()
                         if module is not None:
                             module._on_flag_paint(obj)
+                    elif kind in TAB_MOUSE_EVENTS and obj.inherits("QTabBar"):
+                        module = _module()
+                        if module is not None:
+                            module._on_tab_mouse(obj, kind)
                 except Exception as exc:  # an event filter must never raise
                     _note_error("watcher", exc)
                 return False
@@ -1956,7 +2078,7 @@ def _effect_classes():
 
         def draw_mapped(painter, pixmap, offset, area, min_l, keys=None, ink_below=-1.0, keep_tint=0.0, light_l=None,
                         edge_neutral=0.0, edge_target=0, anchors=None, dark_l=None, gray=False, analyze=None,
-                        plain=False, defringe=False, cache=None, gray_ct=False):
+                        plain=False, defringe=False, cache=None, gray_ct=False, reground=False):
             """Draw the part of pixmap that lands on `area` (painter coordinates), mapped.
 
             analyze: a larger rect (painter coordinates) whose pixels decide the mapping, of which
@@ -1971,21 +2093,26 @@ def _effect_classes():
                 return
 
             def compute(part):
+                drawn = part
                 if gray:
                     part = gray_image(part)
                 if gray_ct:
                     part = gray_cleartype_image(part)
                 mapped = part if plain else map_image(part, min_l, keys, ink_below, keep_tint, light_l, edge_neutral,
                                                       edge_target, anchors, dark_l)
+                if reground and not plain:
+                    mapped = reground_image(drawn, mapped)
+                if anchors == "all" and keep_tint > 0.0 and not plain:  # a canvas: a selected cell's name, anchors' pills
+                    mapped = pills_image(drawn, band_text_image(drawn, mapped))
                 return defringe_image(mapped) if defringe else mapped
 
             def signature(rect):
                 return (rect.x(), rect.y(), rect.width(), rect.height(), min_l, tuple(keys or ()), ink_below, keep_tint,
-                        light_l, edge_neutral, edge_target, anchors, dark_l, gray, plain, defringe, gray_ct)
+                        light_l, edge_neutral, edge_target, anchors, dark_l, gray, plain, defringe, gray_ct, reground)
 
             if analyze is not None:
                 analyze = analyze.intersected(QRect(offset, pixmap.size()))
-                if analyze.contains(area) and analyze != area:
+                if analyze.contains(area) and not analyze == area:  # (PythonQt has no != for Qt's values: always true)
                     part = pixmap.copy(analyze.translated(-offset.x(), -offset.y())).toImage()
                     mapped = _cached_map(cache, signature(analyze), part, compute)
                     painter.drawImage(area.topLeft(), mapped, area.translated(-analyze.x(), -analyze.y()))
@@ -2133,7 +2260,8 @@ def _effect_classes():
                                 cache=id(self) if not logos else None,
                                 # the same island's dark text, drawn with ClearType on a light ground: its edges made
                                 # gray before the mapping (see gray_cleartype_image)
-                                gray_ct=kind == "island" and not self.freelab_keep_tint)
+                                gray_ct=kind == "island" and not self.freelab_keep_tint,
+                                reground=_regrounds(self))
                     if kind == "ink" and getattr(self, "freelab_list", False):
                         # from the copy without logos: FontLab's logo, with its light fringe, showed through
                         # the cleaned logo's smoothing drawn over it
@@ -2300,9 +2428,21 @@ def _effect_classes():
                                                         _gui("QColor"))
             QPainter = _gui("QPainter")
             owner = effect.freelab_widget
+            unchecked_at = _state().setdefault("tool_icon_at", {})
+            found = 0
             for button in owner.findChildren(QToolButton):
                 try:
-                    if not button.isVisible() or not button.isChecked() or u"margin" not in (_prop(button, "styleSheet") or u""):
+                    if not button.isVisible() or u"margin" not in (_prop(button, "styleSheet") or u""):
+                        continue
+                    if not button.isChecked():
+                        # where FontLab draws the icon unchecked, found once per tool, a few a paint: FontLab draws
+                        # a checked icon elsewhere for some (the slant tool's, a pixel up, in its light look too:
+                        # the owner, November 25), and it is drawn checked where it was unchecked
+                        if id(button) not in unchecked_at and found < CHECKED_TOOL_FIND_PER_PAINT:
+                            found += 1
+                            corner = button.mapTo(owner, QPoint(0, 0))
+                            unchecked_at[id(button)] = _dark_box(pixmap.copy(QRect(
+                                corner.x(), corner.y(), _prop(button, "width"), _prop(button, "height"))).toImage())
                         continue
                     corner = button.mapTo(owner, QPoint(0, 0))
                     width, height = _prop(button, "width"), _prop(button, "height")
@@ -2326,6 +2466,10 @@ def _effect_classes():
                             # picture, 16 by 17, is scaled and placed a pixel off from plain centering, so the icon
                             # moved as it was checked: the owner, November 25)
                             drawn = _colored_box(pixmap.copy(QRect(corner.x(), corner.y(), width, height)).toImage())
+                            before = unchecked_at.get(id(button))
+                            if before is not None and drawn is not None and abs(before[0] - drawn[0]) <= 2 \
+                                    and abs(before[1] - drawn[1]) <= 2:
+                                drawn = before
                             own = _colored_box(picture.toImage())
                             if drawn is not None and own is not None:
                                 x = corner.x() + offset.x() + drawn[0] - own[0]
@@ -2339,27 +2483,46 @@ def _effect_classes():
         def draw_tab_crosses(effect, painter, pixmap, offset):
             """A document tab's close cross, light, over the bar's mapping, where FontLab drew its own (see
             TAB_CROSS_COLOR)."""
-            QColor, QPainter, QPointF = _gui("QColor"), _gui("QPainter"), _core("QPointF")
+            QColor, QImage, QPainter = _gui("QColor"), _gui("QImage"), _gui("QPainter")
+            app = _qt()[0].instance()
             bar = effect.freelab_widget
+            text = app.palette().color(_gui("QPalette").WindowText)
+            cross = (text.red() + text.green() + text.blue()) // 3
+            mouse = bar.mapFromGlobal(_gui("QCursor").pos())
+            held = bool(int(app.mouseButtons()) & int(Qt.LeftButton))
             for k in range(bar.count):
                 try:
                     tab = bar.tabRect(k)
-                    box = QRect(tab.x() + TAB_CROSS_FROM, tab.y() + 2, TAB_CROSS_SPAN, tab.height() - 4)
+                    box = QRect(tab.x() + TAB_CROSS_FROM, tab.y(), TAB_CROSS_SPAN, tab.height())
                     if box.width() <= 0 or box.height() <= 0 or box.right() >= pixmap.width():
                         continue
-                    center = _faint_mark_center(pixmap.copy(box).toImage())
-                    if center is None:
+                    shares = _tab_cross_shares(pixmap.copy(box).toImage(), cross)
+                    if not shares:
                         continue
-                    cx, cy = box.x() + offset.x() + center[0], box.y() + offset.y() + center[1]
-                    pen = _gui("QPen")(QColor(TAB_CROSS_COLOR))
-                    pen.setWidthF(TAB_CROSS_WIDTH)
-                    half = TAB_CROSS_HALF
+                    weight = sum(share for _, _, share in shares)
+                    cx = box.x() + sum(x * share for x, _, share in shares) / weight + 0.5
+                    cy = box.y() + sum(y * share for _, y, share in shares) / weight + 0.5
+                    on = abs(mouse.x() - cx) <= TAB_CROSS_HIT and abs(mouse.y() - cy) <= TAB_CROSS_HIT
+                    pressed = on and held
+                    red, green, blue = TAB_CROSS_COLOR if on else TAB_CROSS_DIM
+                    overlay = QImage(box.width(), box.height(), QImage.Format_ARGB32)
+                    overlay.fill(0)
+                    for x, y, share in shares:
+                        overlay.setPixelColor(x, y, QColor(red, green, blue, int(round(255 * share))))
                     painter.save()
                     try:
-                        painter.setRenderHint(QPainter.Antialiasing, True)
-                        painter.setPen(pen)
-                        painter.drawLine(QPointF(cx - half, cy - half), QPointF(cx + half, cy + half))
-                        painter.drawLine(QPointF(cx - half, cy + half), QPointF(cx + half, cy - half))
+                        painter.translate(offset.x() + cx, offset.y() + cy)
+                        if pressed:
+                            # held down: a lighter rounded square, and the cross a little smaller (the owner,
+                            # November 25: the feedback FontLab's own gives as the cross is clicked)
+                            painter.setRenderHint(QPainter.Antialiasing, True)
+                            painter.setPen(Qt.NoPen)
+                            painter.setBrush(QColor(*TAB_CROSS_PRESSED))
+                            half = TAB_CROSS_SQUARE / 2.0
+                            painter.drawRoundedRect(_core("QRectF")(-half, -half, 2 * half, 2 * half), 3.0, 3.0)
+                            painter.scale(TAB_CROSS_PRESSED_SCALE, TAB_CROSS_PRESSED_SCALE)
+                        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+                        painter.drawImage(_core("QPointF")(box.x() - cx, box.y() - cy), overlay)
                     finally:
                         painter.restore()
                 except Exception as exc:
@@ -3171,7 +3334,8 @@ CURSOR_MAX_SIDE = 128
 
 CURSOR_GRAY_SPREAD = 30  # an opaque pixel of the arrow itself: low color (a tool's red mark is kept)
 CURSOR_INNER_MIN = 4  # pixels inside the shape (opaque all around) enough to tell its fill
-CURSOR_REVISION = 3  # raised when glow_to_shadow changes: the cursors an earlier one made are let go
+CURSOR_SEAM_L = 0.85  # an opaque gray this dark at most, beside the glow, kept light inside: the outline's smoothing
+CURSOR_REVISION = 4  # raised when glow_to_shadow changes: the cursors an earlier one made are let go
 
 
 def glow_to_shadow(image):
@@ -3205,6 +3369,11 @@ def glow_to_shadow(image):
                 inner[dark(color)] += 1
     counts = inner if inner[0] + inner[1] >= CURSOR_INNER_MIN else every
     turn = counts[1] > counts[0]
+
+    def on_glow(x, y):  # beside a pixel that is not opaque (the glow, or nothing)
+        return any(not (0 <= x + dx < width and 0 <= y + dy < height) or colors[y + dy][x + dx].alpha() < 255
+                   for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+
     changed = False
     for y in range(height):
         for x in range(width):
@@ -3216,6 +3385,11 @@ def glow_to_shadow(image):
                 changed = True
             elif turn and gray(color):
                 image.setPixelColor(x, y, QColor(255 - red, 255 - green, 255 - blue, alpha))
+                changed = True
+            elif not turn and gray(color) and _lightness(red, green, blue) < CURSOR_SEAM_L and on_glow(x, y):
+                # the outline's smoothing into the white glow: a gray seam between the black outline and the
+                # glow made dark (the owner, November 25: edges of mixed black and white)
+                image.setPixelColor(x, y, QColor(0, 0, 0, alpha))
                 changed = True
     return changed
 
@@ -3794,6 +3968,9 @@ def _undo_widget(widget, keep_props=False, keep_placeholder=False):
             widget.setAutoFillBackground(record.pop("autofill"))
         if "styled" in record:
             widget.setAttribute(_core("Qt").WA_StyledBackground, record.pop("styled"))
+        if "tracking" in record:
+            widget.setMouseTracking(record.pop("tracking"))
+        record.pop("cross_hot", None)
         if "cursor" in record:
             _restore_cursor(widget, record)
         if "sci" in record:
@@ -4004,6 +4181,12 @@ def process(widget):
         if is_content(widget):
             _watch(widget)  # (FontLab gives a canvas another cursor at each change of tool)
             _fix_cursor(widget)
+        elif widget.inherits("QTabBar"):
+            _watch(widget)  # (its close crosses follow the mouse: _on_tab_mouse)
+            record = _record(widget)
+            if "tracking" not in record:  # (moves, not only entering and leaving: taken back with the island)
+                record["tracking"] = bool(widget.hasMouseTracking())
+                widget.setMouseTracking(True)
         return
     _darken_sheet(widget)
     if _own_sheet_ground(widget):

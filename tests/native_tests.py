@@ -935,6 +935,127 @@ class ReviewOfNovember24Tests(unittest.TestCase):
             self.assertGreater(sum(out[y][x]), sum(out[y][pill_x]) + 60,
                                "the name lighter than its pill at %d,%d" % (x, y))
 
+    def test_colored_text_keeps_its_own_color_over_the_mapped_paper(self):
+        """The owner, November 25: in Overlay Fonts, a dark red sample came out pink with light dots, and the mess
+        changed as the color was dragged. The text is drawn again in its own color, its smoothing at the same
+        share over the paper as mapped; a pill's gray and black text keep the mapping."""
+        paper, red, gray, black = (255, 255, 255), (98, 0, 21), (176, 174, 170), (0, 0, 0)
+
+        def mix(color, share):
+            return tuple(int(round(255 + share * (c - 255))) for c in color)
+
+        rows = [[paper] * 40 for _ in range(30)]
+        for y in range(4, 14):  # a dark red stroke, smoothed on both sides
+            rows[y][9], rows[y][14] = mix(red, 0.5), mix(red, 0.25)
+            for x in range(10, 14):
+                rows[y][x] = red
+        for y in range(4, 14):
+            rows[y][30], rows[y][31] = gray, black  # a pill's gray, black text
+        rows += [[paper] * 40 for _ in range(4)]
+        for y in range(18, 30):  # more of the red, as a sample row has: a text color is frequent
+            for x in range(2, 8):
+                rows[y][x] = red
+        flat = [c for row in rows for c in row]
+        drawn = pixels(flat)
+        mapped = pixels(flat)
+        array = (ctypes.c_char * len(mapped)).from_buffer(mapped)
+        LIB.freelab_map_anchors(ctypes.addressof(array), len(mapped) // 4, 40, 6, dm.DARK_OKL, dm.LIGHT_OKL, 0.0,
+                                dm.DARK_OKL, 1)
+        before = bytes(mapped)
+        LIB.freelab_reground.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
+        LIB.freelab_reground.restype = ctypes.c_int64
+        source = (ctypes.c_char * len(drawn)).from_buffer(drawn)
+        self.assertGreater(LIB.freelab_reground(ctypes.addressof(source), ctypes.addressof(array), len(mapped) // 4, 40), 0)
+
+        def at(buf, x, y):
+            return tuple(reversed(struct.unpack_from("<BBB", buf, 4 * (y * 40 + x))))
+
+        ground = at(mapped, 20, 8)
+        self.assertLess(sum(ground), 3 * 80, "the paper mapped dark")
+        self.assertEqual(at(mapped, 11, 8), red, "the text in its own color")
+        half = at(mapped, 9, 8)
+        for ch in range(3):
+            self.assertAlmostEqual(half[ch], (ground[ch] + red[ch]) / 2.0, delta=3, msg="half of it over the mapped paper")
+        quarter = at(mapped, 14, 8)
+        for ch in range(3):
+            self.assertAlmostEqual(quarter[ch], ground[ch] + 0.25 * (red[ch] - ground[ch]), delta=3)
+        self.assertEqual(at(mapped, 30, 8), at(before, 30, 8), "the pill's gray as mapped")
+        self.assertEqual(at(mapped, 31, 8), at(before, 31, 8), "black text as mapped")
+
+    def test_an_anchors_pill_is_drawn_again_whole_over_what_runs_under_it(self):
+        """The owner, November 25: on a pill, anything a contour or a line drew under it made its name a mess. The
+        pill is drawn again plain in its gray as mapped, its name from its coverage; a line under the pill is gone,
+        and outside the pill it is mapped as before."""
+        ground, upper, lower, line, name = (240, 240, 240), (176, 174, 170), (166, 164, 160), (60, 58, 54), (239, 238, 238)
+        rows = [[ground] * 80 for _ in range(30)]
+        for y in range(8, 22):
+            for x in range(10, 70):
+                rows[y][x] = upper if y < 15 else lower
+            if 10 <= y < 20:
+                for x in (20, 21, 30, 31, 44, 45):  # the name's stems
+                    rows[y][x] = name
+        for y in range(30):  # a contour across the pill and beyond, under the name
+            x = 26 + y // 3
+            if not (8 <= y < 22 and rows[y][x] == name):
+                rows[y][x] = line
+        flat = [c for row in rows for c in row]
+        drawn, mapped = pixels(flat), pixels(flat)
+        array = (ctypes.c_char * len(mapped)).from_buffer(mapped)
+        LIB.freelab_map_anchors(ctypes.addressof(array), len(mapped) // 4, 80, 1, dm.DARK_OKL, dm.LIGHT_OKL, 1.0,
+                                dm.DARK_OKL, 1)
+        before = bytes(mapped)
+        LIB.freelab_pills.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
+        LIB.freelab_pills.restype = ctypes.c_int64
+        source = (ctypes.c_char * len(drawn)).from_buffer(drawn)
+        self.assertEqual(LIB.freelab_pills(ctypes.addressof(source), ctypes.addressof(array), len(mapped) // 4, 80), 1)
+
+        def at(buf, x, y):
+            return tuple(reversed(struct.unpack_from("<BBB", buf, 4 * (y * 80 + x))))
+
+        pill = at(mapped, 60, 12)
+        self.assertEqual(at(mapped, 60, 18), pill, "one gray, over both grounds")
+        self.assertEqual(at(mapped, 26 + 9 // 3, 9), pill, "the contour under the pill: gone")
+        self.assertGreater(sum(at(mapped, 20, 12)), sum(pill) + 300, "the name light on it")
+        self.assertEqual(at(mapped, 26, 2), at(before, 26, 2), "the contour outside the pill as mapped")
+        self.assertEqual(at(mapped, 2, 2), at(before, 2, 2), "the canvas as mapped")
+
+    def test_a_selected_cells_name_is_drawn_again_from_its_coverage(self):
+        """The owner, November 25: a selected cell's name, white on the selection's blue, was fringed, with a black
+        pixel in its g. Each pixel of light text on the band: its channels' mean share of the way from the band to
+        white, in gray; the band, and dark marks on it, as mapped."""
+        band, white, cyan, pink, dark = (31, 98, 162), (255, 255, 255), (180, 255, 224), (255, 229, 239), (20, 20, 40)
+        rows = [[(240, 240, 240)] * 60 for _ in range(4)]
+        for y in range(14):
+            row = [band] * 60
+            if 4 <= y < 10:
+                row[20], row[21], row[22] = cyan, white, pink  # a stem with ClearType's edges
+                row[40] = dark
+            rows.append(row)
+        rows += [[(240, 240, 240)] * 60 for _ in range(4)]
+        flat = [c for row in rows for c in row]
+        drawn, mapped = pixels(flat), pixels(flat)
+        array = (ctypes.c_char * len(mapped)).from_buffer(mapped)
+        LIB.freelab_map_anchors(ctypes.addressof(array), len(mapped) // 4, 60, 1, dm.DARK_OKL, dm.LIGHT_OKL, 1.0,
+                                dm.DARK_OKL, 1)
+        before = bytes(mapped)
+        LIB.freelab_band_text.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
+        LIB.freelab_band_text.restype = ctypes.c_int64
+        source = (ctypes.c_char * len(drawn)).from_buffer(drawn)
+        self.assertEqual(LIB.freelab_band_text(ctypes.addressof(source), ctypes.addressof(array), len(mapped) // 4, 60), 18)
+
+        def at(buf, x, y):
+            return tuple(reversed(struct.unpack_from("<BBB", buf, 4 * (y * 60 + x))))
+
+        self.assertEqual(at(mapped, 21, 10), white)
+        for x in (20, 22):
+            edge = at(mapped, x, 10)
+            share = (edge[0] - band[0]) / (255.0 - band[0])
+            for ch in range(3):
+                self.assertAlmostEqual(edge[ch], band[ch] + share * (255 - band[ch]), delta=1.5,
+                                       msg="an edge in gray between the band and white, not colored")
+        self.assertEqual(at(mapped, 40, 10), at(before, 40, 10), "a dark mark on the band as mapped")
+        self.assertEqual(at(mapped, 5, 10), at(before, 5, 10), "the band as mapped")
+
     def test_a_colored_lines_smoothing_fades_to_the_paper_on_a_canvas(self):
         """The owner, 2026-11-25: every colored contour had a jagged edge. A line's full pixels were kept, light
         and red, and its smoothing, judged pixel by pixel, was turned over to a dark red: steps and dots."""
