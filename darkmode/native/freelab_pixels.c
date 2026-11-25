@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 144
+#define FREELAB_PIXELS_VERSION 145
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -4021,6 +4021,36 @@ EXPORT int64_t freelab_pills(const uint8_t *orig, uint8_t *out, int64_t count, i
  * a channel darker than the dark ground, which the defringe pass after keeps (the owner, 2026-11-25). The
  * pixels are judged as drawn, then changed; returns how many were. */
 static uint8_t gray_ct_mark[MAX_INDEXED];
+
+/* Whether a flat surface of a strong color lies within GRAY_CT_SURFACE_REACH of a pixel: a pixel of
+ * GRAY_CT_SURFACE_SPREAD or more whose four neighbors are its color. On one (the Fonts panel's light-blue disc
+ * around a selected style's letter), the disc's own pixels beside the letter were made the gray of their channels
+ * and came out a gray block beside the "R" (the owner, 2026-11-25); ClearType's fringes are strong colors too,
+ * but never flat. */
+#define GRAY_CT_SURFACE_REACH 3
+#define GRAY_CT_SURFACE_SPREAD 60
+static int on_colored_surface(const uint32_t *p, int64_t i, int64_t width, int64_t count)
+{
+    int64_t x = i % width, y = i / width, rows = count / width, xx, yy;
+    for (yy = y - GRAY_CT_SURFACE_REACH; yy <= y + GRAY_CT_SURFACE_REACH; yy++)
+        for (xx = x - GRAY_CT_SURFACE_REACH; xx <= x + GRAY_CT_SURFACE_REACH; xx++) {
+            uint32_t c;
+            uint8_t q[3];
+            if (xx < 1 || xx >= width - 1 || yy < 1 || yy >= rows - 1)
+                continue;
+            c = p[yy * width + xx];
+            q[0] = (uint8_t)c;
+            q[1] = (uint8_t)(c >> 8);
+            q[2] = (uint8_t)(c >> 16);
+            if (spread_of(q) < GRAY_CT_SURFACE_SPREAD)
+                continue;
+            if (p[yy * width + xx - 1] == c && p[yy * width + xx + 1] == c && p[(yy - 1) * width + xx] == c
+                && p[(yy + 1) * width + xx] == c)
+                return 1;
+        }
+    return 0;
+}
+
 EXPORT int64_t freelab_gray_cleartype(uint8_t *pixels, int64_t count, int64_t width)
 {
     uint32_t *p = (uint32_t *)pixels;
@@ -4030,7 +4060,7 @@ EXPORT int64_t freelab_gray_cleartype(uint8_t *pixels, int64_t count, int64_t wi
     dark_text_white_ok = 1;
     for (i = 0; i < count; i++)
         gray_ct_mark[i] = (uint8_t)((p[i] >> 24) >= ANCHOR_MIN_ALPHA && cleartype_fringe(p, i, width, count)
-                                    && dark_text_fringe(p, i, width, count));
+                                    && dark_text_fringe(p, i, width, count) && !on_colored_surface(p, i, width, count));
     dark_text_white_ok = 0;
     for (i = 0; i < count; i++) {
         uint8_t *px = pixels + 4 * i;

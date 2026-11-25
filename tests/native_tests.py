@@ -982,6 +982,35 @@ class ReviewOfNovember24Tests(unittest.TestCase):
         self.assertEqual(at(mapped, 30, 8), at(before, 30, 8), "the pill's gray as mapped")
         self.assertEqual(at(mapped, 31, 8), at(before, 31, 8), "black text as mapped")
 
+    def test_a_letter_on_a_colored_disc_keeps_the_disc_around_it(self):
+        """The owner, November 25: the Fonts panel's selected style, a dark "R" on a light-blue disc, came out with
+        a gray block beside the letter: the disc's pixels by the strokes were taken for the letter's ClearType
+        edges and made gray. A flat surface of a strong color nearby keeps its pixels."""
+        # FontLab's own pixels: the disc's top, its "R" (ClearType), and the row's light ground around it
+        drawn = """
+            e9f0ff e9f0ff e9f0ff e9f0ff b9d9ff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff b9d9ff e9f0ff e9f0ff
+            e9f0ff e9f0ff e9f0ff e9f0ff 90c4ff 7ebcff 7ebcff 7ebcff 7ebcff 7e7d55 15202b 15202b 155eaa 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 90c5ff e9f0ff e9f0ff
+            e9f0ff e9f0ff e9f0ff e0ebff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7e7d55 2a7dff 7ebcff 543f2b 3f9cff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff e0ebff e9f0ff
+            e9f0ff e9f0ff e9f0ff d3e6ff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7e7d55 2a7dff 7ebcd4 3f3f2b 3f9cff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff d3e6ff e9f0ff
+            e9f0ff e9f0ff e9f0ff d3e6ff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7e7d55 152055 2a202b 3f9cff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff d3e6ff e9f0ff
+            e9f0ff e9f0ff e9f0ff e0ebff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7e7d55 2a7dff 7e9c80 152080 69bcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff e0ebff e9f0ff
+            e9f0ff e9f0ff e9f0ff e9f0ff 90c4ff 7ebcff 7ebcff 7ebcff 7ebcff 7e7d55 2a7dff 7ebcff 7e7d55 153faa 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 90c5ff e9f0ff e9f0ff
+            e9f0ff e9f0ff e9f0ff e9f0ff b9d9ff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff 7ebcff b9d9ff e9f0ff e9f0ff
+            """
+        ground = (0xe9, 0xf0, 0xff)
+        rows = [[ground] * 20 + [tuple(int(c[k:k + 2], 16) for k in (0, 2, 4)) for c in line.split()] + [ground] * 20
+                for line in drawn.split("\n") if line.strip()]
+        width = len(rows[0])
+        rows = [[ground] * width for _ in range(10)] + rows + [[ground] * width for _ in range(10)]
+        buf = pixels([c for row in rows for c in row])
+        array = (ctypes.c_char * len(buf)).from_buffer(buf)
+        LIB.freelab_gray_cleartype.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
+        LIB.freelab_gray_cleartype(ctypes.addressof(array), len(buf) // 4, width)
+        for y in range(11, 17):
+            for x in (26, 27, 28):  # the disc beside the letter's stem
+                got = tuple(reversed(struct.unpack_from("<BBB", buf, 4 * (y * width + x))))
+                self.assertEqual(got, rows[y][x], "the disc as drawn at %d,%d" % (x, y))
+
     def test_an_anchors_pill_is_drawn_again_whole_over_what_runs_under_it(self):
         """The owner, November 25: on a pill, anything a contour or a line drew under it made its name a mess. The
         pill is drawn again plain in its gray as mapped, its name from its coverage; a line under the pill is gone,
