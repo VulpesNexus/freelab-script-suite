@@ -2304,6 +2304,116 @@ class ReviewTests(DarkModeCase):
         self.no_freelab_traces()
 
 
+class InterfaceTextTests(DarkModeCase):
+    """Text Qt draws on the dark interface goes through the defringe effect (ClearType's colored edges, the
+    owner's most frequent complaint, November 24 and 25)."""
+
+    def freelab_window(self):
+        window = FakeWidget("QDialog", "fontCheck", window=True, width=800, height=600, inherits=("QDialog",))
+        window.setProperty(dm.FREELAB_WINDOW_PROP, 1)
+        tree = FakeWidget("QListView", "languages", parent=window, width=600, height=400,
+                          inherits=("QAbstractItemView",))
+        viewport = FakeWidget("QWidget", "qt_scrollarea_viewport", parent=tree, width=600, height=400)
+        self.app.roots = [self.main, window]
+        return viewport
+
+    def light_label(self, text, ink="#afafaf", parent=None):
+        panel = FakeWidget("QWidget", "captions", parent=parent or self.main)
+        panel.palette.setColor(QPalette.Window, QColor("#292929"))
+        label = FakeWidget("QLabel", "caption", parent=panel, inherits=("QLabel",))
+        label.text = text
+        label.palette.setColor(QPalette.WindowText, QColor(ink))
+        return label
+
+    def test_a_light_label_is_defringed(self):
+        label = self.light_label(u"Kerning")
+        self.on()
+        self.assertEqual(self.kind(label), "defringe")
+
+    def test_a_dark_label_or_one_with_no_text_is_not(self):
+        self.assertFalse(dm._ui_text_widget(self.light_label(u"Name", ink="#202020")))
+        self.assertFalse(dm._ui_text_widget(self.light_label(u"  ")))
+
+    def test_a_freelab_windows_rich_text_label_is_defringed(self):
+        self.freelab_window()
+        label = FakeWidget("QLabel", "summary", inherits=("QLabel",))
+        label.text = u"<b>2,512</b> languages"
+        self.patch("_freelab_caption", lambda widget: widget is label)
+        self.assertTrue(dm._ui_text_widget(label))
+        self.patch("_freelab_caption", lambda widget: False)
+        self.assertFalse(dm._ui_text_widget(label), "rich text elsewhere is not")
+
+    def test_text_under_a_mapping_effect_is_not(self):
+        panel = FakeWidget("QWidget", "sidebar", parent=self.main)
+        panel.setProperty(dm.ISLAND_PROP, "ink")
+        label = self.light_label(u"Kerning", parent=panel)
+        button = FakeWidget("QToolButton", "go", parent=panel, inherits=("QAbstractButton",))
+        button.text = u"Go"
+        self.assertFalse(dm._ui_text_widget(label))
+        self.assertFalse(dm._ui_text_widget(button))
+
+    def test_a_button_with_a_light_face_is_not(self):
+        button = FakeWidget("QToolButton", "white", parent=self.main, width=10, height=10,
+                            inherits=("QAbstractButton",))
+        button.text = u"Go"
+        self.patch("own_render", lambda widget: widget)
+        self.patch("image_stats", lambda image: (100, 60, 0))
+        self.assertFalse(dm._ui_text_widget(button))
+        self.patch("image_stats", lambda image: (100, 5, 0))
+        self.assertTrue(dm._ui_text_widget(button))
+
+    def test_a_freelab_list_is_defringed(self):
+        viewport = self.freelab_window()
+        self.on()
+        self.assertEqual(self.kind(viewport), "defringe")
+
+    def test_a_freelab_list_keeps_it_when_looked_at_again(self):
+        viewport = self.freelab_window()
+        self.on()
+        effect = viewport.effect
+        for _ in range(3):  # (full sweeps: it lost it at one, got it back at the next)
+            dm.process(viewport)
+        self.assertEqual(self.kind(viewport), "defringe")
+        self.assertIs(viewport.effect, effect)
+
+    def test_a_freelab_tab_bar_left_alone_is_defringed(self):
+        viewport = self.freelab_window()
+        bar = FakeWidget("QTabBar", parent=viewport.parentWidget().parentWidget(), inherits=("QTabBar",))
+        bar.setProperty(dm.LEAVE_ALONE_PROP, True)
+        lone = FakeWidget("QTabBar", parent=self.main, inherits=("QTabBar",))
+        lone.setProperty(dm.LEAVE_ALONE_PROP, True)
+        self.on()
+        self.assertEqual(self.kind(bar), "defringe")
+        self.assertIsNone(lone.effect, "outside FreeLab's windows, left alone as asked")
+
+    def test_a_freelab_dropdown_is_defringed(self):
+        viewport = self.freelab_window()
+        combo = FakeWidget("QComboBox", parent=viewport.parentWidget().parentWidget(), inherits=("QComboBox",))
+        combo.setProperty(dm.LEAVE_ALONE_PROP, True)
+        self.on()
+        self.assertEqual(self.kind(combo), "defringe")
+        dm.process(combo)
+        self.assertEqual(self.kind(combo), "defringe", "kept when looked at again")
+
+    def test_a_list_outside_freelab_windows_is_not(self):
+        tree = FakeWidget("QTreeWidget", parent=self.main, inherits=("QAbstractItemView",))
+        viewport = FakeWidget("QWidget", "qt_scrollarea_viewport", parent=tree)
+        self.assertFalse(dm._freelab_view_text(viewport))
+
+    def test_another_effect_is_left_in_place(self):
+        viewport = self.freelab_window()
+        theirs = object()
+        viewport.effect = theirs
+        self.assertFalse(dm._freelab_view_text(viewport))
+
+    def test_switching_off_leaves_no_trace(self):
+        self.freelab_window()
+        self.light_label(u"Kerning")
+        self.on()
+        self.off()
+        self.no_freelab_traces()
+
+
 class FrameAndPlaceholderTests(DarkModeCase):
     def test_dock_frames_are_keyed(self):
         self.on()

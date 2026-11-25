@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 122
+#define FREELAB_PIXELS_VERSION 125
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -333,7 +333,10 @@ EXPORT void freelab_map_lightness(uint8_t *pixels, int64_t count, int64_t width,
  *   darker field or outline does not lower it;
  * - runs of DEFRINGE_MIN_RUN or more pixels of one strongest channel (colored text and its own
  *   smoothing), and colored runs with no text core beside them (a vertical colored line, a
- *   swatch edge).
+ *   swatch edge);
+ * - runs with no core, or longer than DEFRINGE_MAX_FRINGE, whose colors do not add up to gray
+ *   (colored text's own ClearType edges, a bar of several colors: Font Check's green log
+ *   and blue link, its coverage bars, all drawn gray before: 2026-11-25).
  * The pixels are changed in place, so text cores are flagged from each row's original pixels
  * first (rows wider than DEFRINGE_MAX_WIDTH are left as they are). */
 #define DEFRINGE_NEUTRAL 6
@@ -342,6 +345,8 @@ EXPORT void freelab_map_lightness(uint8_t *pixels, int64_t count, int64_t width,
 #define DEFRINGE_TEXT_STEP 24
 #define DEFRINGE_REACH 2
 #define DEFRINGE_MAX_WIDTH 16384
+#define DEFRINGE_MAX_FRINGE 6   /* longer runs of mixed colors are text edges only when they add up to gray */
+#define DEFRINGE_PAIR_SPREAD 48 /* most spread of a coreless run's mean color: edges that add up to gray */
 
 static uint8_t defringe_core[DEFRINGE_MAX_WIDTH];
 
@@ -425,6 +430,24 @@ EXPORT void freelab_defringe(uint8_t *pixels, int64_t count, int64_t width, int 
                     core = 1;
             if (same && !core)
                 continue;  /* no text beside it: a colored line or a swatch's edge */
+            if (!core || x - start > DEFRINGE_MAX_FRINGE) {
+                /* A light stem too thin for a core is a pair of opposite edges whose colors add up to gray, and
+                 * so are the edges of small light text running across letters (7 to 12 pixels); colored text
+                 * keeps ClearType where it is drawn on an opaque ground (a log's green counts, its blue link),
+                 * and its edges add up to its color, as a bar of several colors does (Font Check's coverage,
+                 * 150 pixels, a light gray end beside it for a core) */
+                int64_t sum[3] = {0, 0, 0}, lo, hi;
+                for (k = start; k < x; k++) {
+                    const uint8_t *px = pixels + 4 * (row + k);
+                    sum[0] += px[0];
+                    sum[1] += px[1];
+                    sum[2] += px[2];
+                }
+                lo = sum[0] < sum[1] ? (sum[0] < sum[2] ? sum[0] : sum[2]) : (sum[1] < sum[2] ? sum[1] : sum[2]);
+                hi = sum[0] > sum[1] ? (sum[0] > sum[2] ? sum[0] : sum[2]) : (sum[1] > sum[2] ? sum[1] : sum[2]);
+                if (hi - lo > DEFRINGE_PAIR_SPREAD * (x - start))
+                    continue;
+            }
             for (k = start; k < x; k++) {
                 uint8_t *px = pixels + 4 * (row + k);
                 if (spread_of(px) > max_spread || min_channel(px) + DEFRINGE_FLOOR_TOLERANCE < ground)

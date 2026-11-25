@@ -227,7 +227,7 @@ SWEEP_MS = 500  # how often to look for widgets FontLab created or showed (750 w
 FULL_SWEEP_EVERY = 60  # every Nth sweep revisits every widget (replaced stylesheets, new icons): every 30 s
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 122
+NATIVE_VERSION = 125
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -2678,6 +2678,135 @@ def _own_sheet_ground(widget):
         return False
 
 
+# Text Qt draws itself, outside any effect, gets Windows' ClearType: each stroke's sides in orange and blue,
+# meant for dark text on light. On the dark interface they show as colored edges around every word of the
+# menu bar, the buttons, the labels (the owner's most frequent complaint, November 24 and 25; counted with
+# tools/find_fringes.py: 2,878 pairs of opposite hues on the main window, 807 once the menu bar and buttons
+# went through an effect). Drawn through an effect, text gets grayscale smoothing, and the defringe effect
+# makes what ClearType is left gray. Not a widget that paints a light face of its own (a tool button FontLab
+# keeps white, mapped by the ink of the panel around it: drawn as it is, it stood white).
+# Not text under an effect that maps it (an ink or island effect above it): its own effect would shield it from
+# that mapping (see _set_effect), and dark text FontLab draws there would stay dark. Not a dropdown: Fusion
+# draws it from the dark palette (see _plain_input), and its effect gained nothing (277 pairs before, 283 after).
+UI_TEXT_CLASSES = ("QMenuBar", "QLabel", "QAbstractButton", "QGroupBox", "QTabBar")
+UI_TEXT_LIGHT_SHARE = 0.25  # of its area near white: a light face
+MAPPING_KINDS = ("ink", "island")
+
+
+def _mapped_from_above(widget):
+    """Whether an effect of a widget above this one (up to its window) maps what it draws. Never raises."""
+    try:
+        parent = widget.parentWidget()
+        while parent is not None:
+            if parent.property(ISLAND_PROP) in MAPPING_KINDS:
+                return True
+            record = _record(parent, create=False)
+            if record is not None and record.get("kind") in MAPPING_KINDS and _ours(parent, record):
+                return True
+            if parent.isWindow():
+                return False
+            parent = parent.parentWidget()
+        return False
+    except Exception:
+        return True
+
+
+def _has_defringe(widget):
+    """Whether the widget's effect is dark mode's defringe effect. Never raises."""
+    try:
+        record = _record(widget, create=False)
+        return record is not None and record.get("kind") == "defringe" and _ours(widget, record)
+    except Exception:
+        return False
+
+
+def _free_or_defringed(widget):
+    """No effect yet, or dark mode's defringe effect already: looked at again (a full sweep processes every
+    widget), a widget with the effect failed a test for "no effect", went on to the branches that take an effect
+    off (left alone, a plain input), and lost it, to get it back at the next full sweep. Never raises."""
+    try:
+        return widget.graphicsEffect() is None or _has_defringe(widget)
+    except Exception:
+        return False
+
+
+def _freelab_view_text(widget):
+    """Whether a widget is the text area of a list or a text view in one of FreeLab's own windows, with no effect
+    but the defringe one. Never raises."""
+    try:
+        if _prop(widget, "objectName") != "qt_scrollarea_viewport" or not _free_or_defringed(widget):
+            return False
+        parent = widget.parentWidget()
+        if parent is None or not any(parent.inherits(c) for c in INK_VIEW_PARENTS):
+            return False
+        return _in_freelab_window(parent)
+    except Exception:
+        return False
+
+
+def _in_freelab_window(widget):
+    """Whether the widget is (in) one of FreeLab's own windows. Never raises."""
+    try:
+        window = widget  # (its window, as Qt's window(): the first widget up that is one)
+        while window is not None and not window.isWindow():
+            window = window.parentWidget()
+        return window is not None and window.property(FREELAB_WINDOW_PROP) is not None
+    except Exception:
+        return False
+
+
+def _freelab_text(widget):
+    """Text in one of FreeLab's own windows to draw through the defringe effect, though it asked to be left alone:
+    FreeLab asks for its tabs, buttons, and lists, drawn in the dialog's colors with nothing to map, and the
+    defringe effect maps nothing (Font Check: 3,433 pairs of opposite hues left, on its tabs and check boxes,
+    once its lists and labels had it; 1,278 once its tabs and buttons had it, on its dropdowns and fields). A
+    dropdown, spin box, or field there takes it too: it maps nothing, so its arrows stay (see _plain_input).
+    Never raises."""
+    try:
+        if _freelab_view_text(widget):
+            return True
+        if not _in_freelab_window(widget):
+            return False
+        if any(widget.inherits(c) for c in PLAIN_INPUTS):
+            if not _free_or_defringed(widget):
+                return False
+            return _has_defringe(widget) or (widget.isVisible() and not _mapped_from_above(widget))
+        return _ui_text_widget(widget)
+    except Exception:
+        return False
+
+
+def _ui_text_widget(widget):
+    """Whether a widget is text Qt draws on the dark interface, to be drawn through the defringe effect. Never
+    raises."""
+    try:
+        if not any(widget.inherits(c) for c in UI_TEXT_CLASSES) or not _free_or_defringed(widget):
+            return False
+        if _has_defringe(widget):
+            return True  # (decided before: not rendered again)
+        if not widget.isVisible() or _mapped_from_above(widget):
+            return False
+        if not any(widget.inherits(c) for c in ("QMenuBar", "QTabBar", "QGroupBox")):
+            text = _prop(widget, "text")
+            if not text or not (u"%s" % text).strip():
+                return False
+        width, height = _prop(widget, "width"), _prop(widget, "height")
+        if width * height <= 0:
+            return False
+        if widget.inherits("QLabel"):
+            # Only light text on a dark ground, already shielded from any mapping above (see _light_text_label):
+            # rich text, dark text, or a label on a light badge needs that mapping. A FreeLab window's label is drawn
+            # from the palette, its rich text too (Font Check's summary, its numbers in bold: 14,053 pairs left)
+            return not _shows_picture(widget) and (_freelab_caption(widget) or _light_text_label(widget))
+        if not widget.inherits("QAbstractButton"):
+            return True  # (only a button paints a face of its own: rendering each to see doubled the time
+            # switching on takes, 15 s to 25 s with FontLab's windows open)
+        _opaque, white, _black = image_stats(own_render(widget))
+        return white < UI_TEXT_LIGHT_SHARE * width * height
+    except Exception:
+        return False
+
+
 def _light_faced_text_button(widget):
     """A tool button with text and no icon whose text the palette makes light, found to paint light all the
     same (the caller's ink detection). Never raises."""
@@ -3487,6 +3616,13 @@ def process(widget):
         _set_effect(widget, _record(widget), "picker")
         _protect(widget)
         return
+    if _freelab_text(widget):
+        # A FreeLab tool's list, log, label, tab, or button, drawn by FreeLab from the dark palette: its text's
+        # ClearType edges made gray by the defringe effect, which leaves every real color as drawn, so one that
+        # asked to be left alone for its pictures takes it too (Font Check: 31,385 pairs of opposite hues before)
+        _note_sheet_as_seen(widget)
+        _set_effect(widget, _record(widget), "defringe")
+        return
     if _left_alone(widget, name):
         _forget_effect(widget)  # one it got before it asked (a dropdown down to one choice)
         _note_sheet_as_seen(widget)
@@ -3530,7 +3666,8 @@ def process(widget):
         visible_unchecked = False  # FontLab's logo: white on purpose, no effect (the ink effect blackened its edges)
     if _plain_input(widget):
         kind, visible_unchecked = None, False  # Fusion draws it from the dark palette: right as it is
-        _forget_effect(widget)  # one it got while it had a stylesheet of its own
+        if not _has_defringe(widget):
+            _forget_effect(widget)  # one it got while it had a stylesheet of its own (not its defringe effect)
     elif kind is None and _light_text_label(widget):
         _protect(widget)  # light text from the dark palette: no effect above may map it again
         visible_unchecked = False
@@ -3562,6 +3699,8 @@ def process(widget):
         if found:
             widget.setProperty(ISLAND_PROP, found)
             kind = found
+    if kind is None and _ui_text_widget(widget):
+        kind = "defringe"  # (see UI_TEXT_CLASSES)
     if kind == "ink" and widget.property(ISLAND_PROP) == "ink" and _light_faced_text_button(widget):
         # (found to paint light, by either look above: see BUTTON_INK)
         _dark_button_text(widget)

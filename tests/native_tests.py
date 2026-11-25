@@ -610,6 +610,24 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(b"".join(out), pixels([px for row in rows for px in row]),
                          "no text core beside them: a colored line and a swatch edge stay colored")
 
+    def test_defringe_keeps_colored_text_and_bars(self):
+        g, light = (40, 40, 40), (200, 200, 200)
+        green_left, green_right = (150, 200, 60), (60, 190, 150)  # green text's own ClearType edges: a flip
+        bar = [(60, 170, 100)] * 6 + [(230, 150, 40)] * 2  # a coverage bar: green, then orange
+        rows = [[g, green_left, green_right, g, g, g, g, g, g, g],
+                [g] + bar + [light]]  # (a light neutral right after the bar)
+        out = self.defringe(rows)
+        self.assertEqual(out[0], pixels(rows[0]), "colored text's edges add up to its color: kept")
+        self.assertEqual(out[1], pixels(rows[1]), "a run longer than text edges that adds up to a color: a bar, kept")
+
+    def test_defringe_grays_small_text_edges_across_letters(self):
+        g = (30, 30, 30)
+        warm, cool = (170, 120, 60), (60, 120, 170)  # small light text: edges running across letters, no core
+        run = [warm, cool] * 5
+        out = self.defringe([[g] + run + [g]])
+        mean = (117, 117, 117)  # (170 + 120 + 60) / 3, rounded
+        self.assertEqual(out[0], pixels([g] + [mean] * 10 + [g]))
+
 
 @unittest.skipIf(LIB is None, "native helper not built: run tools/build-native.ps1 (%s)" % DLL)
 class KeyedTests(unittest.TestCase):
