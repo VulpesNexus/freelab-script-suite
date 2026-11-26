@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 27
+#define FREELAB_HOOKS_VERSION 28
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -386,13 +386,41 @@ static int picked_target(const void *painter)
  * light pick, it fills the selected row navy (#2a3754) so that the sample shows; mapped, the row turned
  * pale (the owner's recording, a white pick). Light grounds (the rows' paper) are mapped as anywhere. */
 #define PICKED_DARK_GROUND_OKL 0.5
-static int picked_dark_ground(const void *painter, const qcolor *c)
+/* FontLab's two grounds for the selected row (pale behind a darker pick, navy behind a light one) are
+ * one color in dark mode: the navy is drawn as the pale one mapped (the owner's images 155 and 156,
+ * where the highlight changed shade with the pick). */
+#define PICKED_SELECTION_PALE 0xe9f0ffU
+#define PICKED_SELECTION_NAVY 0x2a3754U
+static int picked_dark_ground(const void *painter, const qcolor *c, qcolor *out)
 {
     double l, chroma;
+    uint32_t argb;
     if (!picked_target(painter))
         return 0;
-    oklab_of(painted_rgba(c) & 0xffffffU, &l, &chroma);
-    return l < PICKED_DARK_GROUND_OKL;
+    argb = painted_rgba(c);
+    if ((argb & 0xffffffU) == PICKED_SELECTION_NAVY) {
+        set_qcolor(out, (argb & 0xff000000U) | (map_qrgb(0xff000000U | PICKED_SELECTION_PALE) & 0xffffffU));
+        return 1;
+    }
+    oklab_of(argb & 0xffffffU, &l, &chroma);
+    if (l >= PICKED_DARK_GROUND_OKL)
+        return 0;
+    *out = *c;
+    return 1;
+}
+
+/* FontLab's sunken edge on a picked surface (the color field's and the opacity bar's #808080 line along
+ * their top and left), drawn in dark mode's frame color (the color slot's, PICKER_FRAME): mapped, the
+ * mid gray stays mid gray, a light edge on the dark window (the owner's image 154). */
+#define PICKED_FRAME_GRAY 0x808080U
+#define PICKED_FRAME_DARK 0x55555aU
+static int picked_frame(const void *painter, const qcolor *c, qcolor *out)
+{
+    uint32_t argb = painted_rgba(c);
+    if ((argb & 0xffffffU) != PICKED_FRAME_GRAY || !picked_target(painter))
+        return 0;
+    set_qcolor(out, (argb & 0xff000000U) | PICKED_FRAME_DARK);
+    return 1;
 }
 
 /* A brush set on a picked surface: drawn as it is, unless it is FontLab's interface gray. */
@@ -1048,7 +1076,7 @@ static void trace_pen(int hook, const void *painter, const void *in, const void 
         qcolor m;                                                     \
         const qcolor *use = c;                                        \
         hook_calls[index]++;                                          \
-        if (on_screen(painter) && !picked_dark_ground(painter, c) && map_qcolor(c, &m)) { \
+        if (on_screen(painter) && (picked_dark_ground(painter, c, &m) || map_qcolor(c, &m))) { \
             hook_changed[index]++;                                    \
             use = &m;                                                 \
         }                                                             \
@@ -1065,7 +1093,10 @@ static void w_set_pen_color(void *p, const qcolor *c)
     const qcolor *use = c;
     hook_calls[H_SET_PEN_COLOR]++;
     if (on_screen(p)) {
-        if ((!white_pen(c) || palette_light_color(c)) && !dark_on_badge(p, c) && map_qcolor(c, &m)) {
+        if (picked_frame(p, c, &m)) {
+            hook_changed[H_SET_PEN_COLOR]++;
+            use = &m;
+        } else if ((!white_pen(c) || palette_light_color(c)) && !dark_on_badge(p, c) && map_qcolor(c, &m)) {
             hook_changed[H_SET_PEN_COLOR]++;
             use = &m;
         }
@@ -1110,9 +1141,14 @@ static void w_set_pen(void *p, const void *pen)
     const void *use = pen;
     hook_calls[H_SET_PEN]++;
     if (on_screen(p)) {
-        qcolor c;
+        qcolor c, frame;
         qt_pen_color(pen, &c);
-        if (!dark_on_badge(p, &c))
+        if (qt_pen_is_solid(pen) && picked_frame(p, &c, &frame)) {
+            qt_pen_copy(&tmp, pen);
+            qt_pen_set_color(&tmp, &frame);
+            use = &tmp;
+            copied = 1;
+        } else if (!dark_on_badge(p, &c))
             use = mapped_pen(pen, &tmp, &copied);
     } else if (ink_target(p))
         use = ink_pen(pen, &tmp, &copied);

@@ -998,7 +998,11 @@ REGROUND_LIGHT_WIDGETS = ("FontPreviewWidget", "ActionOverlayList")  # (the clas
 # grays, and leave the samples' fills and pictures as they are (the owner, November 26, image 152: a black pick shown
 # white "feels like overreach"; images 150 and 151: white picks, white on the rows' white paper, came out hollow or not
 # at all). The list's rows are FontLab's own painting, so its viewport is hooked too, not inked.
-PICKED_WIDGETS = ("FontPreviewWidget",)
+PICKED_WIDGETS = ("FontPreviewWidget", "YColorBar", "YOpacityBar")
+# The color field and the opacity bar, left as FontLab paints them, kept its light look's sunken edge: a #808080 line
+# along their top and left, light on the dark window (the owner's image 154). Hooked as picked surfaces, their pictures
+# (the colors, the checkerboard) stay as they are and that line is drawn in dark mode's frame color.
+PICKED_BARS = ("YColorBar", "YOpacityBar")
 PICKED_LISTS = ("ActionOverlayList",)  # (by their viewports)
 
 
@@ -4504,6 +4508,9 @@ def process(widget):
         _set_effect(widget, _record(widget), "picker")
         _protect(widget)
         return
+    if name in PICKED_BARS and _native_hooked() and _picked_surface(widget):
+        _hook_island(widget)  # (color controls are left alone otherwise: see PICKED_BARS)
+        return
     if _freelab_text(widget):
         # A FreeLab tool's list, log, label, tab, or button, drawn by FreeLab from the dark palette: its text's
         # ClearType edges made gray by the defringe effect, which leaves every real color as drawn, so one that
@@ -5138,7 +5145,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 27
+HOOKS_VERSION = 28
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
