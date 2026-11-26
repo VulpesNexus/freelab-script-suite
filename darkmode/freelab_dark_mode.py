@@ -285,6 +285,7 @@ COLOR_SLIDER_PANELS = ("ColorPanel",)
 # Color pickers keep their swatch (the white "no color" slot included), but their button frame,
 # drawn white by the style, gets this thin dark border instead (appended to their own stylesheet).
 PICKER_FRAME = u"\nQtColorPicker { border: 1px solid #55555a; border-radius: 2px; background: transparent; }"
+PICKER_SWATCH_EDGE = "#1e1e1e"  # the border around a swatch that is not one flat color (a translucent color's checkerboard)
 # A picker draws its swatch at the left, about as wide as it is tall, inside a light frame of its own,
 # and a dark arrow after this gap: the "picker" effect maps all of it but the swatch's inside (the
 # frame on the swatch's side stayed white).
@@ -2493,7 +2494,13 @@ def _effect_classes():
                                 ring = dark_ring_image(image, inside)
                                 if ring is not None:
                                     painter.drawImage(offset, ring)
-                                border = (inside, _gui("QColor").fromRgba(image.pixel(probe_x, probe_y)))
+                                # the swatch's own color when it is flat; a translucent color shows a checkerboard,
+                                # whose border took one square's color (the owner's images 185 and 186): the frame's dark
+                                corners = set(image.pixel(x, y) for x in (inside.left(), inside.right())
+                                              for y in (inside.top(), inside.bottom()))
+                                flat = len(corners) == 1 and image.pixel(probe_x, probe_y) in corners
+                                border = (inside, _gui("QColor").fromRgba(image.pixel(probe_x, probe_y)) if flat
+                                          else _gui("QColor")(PICKER_SWATCH_EDGE))
                             painter.drawPixmap(inside.translated(offset), pixmap, inside)
                         # Around that square, only the light frame is mapped: a picker that paints its
                         # swatch at full height (the mark color's) keeps its color to the edges.
@@ -5255,7 +5262,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 39
+HOOKS_VERSION = 40
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 

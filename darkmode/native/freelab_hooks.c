@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 39
+#define FREELAB_HOOKS_VERSION 40
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -463,7 +463,8 @@ static int picked_dark_ground(const void *painter, const qcolor *c, qcolor *out)
  * their top and left), drawn in dark mode's frame color (the color slot's, PICKER_FRAME): mapped, the
  * mid gray stays mid gray, a light edge on the dark window (the owner's image 154). */
 #define PICKED_FRAME_GRAY 0x808080U
-#define PICKED_FRAME_DARK 0x55555aU
+#define PICKED_FRAME_DARK 0x292929U /* the panel's own: drawn as the slots' gray, it still read as a light edge
+                                     * (the owner's image 184, 2026-11-26) */
 static int picked_frame(const void *painter, const qcolor *c, qcolor *out)
 {
     uint32_t argb = painted_rgba(c);
