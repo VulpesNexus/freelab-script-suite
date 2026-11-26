@@ -2597,6 +2597,10 @@ def _effect_classes():
                                              QRect(edge.right(), edge.top(), 1, edge.height())):
                                     painter.fillRect(line, color)
                         return
+                    if kind == "crosses":  # a tab bar the hooks map: drawn as it is, dark mode's close crosses over it
+                        painter.drawPixmap(offset, pixmap)
+                        draw_tab_crosses(self, painter, pixmap, offset)
+                        return
                     if kind == "defringe":  # dark already (its stylesheet): only its text's fringes made gray
                         area = whole
                         if painter.hasClipping():
@@ -5443,7 +5447,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 46
+HOOKS_VERSION = 47
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
@@ -5751,13 +5755,14 @@ def _hook_island(widget):
     """Leave the island's painting to the hooks: no light look, no effect. Qt still draws its
     stylesheet and icons, which are darkened as any widget's."""
     first = widget.property(HOOKED_PROP) is None
-    if not (_class_name(widget) in DEFRINGED_ISLANDS and _record(widget).get("kind") == "defringe"):
+    overlay = _island_overlay(widget)
+    if not (overlay and _record(widget).get("kind") == overlay):
         _clear_effect(widget, _record(widget))  # an effect dark mode set before it was found in a hooked island
     widget.setProperty(HOOKED_PROP, True)
-    if _class_name(widget) in DEFRINGED_ISLANDS:
-        _set_effect(widget, _record(widget), "defringe")
-    elif NATIVE_GRAY_TEXT and not widget.inherits("QTabBar"):  # (tab titles keep ClearType: see TITLE_TEXT_STRATEGY)
-        _gray_text(widget)
+    if overlay:
+        _set_effect(widget, _record(widget), overlay)
+    if overlay != "defringe" and NATIVE_GRAY_TEXT and not widget.inherits("QTabBar"):
+        _gray_text(widget)  # (tab titles keep ClearType: see TITLE_TEXT_STRATEGY)
     _protect(widget)  # dark as it is painted: an effect around it (the font window's ink) must not map it again
     _darken_sheet(widget)
     _darken_icons(widget)
@@ -5788,6 +5793,18 @@ def _hook_island(widget):
 # the R on its disc faint (the owner's image 199, 2026-11-27: "passable, but leaves much to be desired"). ClearType alone
 # had its blue and brown edges read as breaks in the letters (image 148).
 DEFRINGED_ISLANDS = ("CIconView",)
+
+def _island_overlay(widget):
+    """The effect a hooked island also gets, drawn over the hooks' mapping, or None: "defringe" (DEFRINGED_ISLANDS), or
+    "crosses" for a tab bar with close crosses. The document tabs' cross dark mode draws (its fading, its highlight on
+    the cross, its square while held: draw_tab_crosses) was an effect's, and the native engine's tab bars had none:
+    FontLab's own cross came back (the owner's image 192, 2026-11-27: "not as good as what you built yesterday")."""
+    if _class_name(widget) in DEFRINGED_ISLANDS:
+        return "defringe"
+    if widget.inherits("QTabBar") and _prop(widget, "tabsClosable"):
+        return "crosses"
+    return None
+
 
 FRAME_KINDS = ("title", "keyed")  # the panels (TITLE_CLASSES) and the dock (KEYED_CLASSES)
 

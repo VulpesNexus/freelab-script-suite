@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 46
+#define FREELAB_HOOKS_VERSION 47
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -320,6 +320,7 @@ static int64_t hook_changed[H_COUNT];
 #define CANVAS_MAX 64
 static uintptr_t canvas_widgets[CANVAS_MAX];
 static int canvas_count, canvas_paint; /* canvas_paint: the painter screen_mode last looked at is on a canvas */
+static int test_canvas; /* the self-test only: an image painter counts as on a canvas */
 static double canvas_dark_l = -1.0, canvas_paper_l = 2.0;
 #define CANVAS_NEUTRAL_CHROMA 0.02
 #define MAP_DARK_L (canvas_paint && canvas_dark_l >= 0.0 ? canvas_dark_l : hook_dark_l)
@@ -398,8 +399,10 @@ static int screen_mode(const void *painter)
     type = ((int (*)(const void *))((void ***)device)[0][1])(device);
     if (type <= 0 || type >= 32 || !((map_devices >> type) & 1U))
         return 0;
-    if (type != DEVICE_WIDGET)
+    if (type != DEVICE_WIDGET) {
+        canvas_paint = test_canvas; /* (the self-test's images, standing for a canvas: freelab_hooks_test_canvas) */
         return SCREEN_PLAIN;
+    }
     if ((!keep_count || !kept_widget(device)) && !frame_widget(device))
         return 0; /* not one of the hooked surfaces: the script engine's */
     canvas_paint = canvas_count && in_sorted(canvas_widgets, canvas_count, (uintptr_t)device - QPAINTDEVICE_IN_QWIDGET);
@@ -1633,7 +1636,9 @@ static void w_set_brush(void *p, const void *brush)
 {
     int style = qt_brush_style(brush);
     note_badge(p, hooks_on && style == BRUSH_SOLID && badge_color(qt_color_rgba(qt_brush_color(brush))));
-    note_dark_box(p, hooks_on && style == BRUSH_SOLID && on_screen(p) && !picked_brush(p, brush)
+    /* (on the glyph canvases only, where the caption's box is: a tab bar's hover highlight, #606060, was taken for one,
+     * and the next tab's name came out black: the owner's image 192, 2026-11-27) */
+    note_dark_box(p, hooks_on && style == BRUSH_SOLID && on_screen(p) && canvas_paint && !picked_brush(p, brush)
                      && dark_box_color(qt_brush_color(brush)));
     note_light_box(p, brush, hooks_on && style == BRUSH_SOLID && on_screen(p) && !picked_brush(p, brush));
     note_warning(p, hooks_on && style == BRUSH_SOLID && on_screen(p) && canvas_paint
@@ -2489,6 +2494,11 @@ EXPORT int freelab_hooks_test_bind(uint8_t *qtgui, uint8_t *qtwidgets, double da
 EXPORT void *freelab_hooks_test_wrapper(int index)
 {
     return index >= 0 && index < H_COUNT ? wrappers[index] : 0;
+}
+
+EXPORT void freelab_hooks_test_canvas(int on)
+{
+    test_canvas = on;
 }
 
 EXPORT void freelab_hooks_test_devices(uint32_t mask)
