@@ -89,9 +89,11 @@ Every FontLab call of the tool is a method of `FontLabCalls`, each with a docstr
 
 - `setGlyphComponents` on a layer that also gets contours (live, 2026-11-26, on scratch layers of a test font): it replaces every shape of the layer, so contours added before it are lost (*O*'s two contours, then an *acute* component: the acute alone), while contours added after it stay (the acute and the two contours). The assembly sets a glyph's components first and copies its contours after (`set_components`, then `copy`), so a glyph of both keeps both.
 
+- The other formats through `requestLoadingFont` (live, 2026-11-26, each opened in the background within 8 s and closed unchanged): a UFO (1,374 glyphs, written by `fgPackage.save`), a VFB (written by `fgPackage.save(path, True)`), a WOFF (Amatic SC, 850 glyphs, made with fontTools), and an OpenType CFF font (Oliver, 28 glyphs), each giving its file as `path`, with its masters and family name read as from a TrueType file.
+
 Not yet proven:
 
-- The other formats through `requestLoadingFont` (OpenType CFF, WOFF, Type 1, UFO, *.vfc*), and whether each gives its file as `path`.
+- Type 1 and *.vfc* through `requestLoadingFont`: no Type 1 font was at hand, and FontLab writes a *.vfc* only through *File > Save As*, which asks for its file on screen (`fgPackage.save` writes a UFO, or a VFB with True).
 - How long reading and assembling take on four static fonts of a few thousand glyphs, and on a CJK family (two fonts of 777 glyphs: under a minute, the comparison included).
 
 ## The crash check, live (2026-11-19)
