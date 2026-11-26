@@ -3487,8 +3487,14 @@ class WhatsThisTests(unittest.TestCase):
         self.assertIn(u"two steps", page.build_button.whats)
         self.assertNotIn(u"one step", page.build_button.whats)
         self.assertIn(u"the count beside the search field", page.build_button.whats)
-        self.assertIn(u"<i>Vary turned and mirrored glyphs</i> back to their defaults", page.restore_button.whats)
+        self.assertIn(u"<i>Vary turned and mirrored glyphs</i> and <i>Thicker strokes for small capitals</i> off",
+                      page.restore_button.whats)
         self.assertIn(u"widths", page.restore_button.whats)
+        # Thicker strokes for small capitals (2026-11-27): offered, the table's small-capital rule being clear, with
+        # the corpus's figure in its help, under Vary and shown with it
+        self.assertIsNotNone(page.thicken_box)
+        self.assertIn(u"no longer follows its capital", page.thicken_box.whats)
+        self.assertIn(u"1.31 times", page.thicken_box.whats)
         self.assertIn(u"not an exact copy of its source", page.vary_box.whats)
         self.assertNotIn(u"carbon", page.vary_box.whats)
         dialog, made = self.build()  # (a module that will not load: the tab says why, once)

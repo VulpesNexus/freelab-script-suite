@@ -9,8 +9,10 @@ abbreviations of the CJK Compatibility blocks, 206 starting points: SQUARED, squ
 decompositions, the Kangxi radicals, the telegraph symbols, the Roman numerals, and the parenthesized and
 numbered forms: COMPAT_GROUPS; then the next scope of 2026-11-24, from the table: the superscript and subscript
 signs and letters, the signs made of letters, the circled figures and letters, the full-width forms, and, as
-starting points, the small capitals, the letters with bars, the small kana, and the half-width forms) that it can make
-of the glyphs the font has, and builds the checked ones in every master, as one step of FontLab's History.
+starting points, the small capitals, the letters with bars, the small kana, and the half-width forms; then what that
+scope left, 2026-11-27: the circled, parenthesized, and half-width Hangul, the parenthesized ideographs, the
+half-width signs, the kanbun annotation marks, and the per mille sign, with Thicker strokes for small capitals) that
+it can make of the glyphs the font has, and builds the checked ones in every master, as one step of FontLab's History.
 A character whose glyph the font has empty (a CID-keyed font keeps one for each character of its
 collection) is listed as one it lacks, and its glyph filled when built (Row.filled). A
 turned or reversed letter is said "likely usable as it is" where the font's design measures monoline
@@ -34,7 +36,9 @@ scope, form (the font's own drawn superior, inferior, or small capital, a compon
 or lowered, as Feature Code places its small figures), scaled (letters scaled side by side: the trade mark sign),
 numero (N, a raised o, the hyphen under it), over (care of: letters about the fraction slash), circle (the font's
 ring and a scaled character in it), cell (a character in a full-width or half-width cell, or a small kana),
-smallcap (a capital scaled to the x-height), and bar (a letter and the hyphen drawn across it, as a dash is drawn).
+smallcap (a capital scaled to the x-height, its outlines thickened where Thicker strokes for small capitals is
+ticked), bar (a letter and the hyphen drawn across it, as a dash is drawn), paren (parentheses and a character
+scaled into a full-width cell), and permille (the percent sign, and its lower ring copied as outlines at its right).
 
 A recipe may use a glyph this list builds (two right single quotes make the right double quote):
 the list builds that one first, and the row says so. Nothing is replaced unless the row says so:
@@ -351,8 +355,13 @@ RINGS = ("25EF", "25CB", "20DD")  # a circled glyph's ring, the first the font h
 # the combining enclosing circle
 RING_KEPT = 0.05  # a ring within this share of the corpus's diameter is used at its own size (its stroke kept)
 NARROWED = 0.9  # a sign whose corpus's letters are narrower than this share of their scaled width is set narrowed
-SCALING_OPS = ("script", "scaled", "numero", "over", "circle", "cell", "smallcap")  # (the row says scaling thins)
+SCALING_OPS = ("script", "scaled", "numero", "over", "circle", "cell", "smallcap", "paren")  # (the row says scaling
+# thins)
 SCALED_NOTE = u"scaling thins its strokes"
+THICKENED_NOTE = u"outlines with thickened strokes: it no longer follows its source"
+PICKED_NOTE = u"its third ring is outlines, a copy of the lower ring: it no longer follows it"
+THICKEN_KEY = "thicken_smallcaps"  # (Thicker strokes for small capitals, in Glyph Compose's settings file)
+THICKEN_LABEL = u"Thicker strokes for small capitals."
 
 
 def square_kind(parts):
@@ -621,6 +630,77 @@ def monoline_measures(polygons_of, glyph_of):
     return found
 
 
+def filled_runs(polygons, at):
+    """[(start, end)] of the ink along the horizontal line y = at, by the nonzero rule (overlapping contours, as a
+    variable font keeps them, count once): the edges crossing it, each with its direction, swept left to right."""
+    found = []
+    for polygon in polygons:
+        count = len(polygon)
+        for index in range(count):
+            (x0, y0), (x1, y1) = polygon[index], polygon[(index + 1) % count]
+            if (y0 <= at < y1) or (y1 <= at < y0):
+                found.append((x0 + (at - y0) * (x1 - x0) / (y1 - y0), 1 if y1 > y0 else -1))
+    found.sort()
+    runs, winding, start = [], 0, None
+    for x, direction in found:
+        was = winding
+        winding += direction
+        if not was and winding:
+            start = x
+        elif was and not winding and start is not None:
+            runs.append((start, x))
+    return runs
+
+
+STEM_HEIGHTS = (0.25, 0.5, 0.75)  # where a glyph's stems are read, as shares of its ink's height
+
+
+def stem_width(polygons):
+    """A glyph's stem: the median length of its ink's runs across it at a quarter, half, and three quarters of
+    its height (H's two stems at a quarter and three quarters outnumber its bar at half; n's stems, o's sides),
+    in its own units; None where it has no ink. The corpus's stems are read so too (compose/train)."""
+    box = box_of(polygons)
+    if box is None:
+        return None
+    runs = sorted(end - start for share in STEM_HEIGHTS
+                  for start, end in filled_runs(polygons, box[1] + share * (box[3] - box[1])) if end > start)
+    return runs[len(runs) // 2] if runs else None
+
+
+def ring_split(polygons, rings=2):
+    """(slash, [(outer, counter)] upper ring first, then the others left to right) of a percent sign's contours
+    (polygons, by index), or (None, why): a slash and rings, each ring an outer contour and the one counter inside
+    it about the same middle, and nothing else (% has 5 contours, ‰ 7). A design whose rings are joined to its
+    slash, or that is drawn otherwise, does not split so."""
+    count = len(polygons)
+    if count != 2 * rings + 1:
+        return None, u"its %s do not split into a slash and %d rings (an outer contour and a counter each: %d)" % (
+            counted(count, u"contour"), rings, 2 * rings + 1)
+    boxes = [box_of([polygon]) for polygon in polygons]
+    area = lambda b: (b[2] - b[0]) * (b[3] - b[1])  # noqa: E731
+    middle = lambda b: ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0)  # noqa: E731
+    pairs, used = [], set()
+    for outer in sorted(range(count), key=lambda i: -area(boxes[i])):
+        if outer in used:
+            continue
+        ob = boxes[outer]
+        size = max(ob[2] - ob[0], ob[3] - ob[1])
+        inner = [i for i in range(count) if i != outer and i not in used and boxes[i][0] >= ob[0] and
+                 boxes[i][1] >= ob[1] and boxes[i][2] <= ob[2] and boxes[i][3] <= ob[3] and
+                 abs(middle(boxes[i])[0] - middle(ob)[0]) < 0.2 * size and
+                 abs(middle(boxes[i])[1] - middle(ob)[1]) < 0.2 * size]
+        if len(inner) == 1:
+            pairs.append((outer, inner[0]))
+            used.update((outer, inner[0]))
+    rest = [i for i in range(count) if i not in used]
+    tallest = max([boxes[o][3] - boxes[o][1] for o, _ in pairs] or [0])
+    if len(pairs) != rings or len(rest) != 1 or boxes[rest[0]][3] - boxes[rest[0]][1] <= tallest:
+        return None, u"its contours do not split into a slash and %d rings (an outer contour and a counter each): " \
+                     u"its rings may be joined to the slash" % rings
+    pairs.sort(key=lambda pair: -middle(boxes[pair[0]])[1])
+    return (rest[0], pairs[:1] + sorted(pairs[1:], key=lambda pair: middle(boxes[pair[0]])[0])), None
+
+
 def likely_usable(measures, rule, kind):
     """Whether a turned (kind "turn") or mirrored ("mirror") letter of a design so measured may be used
     as it is: every measure under the corpus's threshold (rule) that counts for it."""
@@ -636,16 +716,42 @@ def likely_usable(measures, rule, kind):
 
 class Part(object):
     """A glyph placed in another: name, its transform, and for a stretched dash (split, amount): its
-    nodes right of split (in its own units) moved by amount before the transform."""
+    nodes right of split (in its own units) moved by amount before the transform; for some of its contours
+    only (pick: a box in its own units, the contours inside it: the per mille sign's third ring); for its
+    outlines thickened (offset: how far each side of a stroke moves out, in the new glyph's units, Feature
+    Code's Strokes offsetting). Any of the three makes the part outlines, not a component."""
 
-    def __init__(self, name, matrix=IDENTITY, stretch=None):
+    def __init__(self, name, matrix=IDENTITY, stretch=None, pick=None, offset=None):
         self.name, self.matrix, self.stretch = name, tuple(float(v) for v in matrix), stretch
+        self.pick, self.offset = pick, offset
+
+    @property
+    def outline(self):
+        return self.stretch is not None or self.pick is not None or self.offset is not None
 
     def moved(self, matrix):
-        return Part(self.name, compose(matrix, self.matrix), self.stretch)
+        return Part(self.name, compose(matrix, self.matrix), self.stretch, self.pick, self.offset)
 
     def __repr__(self):
-        return "Part(%r, %r, %r)" % (self.name, self.matrix, self.stretch)
+        return "Part(%r, %r, %r, %r, %r)" % (self.name, self.matrix, self.stretch, self.pick, self.offset)
+
+
+def picked(polygons, pick):
+    """The indices of the polygons (a glyph's contours) a pick box holds: each one's middle inside it, and its box
+    within it but for a quarter of its size (a curve's handles may stand out of its ink)."""
+    if pick is None:
+        return []
+    reach = 0.25 * max(pick[2] - pick[0], pick[3] - pick[1])
+    found = []
+    for index, polygon in enumerate(polygons):
+        box = box_of([polygon])
+        if box is None:
+            continue
+        cx, cy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
+        if pick[0] <= cx <= pick[2] and pick[1] <= cy <= pick[3] and box[0] >= pick[0] - reach and \
+                box[1] >= pick[1] - reach and box[2] <= pick[2] + reach and box[3] <= pick[3] + reach:
+            found.append(index)
+    return found
 
 
 class Layout(object):
@@ -823,7 +929,7 @@ def component_names(layout):
     empty glyph point to nothing."""
     if layout is None or layout.kind != "components":
         return []
-    return [part.name for part in layout.parts if part.stretch is None]
+    return [part.name for part in layout.parts if not part.outline]
 
 
 def component_loop(name, parts, components_of):
@@ -892,15 +998,24 @@ class Font(object):
         """Whether the font has ideographs (a kana-only Japanese font has CJK, not these)."""
         return any(low <= code <= high for code in self.codes() for low, high in HAN_RANGES)
 
+    def has_hangul(self):
+        """Whether the font has Hangul syllables (a Japanese Noto has the compatibility jamo, not these)."""
+        return any(0xAC00 <= code <= 0xD7A3 for code in self.codes())
+
+    def has_jamo(self):
+        """Whether the font has Hangul compatibility jamo (U+3131 to U+318E)."""
+        return any(0x3131 <= code <= 0x318E for code in self.codes())
+
 
 class Planner(object):
     """The rows of the list for a font, and each row's layout in one of its masters. codes: the characters to
     list (Font Check's hand-over), else every one; planned against the whole table all the same, so that a
     character built of another the font lacks (‟ of two ‛) is built as the table builds it (prerequisites)."""
 
-    def __init__(self, data, font, settings=None, include_existing=False, codes=None, vary=None):
+    def __init__(self, data, font, settings=None, include_existing=False, codes=None, vary=None, thicken=False):
         self.data, self.font = data, font
         self.vary = vary  # (Vary turned and mirrored glyphs: deformer's vary, else None)
+        self.thicken = thicken  # (Thicker strokes for small capitals: thickened_rule's figures, where clear)
         self.settings = settings_of(data, settings)
         self.rules = data.get("rules") or {}
         self.include_existing = include_existing
@@ -1179,6 +1294,12 @@ class Planner(object):
         return self.font.box(name, matrix)
 
     def part_box(self, part):
+        if part.pick is not None:  # (some of its contours: their box, as the pick holds them)
+            return box_through(part.pick, part.matrix)
+        if part.offset is not None:  # (thickened: its ink grown by the offset on every side)
+            own = self.box(part.name, part.matrix)
+            d = float(part.offset)
+            return None if own is None else (own[0] - d, own[1] - d, own[2] + d, own[3] + d)
         if part.stretch is None:
             return self.box(part.name, part.matrix)
         own = self.box(part.name)
@@ -1640,10 +1761,80 @@ class Planner(object):
             raise Need(u"the recipe table has no figures for it: reinstall FreeLab")
         if box[3] <= 0:
             raise Need(u"%s has no ink over the baseline" % name)
-        scale = float(rule["top/x-height"]) * float(self.font.x_height) / float(box[3])
+        target = float(rule["top/x-height"]) * float(self.font.x_height)
+        ratio = thickened_rule(self.rules, u"smallcap") if self.thicken else None
+        stem = stem_width(self.font.polygons(name)) if ratio else None
+        tall = box[3] - box[1]
+        if ratio and stem and tall > ratio * stem:
+            # Thicker strokes for small capitals: the capital scaled, then its outlines offset by d on every side
+            # (Feature Code's Strokes), the offset multiplier k chosen so that, measured as the corpus was (stems
+            # against the capital's scaled to the small capital's ink height), its stems are ratio times the scaled
+            # ones; scaled so that its top, offset, is at the x-height, raised by d so that it stays on the baseline
+            k = ratio * (tall - stem) / (tall - ratio * stem)
+            scale = target / (box[3] + stem * (k - 1.0))
+            d = scale * stem * (k - 1.0) / 2.0
+            new = round(advance * scale * float(rule["width"]) + 2 * d)
+            out = Layout([Part(name, (scale, 0.0, 0.0, scale, round((new - advance * scale) / 2.0), round(d)),
+                               offset=round(d, 2))], new)
+            out.words = u"%s at %s, as tall as the x-height, its strokes thickened" % (name, percent(scale))
+            return out
+        scale = target / float(box[3])
         new = round(advance * scale * float(rule["width"]))
         out = Layout([Part(name, (scale, 0.0, 0.0, scale, round((new - advance * scale) / 2.0), 0.0))], new)
         out.words = u"%s at %s, as tall as the x-height" % (name, percent(scale))
+        return out
+
+    def op_paren(self, way, row, stack, needs):
+        """A parenthesized Hangul letter, syllable, word, or ideograph: the parentheses ( ) scaled and set at the
+        corpus's places in a full-width cell, and the content scaled between them (two syllables side by side,
+        narrowed as the corpus narrows them), its ink's middle where the corpus puts it."""
+        rules = self.rules.get("parenthesized") or {}
+        rule = rules.get(way["class"]) or self.rule("parenthesized", u"ideograph")
+        (left, lb, _), (right, rb, _) = [self.inked(hex_, stack, needs) for hex_ in (u"0028", u"0029")]
+        sources = [self.inked(hex_, stack, needs) for hex_ in way["of"]]
+        advance = self.em_width() * float(rule.get("advance/em", 1.0))
+        up, wide = float(rule["paren up"]), float(rule["paren across"])
+        y = self.em(float(rule["paren y"]))
+        parts = []
+        for name, box, share in ((left, lb, rule["left x share"]), (right, rb, rule["right x share"])):
+            parts.append(Part(name, (wide, 0.0, 0.0, up, round(float(share) * advance - wide * (box[0] + box[2]) / 2.0),
+                                     round(y - up * (box[1] + box[3]) / 2.0))))
+        scale = float(rule["scale"])
+        across = scale * min(1.0, float(rule.get("squeeze", 1.0))) if len(sources) > 1 else scale
+        placed, x = [], 0.0
+        for name, box, own in sources:  # (side by side at their own advances, before they are scaled)
+            placed.append((name, box, x))
+            x += own
+        ink = union([(across * (box[0] + at), scale * box[1], across * (box[2] + at), scale * box[3])
+                     for _, box, at in placed])
+        dx = round(float(rule["content x share"]) * advance - (ink[0] + ink[2]) / 2.0)
+        dy = round(self.em(float(rule["content y"])) - (ink[1] + ink[3]) / 2.0)
+        content = [Part(name, (across, 0.0, 0.0, scale, dx + round(across * at), dy)) for name, _, at in placed]
+        out = Layout(parts[:1] + content + parts[1:], round(advance))
+        out.words = u"%s at %s between %s and %s, in a full-width cell" % (
+            u" + ".join(name for name, _, _ in placed), percent(scale), left, right)
+        return out
+
+    def op_permille(self, way, row, stack, needs):
+        """The per mille sign: the font's percent sign as it is, and its lower ring (an outer contour and its
+        counter) again at its right, as far from it as the corpus's per mille signs set their two lower rings (a
+        share of the ring's width), the advance grown by as much; only where the percent sign's contours split
+        into a slash and two rings (ring_split): a design whose rings are joined to the slash does not."""
+        name = self.font.glyph_of(int(way["of"], 16))
+        if name is None:
+            raise Need(u"needs %s" % self.describe(way["of"]), way["of"])
+        self.drawn(name)
+        polygons = self.font.polygons(name)
+        split, why = ring_split(polygons, 2)
+        if split is None:
+            raise Need(u"%s: %s" % (name, why))
+        rule = self.rules.get("permille") or {}
+        if "gap/ring" not in rule:
+            raise Need(u"the recipe table has no figures for it: reinstall FreeLab")
+        lower = box_of([polygons[split[1][1][0]]])  # (the lower ring's outer contour)
+        step = round((lower[2] - lower[0]) * (1.0 + float(rule["gap/ring"])))
+        out = Layout([Part(name), Part(name, translation(step, 0), pick=lower)], self.advance(name) + step)
+        out.words = u"%s, and its lower ring again %s to the right" % (name, counted(int(step), u"unit"))
         return out
 
     def op_bar(self, way, row, stack, needs):
@@ -1697,10 +1888,23 @@ def cell_kind(group, hex_, source_hex, category):
         return u"letter" if category.startswith(u"L") else u"figure" if category == u"Nd" else u"sign"
     if group == u"halfwidth":
         source = int(source_hex, 16)
+        if source in HALF_SYMBOLS:
+            return u"symbol"
         return u"mark" if source in (0x3099, 0x309A, 0x309B, 0x309C) else u"kana" if 0x30A0 <= source <= 0x30FF \
             else u"sign"
     code = int(hex_, 16)
     return u"hiragana" if code < 0x30A0 else u"katakana" if code < 0x3100 else u"extension"
+
+
+HALF_SYMBOLS = (0x2502, 0x2190, 0x2191, 0x2192, 0x2193, 0x25A0, 0x25CB)  # (U+FFE8 to U+FFEE's sources)
+
+
+def thickened_rule(rules, kind):
+    """How much thicker the corpus's drawn forms of a kind ("smallcap") are than their source scaled (their stems'
+    ratio, the families' median), where the measure gave a clear rule (the table's "strokes": enough families,
+    nearly all thicker, their middle half narrow); else None: no option is offered for that kind."""
+    found = ((rules or {}).get("strokes") or {}).get(kind) or {}
+    return float(found["median"]) if found.get("clear") and found.get("median") else None
 
 
 def build_order(rows):
@@ -1815,9 +2019,13 @@ def note_text(row, needs_built=()):
         notes.append(u"no new glyph")
     if row.layout is not None and row.layout.kind == "mirrored":
         notes.append(u"outlines, contours set right")
-    if row.layout is not None and (row.way or {}).get("op") in SCALING_OPS and any(
+    if row.layout is not None and any(part.offset is not None for part in row.layout.parts):
+        notes.append(THICKENED_NOTE)  # (Thicker strokes for small capitals: outlines, no longer its source's)
+    elif row.layout is not None and (row.way or {}).get("op") in SCALING_OPS and any(
             part.matrix[0] < 0.99 or part.matrix[3] < 0.99 for part in row.layout.parts):
         notes.append(SCALED_NOTE)  # (made smaller, as Feature Code says of its scaled small figures)
+    if row.layout is not None and any(part.pick is not None for part in row.layout.parts):
+        notes.append(PICKED_NOTE)
     if row.layout is not None and row.layout.varied:  # (Vary turned and mirrored glyphs)
         seed, strength = row.layout.varied
         notes.append(u"varied (seed %d, %s)%s" % (seed, strength.lower(), u"" if row.layout.kind == "mirrored" else
@@ -2047,7 +2255,7 @@ def flat_parts(package, master, parts, depth=4):
     lands on a glyph of outlines (its corrected glyph is made of those)."""
     out = []
     for part in parts:
-        if linear(part.matrix) == linear(IDENTITY) or part.stretch is not None or depth <= 0:
+        if linear(part.matrix) == linear(IDENTITY) or part.outline or depth <= 0:
             out.append(part)
             continue
         glyph = package.findName(part.name)
@@ -2097,6 +2305,44 @@ def stretched_shape(fontlab, fc, package, master, part):
             x, y = mapped(matrix, float(node.x), float(node.y))  # (in the source glyph's own units)
             x = x + amount if x > split else x
             x, y = mapped(part.matrix, x, y)
+            fc.place_node(node, x, y)
+        clones.append(clone)
+    shape = fontlab.flShape()
+    shape.addContours(clones, True)
+    return shape
+
+
+def outline_shape(fontlab, fc, package, master, part):
+    """A part that is outlines, as a new shape: a dash drawn longer (stretched_shape), some of a glyph's contours
+    (part.pick: those it holds, placed by the part's transform: the per mille sign's third ring), or a glyph's
+    outlines thickened (part.offset: placed by the transform, then each contour offset outward by Feature Code's
+    own offset_contour, the outside told by its largest contour's direction, as its Strokes does). Clones of the
+    contours given their nodes' places, as stretched_shape makes them."""
+    if part.stretch is not None:
+        return stretched_shape(fontlab, fc, package, master, part)
+    contours = outline_contours(package, master, part.name)
+    if not contours:
+        raise WriteError(u"%s has no outline in master %s" % (part.name, master))
+    points = [[mapped(part.matrix, *mapped(matrix, float(node.x), float(node.y))) + (u"%s" % node.type == u"on",)
+               for node in contour.nodes()] for contour, matrix in contours]
+    if part.pick is not None:
+        own = [[mapped(matrix, float(node.x), float(node.y)) for node in contour.nodes()] for contour, matrix in contours]
+        chosen = picked(own, part.pick)
+        if not chosen:
+            raise WriteError(u"the contours of %s it is made of were not found in master %s" % (part.name, master))
+        places = [[(x, y) for x, y, _ in points[index]] for index in chosen]
+    else:
+        chosen = list(range(len(contours)))
+        biggest = max(points, key=lambda pts: abs(fc.signed_area(pts)))
+        right = fc.signed_area(biggest) > 0  # (its outer contour counterclockwise, y up: the outside is right)
+        places = [fc.offset_contour(pts, float(part.offset), right) for pts in points]
+    clones = []
+    for index, contour_places in zip(chosen, places):
+        clone = contours[index][0].clone()
+        nodes = clone.nodes()
+        if len(nodes) != len(contour_places):
+            raise WriteError(u"a contour of %s cloned with other nodes in master %s" % (part.name, master))
+        for node, (x, y) in zip(nodes, contour_places):
             fc.place_node(node, x, y)
         clones.append(clone)
     shape = fontlab.flShape()
@@ -2382,8 +2628,8 @@ def write_parts(fontlab, ak, fc, cm, package, master, layer, layout, corrected, 
     components, names, shapes = [], [], []  # (names: the components' glyphs; FontLab's GlyphComponent has no name)
     asked = []  # (each component's glyph and transform, as handed to FontLab: read back after)
     for part in flat_parts(package, master, layout.parts):
-        if part.stretch is not None:
-            shapes.append(stretched_shape(fontlab, fc, package, master, part))
+        if part.outline:  # (a dash drawn longer, a ring copied, or thickened outlines: a shape of its own)
+            shapes.append(outline_shape(fontlab, fc, package, master, part))
             continue
         name, values = part.name, part.matrix
         if is_mirror(values):
@@ -2612,6 +2858,26 @@ class GenerationPage(object):
         self.vary_seed.setToolTip(u"The same seed gives the same glyphs, another seed others.")
         vary_row.addWidget(self.vary_seed)
         vary_row.addStretch(1)
+        # Thicker strokes for small capitals, on a line of its own under Vary turned and mirrored glyphs (the preview
+        # shows what it changes; beside Vary, the line would widen the window): offered only where the table's
+        # corpus measure gave a clear rule (thickened_rule), off at first
+        thicken_row = QtGui.QHBoxLayout()
+        self.thicken_box = None
+        ratio = thickened_rule(self.data.get("rules"), u"smallcap")
+        if ratio:
+            found = ((self.data.get("rules") or {}).get("strokes") or {}).get("smallcap") or {}
+            thicken_help = (u"Builds the small capitals made of their capital scaled (not the font's own small capitals) "
+                            u"as outlines whose strokes are thickened as the corpus's drawn small capitals are: their "
+                            u"stems are %.2f times the scaled capital's (the median of %d families). The outlines are "
+                            u"offset evenly on both sides of each stroke, as Feature Code's <i>Strokes</i> does, and "
+                            u"still sit on the baseline with their top at the x-height. Such a glyph no longer follows "
+                            u"its capital when that is redrawn. Off at first." % (ratio + 1e-9, int(found.get("n", 0))))
+            # (1e-9: 1.305 is held as 1.30499..., which %.2f rounds down; the docs say 1.31)
+            self.thicken_box = cm.helped(QtGui.QCheckBox(THICKEN_LABEL), thicken_help)
+            self.thicken_box.setChecked(saved.get(THICKEN_KEY) is True)
+            thicken_row.addWidget(self.thicken_box)
+            thicken_row.addStretch(1)
+            self.thicken_box.connect("toggled(bool)", lambda on: self.thicken_changed())
         row.addStretch(1)
         self.search, self.search_label = owner.search_field(
             FIND_A_GLYPH, u"Shows only the rows whose glyph name, or the name of a glyph they are built from, holds "
@@ -2666,6 +2932,7 @@ class GenerationPage(object):
         pictures.addWidget(self.details, 1)
         showing.addLayout(pictures, 1)
         showing.addLayout(vary_row)
+        showing.addLayout(thicken_row)
         lower.addLayout(showing, 1)
         layout.addLayout(lower, 2)
         self.all_button = cm.helped(QtGui.QPushButton(cm.TICK_ALL), u"Ticks every row shown that can be built (rows "
@@ -2674,8 +2941,8 @@ class GenerationPage(object):
                                      u"keep their ticks).")
         self.value_button = cm.helped(QtGui.QPushButton(cm.TICK_HIGH_VALUE), cm.VALUE_BUTTON_HELP)
         self.restore_button = cm.helped(QtGui.QPushButton(u"Restore suggestions"), u"Puts every tick back as the "
-                                        u"list first came, and the four widths and <i>Vary turned and mirrored "
-                                        u"glyphs</i> back to their defaults.")
+                                        u"list first came, the four widths back to their defaults, and <i>Vary turned "
+                                        u"and mirrored glyphs</i> and <i>Thicker strokes for small capitals</i> off.")
         self.build_button = QtGui.QPushButton(cm.BUILD_TICKED)
         self.build_button.setWhatsThis(u"Adds each ticked glyph to the font with its Unicode value, in every master, as "
                                        u"its recipe says; a glyph made of others of this list is built after them. A "
@@ -2743,7 +3010,7 @@ class GenerationPage(object):
 
     def planner(self, font, ways=None, progress=None):
         planner = Planner(self.data, font, self.settings, bool(self.existing_box.checked), self.listed_codes(),
-                          self.vary_of(font))
+                          self.vary_of(font), self.thickened())
         planner.progress = progress
         planner.plan(ways)
         return planner
@@ -2757,6 +3024,25 @@ class GenerationPage(object):
         index = int(self.cm._property(self.vary_strength, "currentIndex"))
         key = self.vary_keys[index] if 0 <= index < len(self.vary_keys) else self.vary_keys[0]
         return deformer(self.alternates, int(self.cm._property(self.vary_seed, "value")), key, font.upm)
+
+    def thickened(self):
+        """Whether Thicker strokes for small capitals is ticked (offered: thicken_box)."""
+        box = getattr(self, "thicken_box", None)
+        return box is not None and bool(self.cm._property(box, "checked"))
+
+    def thicken_changed(self):
+        """Thicker strokes for small capitals ticked or unticked: kept in Glyph Compose's settings file, the list
+        planned again (nothing changes in the font)."""
+        try:  # (a signal's handler: nothing may escape to Qt)
+            try:
+                settings = self.owner.settings
+                settings.setdefault(SETTINGS_KEY, {})[THICKEN_KEY] = self.thickened()
+                self.cm.write_settings(self.ak, settings)
+            except Exception:
+                pass
+            self.run()
+        except Exception as exc:
+            self.owner.log.add(u"Could not thicken the small capitals: %s" % self.ak.html(exc), "error")
 
     def vary_changed(self):
         """Vary turned and mirrored glyphs, its strength, or its seed changed: kept in Glyph Compose's settings
@@ -3142,6 +3428,10 @@ class GenerationPage(object):
                 widget.blockSignals(True)
                 getattr(widget, setter)(value)
                 widget.blockSignals(False)
+        if getattr(self, "thicken_box", None) is not None:  # (Thicker strokes for small capitals off)
+            self.thicken_box.blockSignals(True)
+            self.thicken_box.setChecked(False)
+            self.thicken_box.blockSignals(False)
         try:
             self.owner.settings.pop(SETTINGS_KEY, None)
             self.cm.write_settings(self.ak, self.owner.settings)
@@ -3184,7 +3474,8 @@ class GenerationPage(object):
             widget = getattr(self, name, None)
             if widget is not None:
                 widget.setVisible(bool(on))
-        for widget in [getattr(self, name, None) for name in ("vary_box", "vary_strength", "vary_seed")] + list(
+        for widget in [getattr(self, name, None) for name in ("vary_box", "vary_strength", "vary_seed",
+                                                               "thicken_box")] + list(
                 getattr(self, "vary_labels", None) or []):
             if widget is not None:
                 widget.setVisible(bool(on))
@@ -3288,7 +3579,26 @@ class GenerationPage(object):
                 width = max(box.width(), 1e-6)
                 scale = (width + amount) / width
                 path = QtGui.QTransform(scale, 0, 0, 1, box.left() * (1 - scale), 0).map(path)
-        return QtGui.QTransform(*part.matrix).map(path)
+        if part.pick is not None:  # (the contours the pick holds: the per mille sign's third ring)
+            try:
+                polygons = [polygon_points(polygon) for polygon in path.toSubpathPolygons()]
+                some = QtGui.QPainterPath()
+                some.setFillRule(QtCore.Qt.WindingFill)
+                for index in picked(polygons, part.pick):
+                    some.addPolygon(QtGui.QPolygonF([QtCore.QPointF(x, y) for x, y in polygons[index]]))
+                    some.closeSubpath()
+                path = some
+            except Exception:
+                return None
+        path = QtGui.QTransform(*part.matrix).map(path)
+        if part.offset:  # (thickened: grown by the offset on every side, as the build offsets the outlines)
+            try:
+                stroker = QtGui.QPainterPathStroker()
+                stroker.setWidth(2.0 * float(part.offset))
+                path = path.united(stroker.createStroke(path))
+            except Exception:
+                pass
+        return path
 
     def picture(self, r, size, frame=False):
         """The row's glyph in the window's text color, size pixels per em; None where there is nothing."""
@@ -3384,7 +3694,7 @@ class GenerationPage(object):
                 continue
             try:
                 for part in flat_parts(package, master, layout.parts):
-                    if part.stretch is None and is_mirror(part.matrix):
+                    if not part.outline and is_mirror(part.matrix):
                         corrected(part.name, self.cm.mirror_axis(*part.matrix[:4]))
             except Exception:
                 pass  # (a mark with no outline there, a graph unreadable: the row's own write says so)

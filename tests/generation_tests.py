@@ -137,16 +137,17 @@ class TableTests(unittest.TestCase):
         entries = DATA["entries"]
         # (the table's, the squared words and abbreviations of report 177, and the compatibility characters of
         # 2026-11-18: 212 Kangxi radicals, 68 telegraph symbols, 32 Roman numerals, 66 parenthesized and numbered;
-        # then the next scope of 2026-11-24, 618 characters in the table: NextScopeTableTests)
-        self.assertEqual(len(entries), 250 + 618 + 206 + 378)
+        # then the next scope of 2026-11-24, 618 characters in the table: NextScopeTableTests; then what it left,
+        # 2026-11-27, 172: MoreScopeTableTests)
+        self.assertEqual(len(entries), 250 + 618 + 206 + 378 + 172)
         counts = dict((g["id"], g["count"]) for g in DATA["groups"])
-        self.assertEqual(counts, {"spaces": 18, "dashes": 10, "duplicates": 44, "punctuation": 28, "lookalikes": 52,
+        self.assertEqual(counts, {"spaces": 18, "dashes": 10, "duplicates": 44, "punctuation": 29, "lookalikes": 52,
                                   "ligatures": 17, "fractions": 20, "arrows": 20, "turned": 41, "squared": 206,
                                   "kangxi": 212, "telegraph": 68, "roman": 32, "enclosed": 66, "scripts": 154,
-                                  "signs": 8, "circled": 203, "fullwidth": 103, "smallcaps": 30, "bars": 17,
-                                  "smallkana": 40, "halfwidth": 63},
+                                  "signs": 8, "circled": 234, "fullwidth": 103, "smallcaps": 30, "bars": 17,
+                                  "smallkana": 40, "halfwidth": 122, "parenthesized": 67, "kanbun": 14},
                          "the arrows' and triangles' sources added (2026-11-16): built from what they make")
-        self.assertEqual(len(set(e["code"] for e in entries)), 250 + 618 + 206 + 378, "each character once")
+        self.assertEqual(len(set(e["code"] for e in entries)), 250 + 618 + 206 + 378 + 172, "each character once")
         turned = [e for e in entries if e["group"] == "turned"]
         self.assertTrue(all(any(w["confidence"] == "starting point" for w in e["ways"]) for e in turned),
                         "the turned and reversed letters are starting points")
@@ -2353,6 +2354,11 @@ class FullWidthCellTests(unittest.TestCase):
 # half-width forms, small capitals, letters with bars, small kana -------------------------------------------------
 
 NEXT_GROUPS = ("scripts", "signs", "circled", "fullwidth", "smallcaps", "bars", "smallkana", "halfwidth")
+# What the next scope left, added on 2026-11-27 (some to its groups: the circled Hangul, the half-width Hangul and
+# signs): MoreScopeTableTests
+MORE_CODES = set(e["code"] for e in DATA["entries"] if 0x3260 <= int(e["code"], 16) <= 0x327E or
+                 (e["group"] == "halfwidth" and int(e["code"], 16) >= 0xFFA0) or e["group"] in ("parenthesized", "kanbun") or
+                 e["code"] == "2030")
 # A bare font with what the next scope is made of: H of two stems and a bar (Hbar's bar crosses them), h and d with
 # their ascender apart (hbar's and dcroat's bar crosses it alone), T, M, S, E, o, c, u, C, F, the degree sign, and
 # the white circle (a ring 500 units across, its middle 350 up)
@@ -2382,7 +2388,9 @@ class NextScopeTableTests(unittest.TestCase):
     in the table (compose/train/generation_next.py)."""
 
     def entries(self, group=None):
-        return dict((e["code"], e) for e in DATA["entries"] if e["group"] in ((group,) if group else NEXT_GROUPS))
+        """The next scope's own entries (those of 2026-11-27 in its groups left out: MoreScopeTableTests)."""
+        return dict((e["code"], e) for e in DATA["entries"] if e["group"] in ((group,) if group else NEXT_GROUPS)
+                    and e["code"] not in MORE_CODES)
 
     def test_the_groups_and_their_ways(self):
         ops = set(name[3:] for name in dir(gg.Planner) if name.startswith("op_"))
@@ -2889,6 +2897,342 @@ class NextWriteTests(unittest.TestCase):
         self.assertEqual(gg.moved_words(1), u"raised 1 unit")
         self.assertEqual(gg.moved_words(-2), u"lowered 2 units")
         self.assertEqual(gg.moved_words(0), u"on the baseline")
+
+
+# -- What the next scope left (2026-11-27): the circled, parenthesized, and half-width Hangul, the parenthesized
+# ideographs, the half-width signs, the kanbun annotation marks, the per mille sign, and Thicker strokes for small
+# capitals (compose/train/generation_more.py) ---------------------------------------------------------------------
+
+# A percent sign of a slash and two rings (each an outer contour and a counter), and one whose rings are joined to
+# the slash (three contours)
+PERCENT = (0x25, 600, [rect(50, 400, 250, 700), rect(100, 450, 200, 650), [(100, 0), (160, 0), (500, 700), (440, 700)],
+                       rect(350, 0, 550, 300), rect(400, 50, 500, 250)], None)
+JOINED_PERCENT = (0x25, 600, [[(50, 0), (550, 0), (550, 700), (50, 700)], rect(100, 450, 200, 650),
+                              rect(400, 50, 500, 250)], None)
+HANGUL = {"kiyeok": (0x3131, 1000, [rect(200, 100, 750, 600)], None),
+          "ga": (0xAC00, 1000, [rect(100, -50, 900, 800)], None),
+          "oh": (0xC624, 1000, [rect(100, -50, 900, 800)], None),
+          "jeon": (0xC804, 1000, [rect(100, -50, 900, 800)], None),
+          "filler": (0x3164, 920, [], None),
+          "ichi": (0x4E00, 1000, [rect(60, 350, 940, 400)], None),
+          "arrowup": (0x2191, 1000, [rect(300, -80, 700, 840)], None),
+          "parenleft": (0x28, 300, [rect(80, -150, 220, 750)], None),
+          "parenright": (0x29, 300, [rect(80, -150, 220, 750)], None),
+          "uni25EF": (0x25EF, 1000, [rect(40, -80, 960, 840), rect(80, -40, 920, 800)], None),
+          "percent": PERCENT}
+
+
+def hangul_font(*left_out):
+    """kana_font with Hangul (a jamo, three syllables, the filler), 一, ↑, the parentheses, the large circle, and
+    the percent sign; left_out: names not in it."""
+    font = kana_font(more=HANGUL)
+    for name in left_out:
+        del font.glyphs[name]
+    return CidFont(font.glyphs)
+
+
+class MoreScopeTableTests(unittest.TestCase):
+    """The table's entries for what the next scope left, from Unicode's decompositions mapped to what fonts draw,
+    and the corpus's figures behind them."""
+
+    def entries(self):
+        return dict((e["code"], e) for e in DATA["entries"] if e["code"] in MORE_CODES)
+
+    def test_the_characters_and_their_ways(self):
+        import unicodedata
+        entries = self.entries()
+        self.assertEqual(len(entries), 31 + 67 + 52 + 7 + 14 + 1)
+        groups = {}
+        for code, entry in entries.items():
+            groups.setdefault(entry["group"], set()).add(code)
+        self.assertEqual(dict((g, len(c)) for g, c in groups.items()),
+                         {"circled": 31, "parenthesized": 67, "halfwidth": 59, "kanbun": 14, "punctuation": 1})
+        self.assertEqual(entries["3260"]["ways"], [{"op": "circle", "of": ["3131"], "class": "jamo",
+                                                    "confidence": "starting point", "only": "jamo"}],
+                         u"㉠: the compatibility jamo, not the conjoining one Unicode decomposes it to")
+        self.assertEqual(entries["326E"]["ways"][0]["of"], ["AC00"], u"㉮: 가, the syllable its jamo compose")
+        self.assertEqual(entries["327C"]["ways"][0]["of"], ["CC38", "ACE0"], u"㉼: 참고, two syllables")
+        self.assertEqual(entries["327C"]["ways"][0]["class"], "word")
+        self.assertEqual(entries["327E"]["ways"][0]["of"], ["C6B0"], u"㉾: 우")
+        self.assertEqual(entries["3200"]["ways"][0], {"op": "paren", "of": ["3131"], "class": "jamo",
+                                                      "confidence": "starting point", "only": "jamo"})
+        self.assertEqual(entries["321D"]["ways"][0]["of"], ["C624", "C804"], u"㈝: 오전")
+        self.assertEqual(entries["3220"]["ways"][0], {"op": "paren", "of": ["4E00"], "class": "ideograph",
+                                                      "confidence": "starting point", "only": "han"})
+        self.assertNotIn("321F", entries, "unassigned")
+        self.assertEqual(entries["FFA1"]["ways"], [{"op": "shared", "of": "3131", "confidence": "accepted",
+                                                    "only": "jamo"}],
+                         "a second code point on the compatibility jamo, as 12 of the 14 families with them give it")
+        self.assertEqual([w["advance_of"] for w in entries["FFA0"]["ways"]], ["3164", "3131"])
+        self.assertEqual(entries["FFEE"]["ways"][0], {"op": "cell", "of": "25CB", "cell": "halfwidth",
+                                                      "confidence": "starting point", "only": "cjk"})
+        self.assertEqual(entries["3196"]["ways"], [{"op": "copy", "of": "4E0A", "confidence": "starting point",
+                                                    "only": "han"}], u"㆖: 上 at its own size")
+        self.assertEqual(entries["2030"]["ways"], [{"op": "permille", "of": "0025", "confidence": "starting point"}])
+        self.assertEqual(entries["2030"]["glyph_name"], u"perthousand")
+        for code, entry in entries.items():
+            for way in entry["ways"]:
+                for part in way["of"] if isinstance(way.get("of"), list) else [way.get("of") or way.get("advance_of")]:
+                    self.assertIn(part, DATA["characters"], "named for the notes: %s of %s" % (part, code))
+            if sys.version_info[0] >= 3:
+                self.assertTrue(unicodedata.decomposition(u(int(code, 16))) or code == "2030", code)
+
+    def test_the_corpus_figures(self):
+        rules = DATA["rules"]
+        self.assertEqual(DATA["more_scope"]["families"], 667)
+        for key, families in (("cjk jamo", 28), ("cjk syllable", 20), ("cjk word", 5)):
+            self.assertGreaterEqual(rules["circled"][key]["families"], families, key)
+        self.assertLess(rules["circled"]["cjk word"]["squeeze"], 0.8, u"㉼: two syllables narrowed")
+        paren = rules["parenthesized"]
+        for cls, families in (("jamo", 28), ("syllable", 21), ("word", 6), ("ideograph", 51)):
+            self.assertGreaterEqual(paren[cls]["families"], families, cls)
+            self.assertEqual(paren[cls]["advance/em"], 1.0, "a full-width cell")
+            self.assertTrue(0.1 < paren[cls]["left x share"] < 0.15 and 0.85 < paren[cls]["right x share"] < 0.9, cls)
+        self.assertEqual(rules["cells"]["halfwidth"]["FFED"]["advance/em"], 0.5, u"half-width ■ in half a cell")
+        permille = rules["permille"]
+        self.assertTrue(permille["families"] >= 300 and 0.1 < permille["gap/ring"] < 0.25, permille)
+        self.assertEqual((permille["ring/percent ring"], permille["third/second"]), (1.0, 1.0), "%'s rings, alike")
+        strokes = rules["strokes"]
+        self.assertTrue(strokes["smallcap"]["clear"], "small capitals: a clear rule")
+        self.assertTrue(1.25 < strokes["smallcap"]["median"] < 1.35 and strokes["smallcap"]["n"] >= 50)
+        self.assertFalse(strokes["script letter"]["clear"], "superscript and subscript letters: none")
+        self.assertEqual(gg.thickened_rule(rules, "smallcap"), strokes["smallcap"]["median"])
+        self.assertIsNone(gg.thickened_rule(rules, "script letter"))
+        self.assertIsNone(gg.thickened_rule({}, "smallcap"), "an older table: no option")
+
+
+class GeometryTests(unittest.TestCase):
+    def test_runs_count_overlapping_contours_once(self):
+        overlapping = [rect(0, 0, 100, 100), rect(50, 0, 200, 100)]
+        self.assertEqual(gg.filled_runs(overlapping, 50), [(0, 200)])
+        self.assertEqual(gg.filled_runs([rect(0, 0, 100, 100), rect(30, 30, 60, 60)[::-1]], 50), [(0, 30), (60, 100)],
+                         "a counter drawn the other way is a hole")
+
+    def test_a_stem(self):
+        self.assertEqual(gg.stem_width(NEXT["H"][2]), 100, "H's stems, not its bar")
+        self.assertIsNone(gg.stem_width([]))
+
+    def test_the_per_cent_signs_rings(self):
+        split, why = gg.ring_split(PERCENT[2])
+        self.assertIsNone(why)
+        self.assertEqual(split, (2, [(0, 1), (3, 4)]), "the slash, the upper ring, then the lower one")
+        split, why = gg.ring_split(JOINED_PERCENT[2])
+        self.assertIsNone(split)
+        self.assertIn(u"3 contours", why)
+        permille = PERCENT[2] + [rect(600, 0, 800, 300), rect(650, 50, 750, 250)]
+        split, _ = gg.ring_split(permille, 3)
+        self.assertEqual(split[1], [(0, 1), (3, 4), (5, 6)], "the lower rings left to right")
+        self.assertEqual(gg.picked(PERCENT[2], (350, 0, 550, 300)), [3, 4], "the lower ring and its counter")
+
+
+class MorePlanTests(unittest.TestCase):
+    def test_circled_hangul(self):
+        font = hangul_font()
+        planner, rows = plan(font)
+        circled = DATA["rules"]["circled"]
+        row = rows[u(0x3260)]
+        self.assertEqual([p.name for p in row.layout.parts], ["uni25EF", "kiyeok"])
+        self.assertEqual(row.layout.parts[1].matrix[0], circled["cjk jamo"]["scale"])
+        self.assertEqual(row.layout.advance, 1000)
+        self.assertEqual(rows[u(0x326E)].layout.parts[1].matrix[0], circled["cjk syllable"]["scale"], u"㉮")
+        self.assertTrue(row.draft)
+        self.assertIsNone(rows[u(0x327C)].layout, u"㉼: the font has no 참")
+        self.assertIn(u"U+CC38", rows[u(0x327C)].missing)
+        jamo_only = hangul_font("ga", "oh", "jeon")
+        rows = plan(jamo_only)[1]
+        self.assertIn(u(0x3260), rows, u"a font with the compatibility jamo (a Japanese Noto's): ㉠")
+        self.assertNotIn(u(0x326E), rows, u"but no syllable: no ㉮")
+        self.assertNotIn(u(0x3260), plan(FakeFont(NEXT))[1], "none in a Latin font")
+
+    def test_parenthesized(self):
+        font = hangul_font()
+        planner, rows = plan(font)
+        rules = DATA["rules"]["parenthesized"]
+        for code, content, cls in ((0x3200, ["kiyeok"], "jamo"), (0x3220, ["ichi"], "ideograph"),
+                                   (0x320E, ["ga"], "syllable"), (0x321D, ["oh", "jeon"], "word")):
+            row, rule = rows[u(code)], rules[cls]
+            names = [p.name for p in row.layout.parts]
+            self.assertEqual(names, ["parenleft"] + content + ["parenright"], "%04X" % code)
+            self.assertEqual(row.layout.advance, 1000, "a full-width cell")
+            left, right = ink_of(font, row.layout.parts[0]), ink_of(font, row.layout.parts[-1])
+            near(self, (left[0] + left[2]) / 2.0, rule["left x share"] * 1000, 1, "%04X: ( where the fonts set it" % code)
+            near(self, (right[0] + right[2]) / 2.0, rule["right x share"] * 1000, 1)
+            near(self, left[3] - left[1], rule["paren up"] * 900, 1, "as tall against ( as the corpus's")
+            middle = gg.union([ink_of(font, p) for p in row.layout.parts[1:-1]])
+            near(self, (middle[0] + middle[2]) / 2.0, rule["content x share"] * 1000, 1)
+            near(self, (middle[1] + middle[3]) / 2.0, rule["content y"] * 1000, 1)
+            self.assertEqual(row.layout.parts[1].matrix[3], rule["scale"])
+            self.assertTrue(row.draft)
+            self.assertIn(gg.SCALED_NOTE, gg.note_text(row))
+        word = rows[u(0x321D)].layout.parts
+        near(self, word[1].matrix[0], rules["word"]["scale"] * rules["word"]["squeeze"], 1e-9, u"오전 narrowed")
+        self.assertEqual(gg.recipe_text(rows[u(0x3220)], planner.settings),
+                         u"ichi at %d%% between parenleft and parenright, in a full-width cell" % round(
+                             100 * rules["ideograph"]["scale"]))
+        self.assertNotIn(u(0x3220), plan(hangul_font("ichi", "hei", "sei"))[1], u"㈠: in a font with ideographs only")
+
+    def test_half_width_hangul_and_signs(self):
+        font = hangul_font()
+        planner, rows = plan(font)
+        jamo = rows[u(0xFFA1)]
+        self.assertEqual((jamo.layout.kind, jamo.layout.shared), ("shared", "kiyeok"), "a second code point")
+        self.assertFalse(jamo.draft, "accepted: ticked at first")
+        filler = rows[u(0xFFA0)]
+        self.assertEqual((filler.layout.kind, filler.layout.advance), ("empty", 920.0), "as wide as the Hangul filler")
+        self.assertEqual(plan(hangul_font("filler"))[1][u(0xFFA0)].layout.advance, 1000.0, "else as a jamo")
+        arrow = rows[u(0xFFEA)]
+        rule = DATA["rules"]["cells"]["halfwidth"]["FFEA"]
+        part = arrow.layout.parts[0]
+        self.assertEqual((part.name, arrow.layout.advance), ("arrowup", 500), "half a full-width cell")
+        self.assertEqual((part.matrix[0], part.matrix[3]), (rule["across"], rule["up"]))
+        self.assertEqual(gg.cell_kind(u"halfwidth", u"FFEE", u"25CB", u"So"), u"symbol")
+        self.assertNotIn(u(0xFFA1), plan(kana_font())[1], "no half-width jamo without the compatibility jamo")
+
+    def test_kanbun_marks(self):
+        planner, rows = plan(hangul_font())
+        row = rows[u(0x3192)]
+        self.assertEqual([(p.name, p.matrix) for p in row.layout.parts], [("ichi", gg.IDENTITY)], u"㆒: 一 as it is")
+        self.assertTrue(row.draft)
+        self.assertNotIn(u(0x3192), plan(hangul_font("ichi", "hei", "sei"))[1], "in a font with ideographs only")
+
+    def test_the_per_mille_sign(self):
+        font = FakeFont(dict(NEXT, percent=PERCENT))
+        planner, rows = plan(font)
+        row = rows[u(0x2030)]
+        whole, ring = row.layout.parts
+        self.assertEqual((whole.name, whole.matrix, whole.outline), ("percent", gg.IDENTITY, False), "% as a component")
+        step = round(200 * (1 + DATA["rules"]["permille"]["gap/ring"]))
+        self.assertEqual((ring.name, ring.pick, ring.matrix), ("percent", (350, 0, 550, 300), gg.translation(step, 0)))
+        self.assertEqual(row.layout.advance, 600 + step, "the advance grown by the third ring's step")
+        self.assertEqual(planner.part_box(ring), (350 + step, 0, 550 + step, 300))
+        self.assertEqual(gg.component_names(row.layout), ["percent"], "the ring is outlines, no component")
+        self.assertIn(gg.PICKED_NOTE, gg.note_text(row))
+        self.assertTrue(row.draft)
+        joined = plan(FakeFont(dict(NEXT, percent=JOINED_PERCENT)))[1][u(0x2030)]
+        self.assertIsNone(joined.layout, "rings joined to the slash: not buildable")
+        self.assertIn(u"percent: its 3 contours do not split into a slash and 2 rings", joined.missing)
+        self.assertEqual(plan()[1][u(0x2030)].missing, u"needs the percent sign (U+0025)")
+
+    def test_thicker_strokes_for_small_capitals(self):
+        font = FakeFont(NEXT)
+        ratio = gg.thickened_rule(DATA["rules"], "smallcap")
+        planner = gg.Planner(DATA, font, None, False, None, None, True)
+        planner.plan()
+        row = planner.by_hex["029C"]
+        (part,) = row.layout.parts
+        self.assertEqual(part.name, "H")
+        self.assertIsNotNone(part.offset, "outlines, offset")
+        ink = planner.part_box(part)
+        near(self, ink[3], 500, 1, "its top, thickened, at the x-height")
+        near(self, ink[1], 0, 1, "on the baseline")
+        stems = part.matrix[0] * 100 + 2 * part.offset
+        scaled = (ink[3] - ink[1]) / 700.0 * 100  # (the capital's stem scaled to its ink height: as measured)
+        near(self, stems / scaled, ratio, 0.01, "its stems as much thicker as the corpus's")
+        self.assertEqual(row.layout.advance, round(700 * part.matrix[0] * DATA["rules"]["smallcaps"]["width"] +
+                                                   2 * part.offset))
+        self.assertIn(gg.THICKENED_NOTE, gg.note_text(row))
+        self.assertNotIn(gg.SCALED_NOTE, gg.note_text(row))
+        self.assertIn(u"its strokes thickened", gg.recipe_text(row, planner.settings))
+        self.assertEqual(gg.component_names(row.layout), [], "no component: it no longer follows H")
+        plain = plan(FakeFont(NEXT))[1][u(0x029C)]
+        self.assertIsNone(plain.layout.parts[0].offset, "off at first")
+        own = gg.Planner(DATA, FakeFont(dict(NEXT, **{"h.sc": (None, 520, [rect(60, 0, 460, 500)], None)})), None,
+                         False, None, None, True)
+        own.plan()
+        self.assertEqual([(p.name, p.offset) for p in own.by_hex["029C"].layout.parts], [("h.sc", None)],
+                         "the font's own small capital stays as it is")
+        script = gg.Planner(DATA, FakeFont(NEXT), None, False, None, None, True)
+        script.plan()
+        self.assertIsNone(script.by_hex["207F"].layout.parts[0].offset, "no clear rule for superscript letters")
+
+
+class MoreWriteTests(unittest.TestCase):
+    """The new ways written through FontLab's objects stubbed, in two masters planned apart: scaled components
+    (circled, parenthesized), a second code point (half-width jamo), and outlines (the per mille sign's third ring,
+    thickened small capitals: clones of the contours placed, through Feature Code's own offsetting)."""
+    page = WriteTests.__dict__["page"]
+    place = WriteTests.__dict__["place"]
+    corrector = WriteTests.__dict__["corrector"]
+    build = WriteTests.__dict__["build"]
+
+    def built(self, regular, bold, codes, thicken=False):
+        page, package, steps, logged = self.page(regular, ("Regular", "Bold"))
+        page.fc = Stub(place_node=self.place, offset_contour=fc.offset_contour, signed_area=fc.signed_area)
+        page.thickened = lambda: thicken
+        page.vary_of = lambda font: None
+        page.listed_codes = lambda: None
+        page.existing_box = Stub(checked=False)
+        page.font_in = lambda package_, master: bold if master == "Bold" else regular
+        page.planner_now = gg.Planner(DATA, regular, None, False, None, None, thicken)
+        page.rows = page.planner_now.plan()
+        page.planner = lambda font, ways=None, progress=None: gg.GenerationPage.planner(page, font, ways, progress)
+        self.build(page, codes)
+        return package, steps, logged
+
+    def components(self, layer):
+        return [(shape.shapeData.componentGlyph, tuple(shape.transform.values)) for shape in layer.shapes
+                if shape.isComponent]
+
+    def test_hangul_and_parenthesized(self):
+        regular = hangul_font()
+        bold = hangul_font()
+        bold.glyphs["kiyeok"] = (0x3131, 1000, [rect(180, 80, 780, 620)], None)
+        package, steps, logged = self.built(regular, bold, [0x3260, 0x3200, 0x3220, 0xFFA1, 0x3192])
+        for master in ("Regular", "Bold"):
+            self.assertEqual([n for n, _ in self.components(package.findName("uni3260").getLayerByName(master))],
+                             ["uni25EF", "kiyeok"])
+            self.assertEqual([n for n, _ in self.components(package.findName("uni3200").getLayerByName(master))],
+                             ["parenleft", "kiyeok", "parenright"])
+            self.assertEqual([n for n, _ in self.components(package.findName("uni3192").getLayerByName(master))],
+                             ["ichi"])
+        dx = [self.components(package.findName("uni3200").getLayerByName(m))[1][1][4] for m in ("Regular", "Bold")]
+        self.assertNotEqual(dx[0], dx[1], "each master's jamo placed on its own")
+        self.assertIn(0xFFA1, package.findName("kiyeok").fgGlyph.unicodes, "a second code point, no new glyph")
+        self.assertIsNone(package.findName("uniFFA1"))
+        self.assertEqual([s[0] for s in steps], ["begin", u"FreeLab Glyph Compose", "end"], "one History step")
+        self.assertTrue(any(kind == "done" and u"Built 4 glyphs" in text for kind, text in logged), logged)
+
+    def test_the_per_mille_sign_and_thickened_small_capitals(self):
+        regular = FakeFont(dict(NEXT, percent=PERCENT))
+        wide = list(PERCENT[2])
+        wide[3], wide[4] = rect(350, 0, 570, 300), rect(400, 50, 520, 250)  # (Bold's lower ring wider)
+        bold = FakeFont(dict(NEXT, percent=(0x25, 620, wide, None)))
+        package, steps, logged = self.built(regular, bold, [0x2030, 0x029C], thicken=True)
+        gap = DATA["rules"]["permille"]["gap/ring"]
+        for master, width in (("Regular", 200), ("Bold", 220)):
+            layer = package.findName("perthousand").getLayerByName(master)
+            self.assertEqual(self.components(layer), [("percent", gg.IDENTITY)])
+            outlines = [shape for shape in layer.shapes if not shape.isComponent]
+            self.assertEqual(len(outlines), 1)
+            self.assertEqual(len(outlines[0].contours), 2, "%s: the ring and its counter" % master)
+            xs = sorted(set(n.x for c in outlines[0].contours for n in c.nodes()))
+            step = round(width * (1 + gap))
+            self.assertEqual(xs[0], 350 + step, "%s: its own lower ring, one step right" % master)
+            self.assertEqual(layer.advanceWidth, (600 if master == "Regular" else 620) + step)
+        small = package.findName("Hsmall").getLayerByName("Regular")
+        self.assertEqual(self.components(small), [], "outlines: no component")
+        (shape,) = small.shapes
+        self.assertEqual(len(shape.contours), 3, "H's three contours, offset")
+        nodes = [(n.x, n.y) for c in shape.contours for n in c.nodes()]
+        self.assertTrue(abs(max(y for _, y in nodes) - 500) <= 1 and abs(min(y for _, y in nodes)) <= 1,
+                        "from the baseline to the x-height")
+        stem = shape.contours[0].nodes()
+        width = max(n.x for n in stem) - min(n.x for n in stem)
+        plain = gg.Planner(DATA, regular)
+        plain.plan()
+        self.assertGreater(width, plain.by_hex["029C"].layout.parts[0].matrix[0] * 100 + 10, "a thicker stem")
+        self.assertTrue(any(kind == "done" and u"Built 2 glyphs" in text for kind, text in logged), logged)
+
+    def test_the_cells_are_short_notes(self):
+        for font in (hangul_font(), FakeFont(dict(NEXT, percent=PERCENT))):
+            planner, rows = plan(font)
+            for r in planner.rows:
+                if r.hex not in MORE_CODES:
+                    continue
+                for text in (gg.recipe_text(r, planner.settings, DATA["rules"]), gg.note_text(r), gg.confidence_text(r)):
+                    self.assertFalse(text.endswith(u"."), (r.hex, text))
+                    for banned in TextTests.BANNED + (u"(s)",):
+                        self.assertNotIn(banned, text, (r.hex, text))
 
 
 class Item(object):

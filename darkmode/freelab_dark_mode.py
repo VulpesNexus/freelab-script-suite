@@ -449,8 +449,9 @@ PICKED_PROP = "freelabPicked"  # a hooked island showing colors the user picked,
 # (measured live, 2026-11-26).
 FRAME_PROP = "freelabHookedFrame"
 SWATCH_PROP = "freelabSwatch"  # a palette's swatch: its checkerboard held back under an opaque color (freelab_hooks.c)
+NOTED_PROP = "freelabSheetNoted"  # DARK_SHEET_PROP holds FontLab's sheet, noted as seen, not one of ours
 PROPS = (ID_PROP, SEEN_PROP, QUEUED_PROP, WATCHED_PROP, CHECKED_PROP, ISLAND_PROP, SHEET_PROP, DARK_SHEET_PROP, HOOKED_PROP, NATIVE_INK_PROP,
-         PICKED_PROP, FRAME_PROP, SWATCH_PROP)
+         PICKED_PROP, FRAME_PROP, SWATCH_PROP, NOTED_PROP)
 
 NAMED_COLORS = {
     "white": (255, 255, 255), "black": (0, 0, 0), "whitesmoke": (245, 245, 245),
@@ -1407,8 +1408,9 @@ def _darken_sheet(widget):
     if sheet == widget.property(SEPARATOR_PROP):
         return  # a menu's lighter separators: drawn as set
     ours = widget.property(DARK_SHEET_PROP)
-    if sheet == ours:
-        return  # already ours
+    if sheet == ours and not widget.property(NOTED_PROP):
+        return  # already ours (a sheet only noted as seen, _note_sheet_as_seen, is FontLab's: darkened now)
+    widget.setProperty(NOTED_PROP, None)
     if ours is not None:
         _watch(widget)  # FontLab restyles this one while it works (fields while a glyph is edited): catch it at once
     dark = map_sheet_images(recolor_sheet(sheet), _mapped_resource)
@@ -3792,6 +3794,7 @@ def _dark_button_text(widget):
     if own == widget.property(DARK_SHEET_PROP):
         return
     widget.setProperty(SHEET_PROP, own)
+    widget.setProperty(NOTED_PROP, None)
     widget.setProperty(DARK_SHEET_PROP, own + BUTTON_INK)
     widget.setStyleSheet(own + BUTTON_INK)
 
@@ -3826,8 +3829,9 @@ BITMAP_CURSOR = 24  # Qt::BitmapCursor: a cursor made of a picture
 # softens the outline's staircase.
 CURSOR_TREATMENTS = {
     "b06ff714172f45d24fc438352410e791": "shadow",  # Contour (32 px)
-    "71f9b22028c0149036fb60d179d6de91": "invert",  # Eraser (16 px)
-    "207990417a87cfdce111db75d3a21776": "rim",  # TrueType Hinting (32 px)
+    # TrueType Hinting (32 px): a drawing of the arrow, which the Element tool shows as the system's own; alike in light
+    # mode, the system's looked substantially better on the dark canvas (the owner, 2026-11-27): it takes its place
+    "207990417a87cfdce111db75d3a21776": "arrow",
 }
 CURSOR_SHADOW_ALPHA = 0.55  # the drop shadow at its densest
 CURSOR_SHADOW_OFFSET = 1  # pixels right and down
@@ -3844,7 +3848,8 @@ def cursor_hash(image):
 
 
 def treated_cursor_pixels(pixels, width, height, treatment):
-    """pixels: [0xAARRGGBB] row by row; the treated pixels (CURSOR_TREATMENTS), same size."""
+    """pixels: [0xAARRGGBB] row by row; the "shadow" treatment (CURSOR_TREATMENTS): the light glow out, the edge
+    black at its coverage, a soft drop shadow. Same size."""
     def channels(v):
         return (v >> 24) & 255, (v >> 16) & 255, (v >> 8) & 255, v & 255
 
@@ -3852,28 +3857,28 @@ def treated_cursor_pixels(pixels, width, height, treatment):
         _a, r, g, b = channels(v)
         return (r + g + b) / 3.0 > 128
 
-    if treatment == "rim":
-        out = list(pixels)
-        for y in range(height):
-            for x in range(width):
-                a, r, g, b = channels(pixels[y * width + x])
-                if a < 255 or (r + g + b) / 3.0 < 200:
-                    continue
-                inside = 0
-                for yy in range(y - 1, y + 2):
-                    for xx in range(x - 1, x + 2):
-                        if (xx, yy) != (x, y) and 0 <= xx < width and 0 <= yy < height:
-                            na, nr, ng, nb = channels(pixels[yy * width + xx])
-                            inside += na == 255 and (nr + ng + nb) / 3.0 < 100
-                if inside <= 2:
-                    out[y * width + x] = ((140 if inside <= 1 else 210) << 24) | (pixels[y * width + x] & 0xffffff)
-        return out
     # the shape: what is not the light glow
     shape = [0.0] * (width * height)
     for k, v in enumerate(pixels):
         a = (v >> 24) & 255
         if a == 255 or (a and not light(v)):
             shape[k] = a / 255.0
+    # Its edge where the glow was: opaque grays, the black outline smoothed over the white glow, a light fringe once the
+    # glow is gone (the owner's note on the Contour cursor, 2026-11-27). Each is black at the coverage its gray shows.
+    pixels = list(pixels)
+    edge = []
+    for y in range(height):
+        for x in range(width):
+            k = y * width + x
+            if shape[k] < 1.0:
+                continue
+            if any(not (0 <= xx < width and 0 <= yy < height) or shape[yy * width + xx] == 0.0
+                   for yy in range(y - 1, y + 2) for xx in range(x - 1, x + 2)):
+                edge.append(k)
+    for k in edge:
+        _a, r, g, b = channels(pixels[k])
+        shape[k] = 1.0 - (r + g + b) / 765.0
+        pixels[k] = 0xff000000
 
     def blur(m):
         n = [0.0] * (width * height)
@@ -3887,7 +3892,7 @@ def treated_cursor_pixels(pixels, width, height, treatment):
                 n[y * width + x] = s / 9.0
         return n
 
-    strength = CURSOR_SHADOW_ALPHA if treatment == "shadow" else 0.0
+    strength = CURSOR_SHADOW_ALPHA
     soft = blur(blur(shape)) if strength else shape
     out = [0] * (width * height)
     for y in range(height):
@@ -3901,14 +3906,12 @@ def treated_cursor_pixels(pixels, width, height, treatment):
                 continue
             _a, r, g, b = channels(pixels[k])
             r, g, b = (int(round(c * fa / alpha)) for c in (r, g, b))
-            if treatment == "invert":
-                r, g, b = 255 - r, 255 - g, 255 - b
             out[k] = (int(round(alpha * 255)) << 24) | (r << 16) | (g << 8) | b
     return out
 
 
 def _fix_cursor(widget):
-    """The widget's cursor: FontLab's own, never altered, but for the three of CURSOR_TREATMENTS, replaced by their
+    """The widget's cursor: FontLab's own, never altered, but for those of CURSOR_TREATMENTS, replaced by their
     treated copy while dark mode is on (made once each, held). Never raises (it runs from an event filter)."""
     try:
         state = _state()
@@ -3931,7 +3934,10 @@ def _fix_cursor(widget):
             entry = False
             image = pixmap.toImage().convertToFormat(_gui("QImage").Format_ARGB32)
             treatment = CURSOR_TREATMENTS.get(cursor_hash(image))
-            if treatment:
+            if treatment == "arrow":  # (the system's: not a bitmap, so never looked at again)
+                fixed = _gui("QCursor")(_core("Qt").ArrowCursor)
+                entry = (fixed, None)
+            elif treatment:
                 w, h = image.width(), image.height()
                 pixels = [image.pixel(x, y) & 0xffffffff for y in range(h) for x in range(w)]
                 for k, v in enumerate(treated_cursor_pixels(pixels, w, h, treatment)):
@@ -4036,6 +4042,7 @@ def _frame_picker(widget):
     # the owner, November 24, "the opacity dropdown still being white")
     framed = (u"QtColorPicker{%s}" % own if own.strip() and u"{" not in own else own) + PICKER_FRAME
     widget.setProperty(SHEET_PROP, own)
+    widget.setProperty(NOTED_PROP, None)
     widget.setProperty(DARK_SHEET_PROP, framed)
     widget.setStyleSheet(framed)
 
@@ -4396,6 +4403,7 @@ def _make_island(widget):
         combined = (combined + u"\n" + fill_rule).strip()
     if combined != own:
         widget.setProperty(SHEET_PROP, own)
+        widget.setProperty(NOTED_PROP, None)
         widget.setProperty(DARK_SHEET_PROP, combined)
         widget.setStyleSheet(combined)
     else:
@@ -5176,6 +5184,11 @@ def _note_sheet_as_seen(widget):
     sheet = _prop(widget, "styleSheet")
     if sheet:
         widget.setProperty(DARK_SHEET_PROP, sheet)
+        # FontLab's, not ours: nothing to put back on switching off (an original kept from an earlier sheet of ours,
+        # restored over it, took FontLab's away: the Font Info panel's Change... button, 2026-11-27), and darkened
+        # if the widget is later styled as any (see _darken_sheet)
+        widget.setProperty(SHEET_PROP, None)
+        widget.setProperty(NOTED_PROP, True)
 
 
 def _connect_timeout(timer, callback):
@@ -5324,7 +5337,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 41
+HOOKS_VERSION = 44
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
@@ -5527,10 +5540,38 @@ def _island(widget):
     """An island: the native engine hooks one FontLab paints itself; otherwise (the script engine, or
     an item view, whose rows Qt draws) the script engine's light look and effect."""
     state = _state()
-    if state.get("engine") == "native" and state.get("hooked") and _hookable(widget):
+    if state.get("engine") == "native" and state.get("hooked") and _qt_drawn_styled(widget):
+        # Qt draws it (Qt5Widgets, which the hooks do not map) from its stylesheet: hooked, it stayed as light as
+        # FontLab styled it. FontLab's segmented buttons (Anchors and Pins, the Font Info panel's Change...) came out
+        # white once FontLab restyled them, as a toggle or a refresh does, and a sweep found them light (the owner's
+        # images 193 to 196, 2026-11-27). Their stylesheet is darkened instead, as any widget's.
+        _unhook(widget)
+        _darken_sheet(widget)
+    elif state.get("engine") == "native" and state.get("hooked") and _hookable(widget):
         _hook_island(widget)
     else:
         _make_island(widget)
+
+
+def _qt_drawn_styled(widget):
+    """A widget of Qt's own drawing (QT_DRAWN_BASES) with a stylesheet, but a tab bar (its names: see _hook_island)."""
+    return bool(_prop(widget, "styleSheet")) and not widget.inherits("QTabBar") \
+        and any(widget.inherits(base) for base in QT_DRAWN_BASES)
+
+
+def _unhook(widget):
+    """A widget hooked as an island let go of: off the hooks' lists."""
+    if not widget.property(HOOKED_PROP):
+        return
+    widget.setProperty(HOOKED_PROP, None)
+    state = _state()
+    pointer = _sci_pointer(widget)
+    for name, send in (("hooked_addresses", _send_hooked), ("ink_addresses", _send_ink),
+                       ("picked_addresses", _send_picked)):
+        if pointer and pointer in state.get(name, []):
+            state[name].remove(pointer)
+            send(state)
+    widget.update()
 
 
 def _child_widgets(widget):

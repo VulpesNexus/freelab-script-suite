@@ -235,14 +235,32 @@ class ShadeAndPickerTests(DarkModeCase):
         dm.run_queue()
         self.assertEqual(self.content.styleSheet, PANEL_SHEET)
 
-    def test_fontlabs_cursors_are_left_alone_but_three(self):
+    def test_a_sheet_noted_as_seen_is_fontlabs_not_ours(self):
+        """The owner's image 193, 2026-11-27: the Font Info panel's Change... button white. FontLab's sheet, noted as
+        seen, passed for one dark mode had darkened; and switching off put back an original kept from an earlier sheet
+        of ours over it, an empty one, taking FontLab's away."""
+        light = u"QToolButton{background-color: white;border:1 solid white;}"
+        button = FakeWidget("QToolButton", sheet=light)
+        button.setProperty(dm.SHEET_PROP, u"")  # (an earlier sheet of ours, set on a button that had none)
+        dm._note_sheet_as_seen(button)
+        dm._restore_sheet(button)
+        self.assertEqual(button.styleSheet, light, "switching off leaves FontLab's sheet")
+        dm._note_sheet_as_seen(button)
+        dm._darken_sheet(button)
+        self.assertNotIn(u"white", button.styleSheet, "darkened, once styled as any widget")
+        dark = button.styleSheet
+        dm._darken_sheet(button)
+        self.assertEqual(button.styleSheet, dark, "ours is not darkened again")
+
+    def test_fontlabs_cursors_are_left_alone_but_two(self):
         """The owner, 2026-11-26: the tools' cursors, all turned for the dark canvas, looked inverted and bad; "leave
-        cursors up to FontLab", except the Contour and Eraser tools' (a jarring light glow: a standard drop shadow, or
-        the Eraser's cross inverted) and TrueType Hinting's rough outline. Known by their pixels' hash only."""
+        cursors up to FontLab", except the Contour tool's (a jarring light glow: a standard drop shadow, its edge
+        without the light fringe of 2026-11-27) and TrueType Hinting's (the system arrow the Element tool shows, which
+        looked better). The Eraser's cross is FontLab's again: the owner meant its drop. Known by their pixels' hash."""
         with open(os.path.join(os.path.dirname(HERE), "darkmode", "freelab_dark_mode.py"), "rb") as handle:
             source = handle.read().decode("utf-8")
         self.assertNotIn("glow_to_shadow", source)
-        self.assertEqual(sorted(dm.CURSOR_TREATMENTS.values()), ["invert", "rim", "shadow"])
+        self.assertEqual(sorted(dm.CURSOR_TREATMENTS.values()), ["arrow", "shadow"])
         canvas = FakeWidget("GlyphCanvas")
         calls = []
         canvas.setCursor = lambda cursor: calls.append(cursor)
@@ -263,12 +281,11 @@ class ShadeAndPickerTests(DarkModeCase):
                         "the light glow taken out (above and left: a trace of the shadow at most)")
         corner = shadow[5 * 7 + 5]
         self.assertTrue(0 < (corner >> 24) < 255 and (corner & 0xffffff) == 0, "a soft black shadow below and right")
-        inverted = dm.treated_cursor_pixels(pixels, 7, 7, "invert")
-        self.assertEqual(inverted[3 * 7 + 3], 0xffffffff, "the Eraser's cross white")
-        self.assertEqual(inverted[1 * 7 + 1], clear, "its glow out")
-        rim = [clear] * 9
-        rim[4], rim[1] = 0xffffffff, black  # (a white pixel with one dark neighbor: an outline's staircase step)
-        self.assertEqual(dm.treated_cursor_pixels(rim, 3, 3, "rim")[4] >> 24, 140)
+        # an opaque gray at the shape's edge (its outline smoothed over the white glow): black at that coverage
+        pixels[2 * 7 + 2] = 0xff9f9f9f
+        edge = dm.treated_cursor_pixels(pixels, 7, 7, "shadow")[2 * 7 + 2]
+        self.assertEqual(edge & 0xffffff, 0, "no light fringe")
+        self.assertTrue(80 <= (edge >> 24) <= 130, "at its coverage (1 - 0x9f / 255), over a trace of shadow")
 
     def test_an_effect_drawn_again_from_inside_its_own_drawing_draws_its_widget_as_it_is(self):
         """The owner, November 25: dragging a color in Overlay Fonts ran FontLab's stack out after a few seconds,

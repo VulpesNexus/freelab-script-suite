@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 41
+#define FREELAB_HOOKS_VERSION 44
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -567,6 +567,8 @@ typedef struct {
     int badge; /* its brush is a light color kept as it is (see dark_on_badge) */
     int dark_box; /* its brush is a dark box mapped light (see on_dark_box) */
     int light_box; /* its brush is a light box mapped dark (see box_contrast), */
+    int warning; /* its brush is a mark's red or orange on a glyph canvas (see warning_brush) */
+    int white_pen; /* its pen was last set pure white */
     double box_in_l, box_out_l; /* its lightness before and after */
     qhandle pen, brush; /* the copies last handed out */
 } painter_note;
@@ -683,6 +685,41 @@ static void note_badge(const void *painter, int badge)
     painter_note *n = find_note(painter);
     if (n)
         n->badge = badge;
+}
+
+/* FontAudit's markers on the glyph canvas: a red or orange shape outlined in pure white, the outline invisible on light
+ * mode's white canvas. White pens stay white elsewhere (white_pen), and so the outline stood as a jagged white rim
+ * around each marker on the dark canvas. On a canvas, a pure white pen with such a brush (a saturated red to orange) is
+ * drawn in the canvas' ground: whichever of the two FontLab sets first, the other follows. White text on another color
+ * (TrueType Hinting's selected size, white on navy) is not touched. */
+#define WARNING_MIN_CHROMA 0.15
+static int warning_brush(uint32_t argb)
+{
+    double l, chroma, a, b;
+    if ((argb >> 24) < 128)
+        return 0;
+    oklab_of(argb & 0xffffffU, &l, &chroma);
+    oklab_ab(argb & 0xffffffU, &a, &b);
+    return chroma >= WARNING_MIN_CHROMA && a > 0.0 && b > -0.02 && b < a * 2.5; /* red to orange, not yellow or pink */
+}
+
+static void note_white_pen(const void *painter, int white)
+{
+    painter_note *n = find_note(painter);
+    if (n)
+        n->white_pen = white;
+}
+
+static int on_warning(const void *painter)
+{
+    painter_note *n = find_note(painter);
+    return n != 0 && n->warning;
+}
+
+static int pen_is_white(const void *painter)
+{
+    painter_note *n = find_note(painter);
+    return n != 0 && n->white_pen;
 }
 
 /* On a dark box mapped light (see on_dark_box), dark and middle grays are drawn darker still, so the text stands out
@@ -1441,11 +1478,12 @@ static void w_set_pen_color(void *p, const qcolor *c)
         if (picked_frame(p, c, &m) || dark_on_box(p, c, &m)) {
             hook_changed[H_SET_PEN_COLOR]++;
             use = &m;
-        } else if ((!white_pen(c) || palette_light_color(c) || on_dark_box(p)) && !dark_on_badge(p, c)
-                   && map_qcolor(c, &m)) {
+        } else if ((!white_pen(c) || palette_light_color(c) || on_dark_box(p) || (canvas_paint && on_warning(p)))
+                   && !dark_on_badge(p, c) && map_qcolor(c, &m)) {
             hook_changed[H_SET_PEN_COLOR]++;
             use = &m;
         }
+        note_white_pen(p, white_pen(c));
         if (use == c)
             m = *c;
         if (box_contrast(p, c, &m)) {
@@ -1504,7 +1542,7 @@ static void w_set_pen(void *p, const void *pen)
             copied = 1;
         } else if (!dark_on_badge(p, &c)) {
             qcolor shown;
-            use = mapped_pen(pen, &tmp, &copied, on_dark_box(p));
+            use = mapped_pen(pen, &tmp, &copied, on_dark_box(p) || (canvas_paint && on_warning(p)));
             qt_pen_color(use, &shown);
             if (qt_pen_is_solid(pen) && box_contrast(p, &c, &shown)) {
                 if (!copied) {
@@ -1517,6 +1555,11 @@ static void w_set_pen(void *p, const void *pen)
         }
     } else if (ink_target(p))
         use = ink_pen(pen, &tmp, &copied);
+    {
+        qcolor given;
+        qt_pen_color(pen, &given);
+        note_white_pen(p, qt_pen_is_solid(pen) && white_pen(&given));
+    }
     hook_changed[H_SET_PEN] += copied;
     trace_pen(H_SET_PEN, p, pen, use);
     if (copied) {
@@ -1547,6 +1590,34 @@ static void w_set_pen(void *p, const void *pen)
             qt_brush_dtor(&tmp);                                     \
     }
 
+typedef const void *(*pen_getter_fn)(const void *);
+
+/* A warning brush set or left (see warning_brush): a pure white pen set before it is drawn in the canvas' ground while
+ * it lasts, and white again after. */
+static void note_warning(void *painter, int warning)
+{
+    painter_note *n = find_note(painter);
+    const void *pen;
+    qhandle tmp;
+    qcolor c;
+    if (!n || n->warning == warning) {
+        if (n)
+            n->warning = warning;
+        return;
+    }
+    n->warning = warning;
+    if (!n->white_pen)
+        return;
+    pen = ORIGINAL(H_PAINTER_PEN, pen_getter_fn)(painter);
+    if (!pen || !qt_pen_is_solid(pen))
+        return;
+    set_qcolor(&c, warning ? 0xff000000U | map_qrgb(0xffffffffU) : 0xffffffffU);
+    qt_pen_copy(&tmp, pen);
+    qt_pen_set_color(&tmp, &c);
+    ORIGINAL(H_SET_PEN, one_fn)(painter, &tmp);
+    qt_pen_dtor(&tmp);
+}
+
 static void w_set_brush(void *p, const void *brush)
 {
     int style = qt_brush_style(brush);
@@ -1554,6 +1625,8 @@ static void w_set_brush(void *p, const void *brush)
     note_dark_box(p, hooks_on && style == BRUSH_SOLID && on_screen(p) && !picked_brush(p, brush)
                      && dark_box_color(qt_brush_color(brush)));
     note_light_box(p, brush, hooks_on && style == BRUSH_SOLID && on_screen(p) && !picked_brush(p, brush));
+    note_warning(p, hooks_on && style == BRUSH_SOLID && on_screen(p) && canvas_paint
+                    && warning_brush(qt_color_rgba(qt_brush_color(brush))));
     BRUSH_ON_SCREEN(H_SET_BRUSH, p, (note_brush(p, brush, use), ORIGINAL(H_SET_BRUSH, one_fn)(p, use)))
 }
 
@@ -1639,7 +1712,6 @@ static void w_set_brush_style(void *p, int style)
 }
 
 /* A painter's pen in the trace as it begins (out: the painter; mapped_surface: the pen's style). */
-typedef const void *(*pen_getter_fn)(const void *);
 static void trace_painter_pen(int index, const void *painter)
 {
     qcolor c;
