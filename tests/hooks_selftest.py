@@ -362,6 +362,23 @@ check("on black (a glyph's fill): white kept", pen_rgba(painter_pen(addr(tracked
 set_brush(addr(tracked), addr(white_brush))
 set_pen_color(addr(tracked), addr(white))
 check("no dark box: white kept", pen_rgba(painter_pen(addr(tracked))), 0xffffff)
+# a light box: a measurement's blue number on a 60% white label is lightened to keep its contrast with the mapped box
+length_blue = color(0x46, 0x78, 0xaa)
+set_brush_style(addr(tracked), 0)
+set_pen_color(addr(tracked), addr(length_blue))
+plain = pen_rgba(painter_pen(addr(tracked)))
+label_white = color(255, 255, 255, 0x96)
+label_box = brush(label_white)
+set_brush(addr(tracked), addr(label_box))
+set_pen_color(addr(tracked), addr(length_blue))
+boxed = pen_rgba(painter_pen(addr(tracked)))
+channels = lambda v: ((v >> 16) & 255) + ((v >> 8) & 255) + (v & 255)
+results.append(channels(boxed) > channels(plain) + 30 and (boxed & 0xff) > ((boxed >> 16) & 0xff))
+print("%-46s %08x %s (%08x without the box)" % ("blue on a white label: lighter, still blue", boxed,
+                                                "ok" if results[-1] else "WRONG", plain))
+set_pen_color(addr(tracked), addr(black))
+check("black on it: mapped as ever", pen_rgba(painter_pen(addr(tracked))), "light")
+set_brush_style(addr(tracked), 0)
 hooks.freelab_hooks_badge_count.restype = ctypes.c_int64
 check("dark pens kept on badges and boxes", hooks.freelab_hooks_badge_count(), 5)
 wrapper(25, c_void_p, restype=ctypes.c_bool)(addr(tracked))

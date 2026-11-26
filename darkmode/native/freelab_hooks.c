@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 33
+#define FREELAB_HOOKS_VERSION 35
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -522,6 +522,8 @@ typedef struct {
     int pen_n, brush_n, pen_next, brush_next, has_pen, has_brush;
     int badge; /* its brush is a light color kept as it is (see dark_on_badge) */
     int dark_box; /* its brush is a dark box mapped light (see on_dark_box) */
+    int light_box; /* its brush is a light box mapped dark (see box_contrast), */
+    double box_in_l, box_out_l; /* its lightness before and after */
     qhandle pen, brush; /* the copies last handed out */
 } painter_note;
 static painter_note painter_notes[PAINTERS_MAX];
@@ -533,6 +535,7 @@ static void drop_note(painter_note *n)
     if (n->has_brush)
         qt_brush_dtor(&n->brush);
     n->pen_n = n->brush_n = n->pen_next = n->brush_next = n->has_pen = n->has_brush = n->badge = n->dark_box = 0;
+    n->light_box = 0;
 }
 
 static void note_painter(const void *painter)
@@ -688,6 +691,62 @@ static int on_dark_box(const void *painter)
 {
     painter_note *n = find_note(painter);
     return n != 0 && n->dark_box;
+}
+
+/* Light boxes: FontLab writes a segment's length in blue and its angle in gray on a small white box at 60 to 70%
+ * (the canvas' measurement labels). The box is mapped dark, as paper is, while a middle-lightness pen keeps about
+ * the lightness it had (blue is kept as a color; #646464 maps to #919191), so the numbers stood dim on their dark
+ * boxes (the roadmap's "measurement labels come out dim"). While the painter's brush is such a box, a pen darker
+ * than the box is lightened, its hue kept, until it stands as far above the mapped box as it stood below the box
+ * in light mode, at most to the light end of the mapping (black text on it, mapped to that end, is unchanged). */
+#define LIGHT_BOX_MIN_OKL 0.85
+#define LIGHT_BOX_MIN_ALPHA 128
+
+static void note_light_box(const void *painter, const void *brush, int on)
+{
+    painter_note *n = find_note(painter);
+    qcolor m;
+    double l, chroma;
+    uint32_t argb;
+    if (!n)
+        return;
+    n->light_box = 0;
+    if (!on)
+        return;
+    argb = painted_rgba(qt_brush_color(brush));
+    if ((argb >> 24) < LIGHT_BOX_MIN_ALPHA)
+        return;
+    oklab_of(argb & 0xffffffU, &l, &chroma);
+    if (l < LIGHT_BOX_MIN_OKL || chroma >= CONTENT_KEEP_CHROMA || !map_qcolor(qt_brush_color(brush), &m))
+        return;
+    n->box_in_l = l;
+    oklab_of(qt_color_rgba(&m) & 0xffffffU, &n->box_out_l, &chroma);
+    n->light_box = 1;
+}
+
+/* m: the pen's color as mapped (c the one FontLab gave). Lightened in place on a light box; 1 if it changed. */
+static int box_contrast(const void *painter, const qcolor *c, qcolor *m)
+{
+    painter_note *n = find_note(painter);
+    double in_l, out_l, chroma, target, a, b;
+    uint32_t rgba;
+    uint8_t r8, g8, b8;
+    if (!n || !n->light_box)
+        return 0;
+    oklab_of(painted_rgba(c) & 0xffffffU, &in_l, &chroma);
+    if (in_l >= n->box_in_l)
+        return 0;
+    target = n->box_out_l + (n->box_in_l - in_l);
+    if (target > hook_light_l)
+        target = hook_light_l;
+    rgba = qt_color_rgba(m);
+    oklab_of(rgba & 0xffffffU, &out_l, &chroma);
+    if (out_l >= target)
+        return 0;
+    oklab_ab(rgba & 0xffffffU, &a, &b);
+    oklab_to_bytes(target, a, b, &r8, &g8, &b8);
+    set_qcolor(m, (rgba & 0xff000000U) | ((uint32_t)r8 << 16) | ((uint32_t)g8 << 8) | b8);
+    return 1;
 }
 
 /* The light palette's slot for a color the dark palette holds there, or -1. */
@@ -1197,6 +1256,12 @@ static void w_set_pen_color(void *p, const qcolor *c)
             hook_changed[H_SET_PEN_COLOR]++;
             use = &m;
         }
+        if (use == c)
+            m = *c;
+        if (box_contrast(p, c, &m)) {
+            hook_changed[H_SET_PEN_COLOR] += use == c;
+            use = &m;
+        }
     } else if (ink_target(p) && ink_qcolor(c, &m)) {
         hook_changed[H_SET_PEN_COLOR]++;
         use = &m;
@@ -1245,8 +1310,19 @@ static void w_set_pen(void *p, const void *pen)
             qt_pen_set_color(&tmp, &frame);
             use = &tmp;
             copied = 1;
-        } else if (!dark_on_badge(p, &c))
+        } else if (!dark_on_badge(p, &c)) {
+            qcolor shown;
             use = mapped_pen(pen, &tmp, &copied, on_dark_box(p));
+            qt_pen_color(use, &shown);
+            if (qt_pen_is_solid(pen) && box_contrast(p, &c, &shown)) {
+                if (!copied) {
+                    qt_pen_copy(&tmp, pen);
+                    copied = 1;
+                    use = &tmp;
+                }
+                qt_pen_set_color(&tmp, &shown);
+            }
+        }
     } else if (ink_target(p))
         use = ink_pen(pen, &tmp, &copied);
     hook_changed[H_SET_PEN] += copied;
@@ -1284,6 +1360,7 @@ static void w_set_brush(void *p, const void *brush)
     note_badge(p, hooks_on && style == BRUSH_SOLID && badge_color(qt_color_rgba(qt_brush_color(brush))));
     note_dark_box(p, hooks_on && style == BRUSH_SOLID && on_screen(p) && !picked_brush(p, brush)
                      && dark_box_color(qt_brush_color(brush)));
+    note_light_box(p, brush, hooks_on && style == BRUSH_SOLID && on_screen(p) && !picked_brush(p, brush));
     BRUSH_ON_SCREEN(H_SET_BRUSH, p, (note_brush(p, brush, use), ORIGINAL(H_SET_BRUSH, one_fn)(p, use)))
 }
 
@@ -1323,6 +1400,8 @@ static void w_set_brush_style(void *p, int style)
     qhandle tmp;
     hook_calls[H_SET_BRUSH_STYLE]++;
     note_badge(p, 0);
+    note_dark_box(p, 0); /* (black: no box of either kind, see dark_box_color) */
+    note_light_box(p, 0, 0);
     if (style >= BRUSH_SOLID && style <= BRUSH_LAST_PATTERN && on_screen(p)) {
         set_qcolor(&black, 0xff000000U);
         if (map_qcolor(&black, &m)) {
