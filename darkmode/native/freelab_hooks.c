@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 26
+#define FREELAB_HOOKS_VERSION 27
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -380,6 +380,19 @@ static int picked_target(const void *painter)
     if (!device || ((int (*)(const void *))((void ***)device)[0][1])(device) != DEVICE_WIDGET)
         return 0;
     return in_sorted(picked_widgets, picked_count, (uintptr_t)device - QPAINTDEVICE_IN_QWIDGET);
+}
+
+/* A dark ground filled on a picked surface: FontLab's own choice for contrast, drawn as it is. For a
+ * light pick, it fills the selected row navy (#2a3754) so that the sample shows; mapped, the row turned
+ * pale (the owner's recording, a white pick). Light grounds (the rows' paper) are mapped as anywhere. */
+#define PICKED_DARK_GROUND_OKL 0.5
+static int picked_dark_ground(const void *painter, const qcolor *c)
+{
+    double l, chroma;
+    if (!picked_target(painter))
+        return 0;
+    oklab_of(painted_rgba(c) & 0xffffffU, &l, &chroma);
+    return l < PICKED_DARK_GROUND_OKL;
 }
 
 /* A brush set on a picked surface: drawn as it is, unless it is FontLab's interface gray. */
@@ -1035,7 +1048,7 @@ static void trace_pen(int hook, const void *painter, const void *in, const void 
         qcolor m;                                                     \
         const qcolor *use = c;                                        \
         hook_calls[index]++;                                          \
-        if (on_screen(painter) && map_qcolor(c, &m)) {                \
+        if (on_screen(painter) && !picked_dark_ground(painter, c) && map_qcolor(c, &m)) { \
             hook_changed[index]++;                                    \
             use = &m;                                                 \
         }                                                             \

@@ -285,6 +285,49 @@ PICKER_FRAME = u"\nQtColorPicker { border: 1px solid #55555a; border-radius: 2px
 # and a dark arrow after this gap: the "picker" effect maps all of it but the swatch's inside (the
 # frame on the swatch's side stayed white).
 PICKER_SWATCH_GAP = 3  # the swatch's side ends this far past a square as tall as the picker
+
+
+def swatch_rect(image, x, y, max_x):
+    """The rectangle of the color at (x, y) in a QImage, found along its row (up to max_x) and its column: a picker's
+    whole swatch. Kept as drawn: a picker painting its swatch wider than the square (Overlay Fonts', 21 by 18 pixels)
+    had its edges mapped, and a black pick showed in a white frame (the owner's recording, November 26); colored picks
+    kept their edges by their chroma only."""
+    QRect = _core("QRect")
+    color = image.pixel(x, y)
+    left, right, top, bottom = x, x, y, y
+    while left > 0 and image.pixel(left - 1, y) == color:
+        left -= 1
+    while right + 1 < max_x and image.pixel(right + 1, y) == color:
+        right += 1
+    while top > 0 and image.pixel(x, top - 1) == color:
+        top -= 1
+    while bottom + 1 < image.height() and image.pixel(x, bottom + 1) == color:
+        bottom += 1
+    return QRect(left, top, right - left + 1, bottom - top + 1)
+
+
+PICKER_DARK_RING = 0x80  # the frame's pixels darker than this in every channel are dark mode's own
+
+
+def dark_ring_image(image, rect):
+    """A transparent QImage the size of `image` holding the dark pixels of the one-pixel ring around `rect` (dark mode's
+    #55555a frame, PICKER_FRAME), to draw as they are: mapped again, they made a faint light edge that other color
+    slots do not have (the owner's image 153). A picker's own light frame is left out (mapped), or None if none."""
+    QImage = _gui("QImage")
+    ring = QImage(image.width(), image.height(), QImage.Format_ARGB32)
+    ring.fill(0)
+    found = False
+    x0, y0 = rect.x() - 1, rect.y() - 1
+    x1, y1 = rect.x() + rect.width(), rect.y() + rect.height()
+    for y in range(max(0, y0), min(image.height(), y1 + 1)):
+        for x in range(max(0, x0), min(image.width(), x1 + 1)):
+            if x0 < x < x1 and y0 < y < y1:
+                continue  # (inside: the swatch)
+            value = image.pixel(x, y)
+            if value >> 24 and max((value >> 16) & 255, (value >> 8) & 255, value & 255) < PICKER_DARK_RING:
+                ring.setPixel(x, y, value)
+                found = True
+    return ring if found else None
 PICKER_KEEP_CHROMA = 48  # around the swatch's inside, pixels this colored keep their color
 # Color pickers and mark-color buttons keep their look, the white "no color" slot included (the owner
 # preferred that to a half-dark frame).
@@ -2417,6 +2460,12 @@ def _effect_classes():
                             if _gui("QColor").fromRgba(image.pixel(probe_x, probe_y)).alpha() < 200:
                                 # Some pickers paint "no color" transparent: give them the white slot others paint.
                                 painter.fillRect(inside.translated(offset), Qt.white)
+                            else:
+                                inside = inside.united(swatch_rect(image, probe_x, probe_y, min(
+                                    pixmap.width(), pixmap.height() + PICKER_SWATCH_GAP)))
+                                ring = dark_ring_image(image, inside)
+                                if ring is not None:
+                                    painter.drawImage(offset, ring)
                             painter.drawPixmap(inside.translated(offset), pixmap, inside)
                         # Around that square, only the light frame is mapped: a picker that paints its
                         # swatch at full height (the mark color's) keeps its color to the edges.
@@ -5089,7 +5138,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 26
+HOOKS_VERSION = 27
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 

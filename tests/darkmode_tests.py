@@ -1220,6 +1220,74 @@ class FakeHooks(object):
         return 24
 
 
+class SwatchRectTests(DarkModeCase):
+    """The owner, November 26 (a recording): Overlay Fonts' color slot showed a black pick in a white frame. Its picker
+    paints the swatch 21 by 18 pixels; the picker effect kept a 14-pixel square as drawn and mapped the rest."""
+
+    class Picker(object):
+        def __init__(self):
+            self.rows = []
+            for y in range(20):
+                row = []
+                for x in range(39):
+                    frame = x == 0 or y in (0, 19)
+                    swatch = 1 <= x <= 21 and 1 <= y <= 18
+                    arrow = 26 <= x <= 31 and 7 <= y <= 12
+                    row.append(0xff505050 if frame and x <= 21 else 0xff000000 if swatch else
+                               0xf0404040 if arrow else 0)
+                self.rows.append(row)
+
+        def pixel(self, x, y):
+            return self.rows[y][x]
+
+        def height(self):
+            return 20
+
+    def test_the_whole_swatch_up_to_its_frame(self):
+        rect = dm.swatch_rect(self.Picker(), 5, 5, 23)
+        self.assertEqual(rect.args, (1, 1, 21, 18), "the black swatch, not its frame or the arrow")
+
+    def test_the_dark_frame_around_it_is_drawn_as_it_is(self):
+        """Image 153: dark mode's own dark frame, mapped again, made a faint light edge."""
+        class Image(object):
+            Format_ARGB32 = 5
+
+            def __init__(self, width, height, fmt):
+                self.pixels = {}
+
+            def fill(self, value):
+                pass
+
+            def setPixel(self, x, y, value):
+                self.pixels[(x, y)] = value
+
+        class Rect(object):
+            def x(self):
+                return 1
+
+            def y(self):
+                return 1
+
+            def width(self):
+                return 21
+
+            def height(self):
+                return 18
+
+        picker = self.Picker()
+        picker.width = lambda: 39
+        self.patch("_gui", lambda name: Image)
+        ring = dm.dark_ring_image(picker, Rect())
+        self.assertEqual(ring.pixels.get((5, 0)), 0xff505050, "the frame above the swatch")
+        self.assertEqual(ring.pixels.get((0, 5)), 0xff505050, "and beside it")
+        self.assertNotIn((5, 5), ring.pixels, "not the swatch")
+        self.assertNotIn((27, 8), ring.pixels, "not the arrow")
+        light = self.Picker()
+        light.width = lambda: 39
+        light.rows = [[0xffe0e0e0 if v == 0xff505050 else v for v in row] for row in light.rows]
+        self.assertIsNone(dm.dark_ring_image(light, Rect()), "a picker's own light frame: mapped")
+
+
 class SelectedAsPaintedTests(unittest.TestCase):
     """A selected row is drawn again as FontLab painted it only when that is light text on a dark row."""
 
