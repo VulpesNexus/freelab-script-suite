@@ -3096,5 +3096,19 @@ class MoveGuardTests(unittest.TestCase):
         self.assertEqual(seen, ["bar", "frame"])
 
 
+class CheckedIconTests(unittest.TestCase):
+    """FontLab's slant tool: its checked picture is drawn a pixel higher than its unchecked one (read live, November
+    26: opaque boxes (1, 1, 13, 14) and (1, 0, 13, 13) in 16 by 17)."""
+
+    def test_the_slant_tools_checked_picture_goes_down_a_pixel(self):
+        self.assertEqual(dm.checked_shift((1, 1, 13, 14), (1, 0, 13, 13)), (0, 1))
+
+    def test_pictures_that_line_up_or_differ_are_left_alone(self):
+        self.assertIsNone(dm.checked_shift((1, 1, 9, 13), (1, 1, 9, 13)), "the rotate tool's: nothing to mend")
+        self.assertIsNone(dm.checked_shift((1, 1, 13, 14), (1, 0, 12, 13)), "another drawing, not a shift")
+        self.assertIsNone(dm.checked_shift((1, 5, 13, 18), (1, 0, 13, 13)), "too far to be a slip")
+        self.assertIsNone(dm.checked_shift(None, (1, 0, 13, 13)))
+
+
 if __name__ == "__main__":
     unittest.main()

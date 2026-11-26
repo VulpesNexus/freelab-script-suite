@@ -1435,6 +1435,95 @@ def _on_guarded_mouse(widget, event, kind):
     return True
 
 
+# FontLab's own defect, mended here whether dark mode is on or off: the slant tool's picture for its checked state is
+# drawn a pixel higher in its image than the unchecked one (16 by 17 both, read live on 2026-11-26; every other
+# tool's two line up), so its icon jumps up as the tool is checked, in FontLab's light look too. The button is given
+# the same icon with the checked picture moved to where the unchecked one is.
+ALIGNED_ICONS = (("ToolbarPanel", "buttonSlant"),)
+ALIGN_MAX_SHIFT = 2  # pixels: a larger gap between the two pictures is a drawing of its own, left alone
+
+
+def _opaque_box(image):
+    """(left, top, right, bottom) of a QImage's opaque pixels, or None."""
+    QColor = _gui("QColor")
+    left = top = right = bottom = None
+    for y in range(image.height()):
+        for x in range(image.width()):
+            if QColor.fromRgba(image.pixel(x, y)).alpha() < 128:
+                continue
+            left = x if left is None or x < left else left
+            right = x if right is None or x > right else right
+            top = y if top is None or y < top else top
+            bottom = y if bottom is None or y > bottom else bottom
+    return None if left is None else (left, top, right, bottom)
+
+
+def checked_shift(off_box, on_box):
+    """(dx, dy) that moves the checked picture onto the unchecked one, when it is the same drawing shifted by at
+    most ALIGN_MAX_SHIFT; None otherwise (nothing to mend, or not a shift)."""
+    if off_box is None or on_box is None:
+        return None
+    dx, dy = off_box[0] - on_box[0], off_box[1] - on_box[1]
+    if (dx, dy) == (0, 0) or abs(dx) > ALIGN_MAX_SHIFT or abs(dy) > ALIGN_MAX_SHIFT:
+        return None
+    if (off_box[2] - off_box[0], off_box[3] - off_box[1]) != (on_box[2] - on_box[0], on_box[3] - on_box[1]):
+        return None
+    return dx, dy
+
+
+def _align_checked_icon(button):
+    """The button given its icon with each checked picture moved onto the unchecked one (see ALIGNED_ICONS). True
+    when it was changed; an icon already aligned is left as it is, so this can run again."""
+    QIcon, QPixmap, QPainter = _gui("QIcon"), _gui("QPixmap"), _gui("QPainter")
+    icon = _prop(button, "icon")
+    if icon is None or icon.isNull():
+        return False
+    sizes = list(icon.availableSizes(QIcon.Normal, QIcon.Off))
+    if not sizes:
+        return False
+    size = max(sizes, key=lambda s: s.width() * s.height())
+    shift = checked_shift(_opaque_box(icon.pixmap(size, QIcon.Normal, QIcon.Off).toImage()),
+                          _opaque_box(icon.pixmap(size, QIcon.Normal, QIcon.On).toImage()))
+    if shift is None:
+        return False
+    aligned = QIcon()
+    for mode in (QIcon.Normal, QIcon.Disabled, QIcon.Active, QIcon.Selected):
+        for state in (QIcon.Off, QIcon.On):
+            for each in icon.availableSizes(mode, state):
+                picture = icon.pixmap(each, mode, state)
+                if state == QIcon.On:
+                    moved = QPixmap(picture.size())
+                    moved.fill(_core("Qt").transparent)
+                    painter = QPainter(moved)
+                    try:
+                        painter.drawPixmap(shift[0], shift[1], picture)
+                    finally:
+                        painter.end()
+                    picture = moved
+                aligned.addPixmap(picture, mode, state)
+    button.setIcon(aligned)
+    return True
+
+
+def _align_icons(app):
+    """FontLab's icons named in ALIGNED_ICONS mended, once a session (the tool bar is made at launch). Never raises."""
+    state = _state()
+    if state.get("icons_aligned"):
+        return
+    try:
+        QToolButton = _gui("QToolButton")
+        for widget in app.allWidgets():
+            for owner, name in ALIGNED_ICONS:
+                if _class_name(widget) != owner:
+                    continue
+                for button in widget.findChildren(QToolButton):
+                    if button.objectName == name:
+                        _align_checked_icon(button)
+                        state["icons_aligned"] = True
+    except Exception as exc:
+        _note_error("icon alignment", exc)
+
+
 def _on_style_change(widget):
     """A watched widget was restyled: darken its new stylesheet before it paints."""
     state = _state()
@@ -4563,6 +4652,8 @@ def _focus_hook(*args):
     if module is not None:
         if len(args) > 1:
             module._guard_focus(args[1])
+        if not _state().get("icons_aligned"):
+            module._align_icons(_qt()[0].instance())
         module._on_focus()
 
 
@@ -5447,6 +5538,7 @@ def startup():
     app = _qt()[0].instance()
     if app is not None:
         _hook_focus(app)  # (Overlay Fonts' moves guarded, dark mode on or off: see MOVE_GUARD_WINDOWS)
+        _align_icons(app)  # (and again at focus changes until the tool bar is there: see ALIGNED_ICONS)
     if (windows_is_dark() if follow else settings.get("enabled")):
         apply_dark()
         schedule_reapply()
