@@ -3498,11 +3498,11 @@ def reorder_components(layer, names):
             take = permutation_to(current, target)
         except StopIteration:
             raise FixError(u"FontLab changed the layer's shapes")
-        argument = [shapes[k].id for k in take] if attempt == "ids" else take if attempt == "take" else inverse(take)
         try:
+            argument = [shapes[k].id for k in take] if attempt == "ids" else take if attempt == "take" else inverse(take)
             layer.reorderShapes(argument)
         except Exception:
-            pass
+            pass  # (this reading refused, or its shapes have no id: the next is tried)
     if [shape_signature(shape) for shape in list(layer.shapes)] != target:
         raise FixError(u"FontLab did not reorder the components")
 
