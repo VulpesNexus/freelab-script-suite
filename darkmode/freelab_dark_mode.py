@@ -3578,6 +3578,21 @@ def _freelab_view_text(widget):
         return False
 
 
+TEXT_BOX_CLASSES = ("QTextEdit", "QPlainTextEdit")  # (QTextBrowser derives from QTextEdit)
+
+
+def _freelab_text_box(widget):
+    """Whether a widget is the text area of a text box (TEXT_BOX_CLASSES) in one of FreeLab's own windows. Never
+    raises."""
+    try:
+        if _prop(widget, "objectName") != "qt_scrollarea_viewport":
+            return False
+        parent = widget.parentWidget()
+        return parent is not None and any(parent.inherits(c) for c in TEXT_BOX_CLASSES) and _in_freelab_window(parent)
+    except Exception:
+        return False
+
+
 def _in_freelab_window(widget):
     """Whether the widget is (in) one of FreeLab's own windows. Never raises."""
     try:
@@ -4422,6 +4437,15 @@ def process(widget):
     if name in PICKED_BARS and _native_hooked() and _picked_surface(widget):
         _hook_island(widget)  # (color controls are left alone otherwise: see PICKED_BARS)
         return
+    if _freelab_text_box(widget):
+        # The text area of a FreeLab tool's text box (a Code preview, a log): no effect, the box's text smoothed in
+        # grays. Through the defringe effect, colored code came out gray inside each letter, its color left only at
+        # the edges (the owner's images 165 and 166, 2026-11-26): thin colored strokes are all edge pixels, which the
+        # effect could not tell from ClearType's fringes. Drawn in grays, there are no fringes to take out.
+        _forget_effect(widget)
+        _gray_text(widget.parentWidget())
+        _note_sheet_as_seen(widget)
+        return
     if _freelab_text(widget):
         # A FreeLab tool's list, log, label, tab, or button, drawn by FreeLab from the dark palette: its text's
         # ClearType edges made gray by the defringe effect, which leaves every real color as drawn, so one that
@@ -5056,7 +5080,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 28
+HOOKS_VERSION = 30
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 

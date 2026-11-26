@@ -2683,6 +2683,22 @@ class InterfaceTextTests(DarkModeCase):
         self.assertEqual(self.kind(viewport), "defringe")
         self.assertIs(viewport.effect, effect)
 
+    def test_a_freelab_text_box_has_no_effect_and_gray_smoothing(self):
+        """The owner's images 165 and 166: the Code preview's colored code came out gray inside each letter through
+        the defringe effect. A FreeLab text box's text area has no effect; the box smooths its text in grays."""
+        viewport = self.freelab_window()
+        window = viewport.parentWidget().parentWidget()
+        code = FakeWidget("QPlainTextEdit", "code", parent=window, inherits=("QPlainTextEdit", "QAbstractScrollArea"))
+        area = FakeWidget("QWidget", "qt_scrollarea_viewport", parent=code)
+        elsewhere = FakeWidget("QPlainTextEdit", "editor", parent=self.main, inherits=("QPlainTextEdit",))
+        self.assertTrue(dm._freelab_text_box(area))
+        self.assertFalse(dm._freelab_text_box(FakeWidget("QWidget", "qt_scrollarea_viewport", parent=elsewhere)),
+                         "outside FreeLab's windows: as before")
+        self.assertFalse(dm._freelab_text_box(viewport), "a list's text area: defringed as before")
+        self.on()
+        self.assertIsNone(area.effect)
+        self.assertIn("font", dm._record(code), "the box's font: grayscale smoothing, its own back when off")
+
     def test_a_freelab_tab_bar_left_alone_is_defringed(self):
         viewport = self.freelab_window()
         bar = FakeWidget("QTabBar", parent=viewport.parentWidget().parentWidget(), inherits=("QTabBar",))

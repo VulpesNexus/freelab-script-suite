@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 28
+#define FREELAB_HOOKS_VERSION 30
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -439,14 +439,14 @@ static int white_pen(const qcolor *c)
 }
 
 /* The pen to paint with: pen itself, or a mapped copy in tmp (then *copied is 1; destroy it after). */
-static const void *mapped_pen(const void *pen, qhandle *tmp, int *copied)
+static const void *mapped_pen(const void *pen, qhandle *tmp, int *copied, int map_white)
 {
     qcolor c, m;
     *copied = 0;
     if (!qt_pen_is_solid(pen))
         return pen; /* a gradient or texture pen: setColor would replace it */
     qt_pen_color(pen, &c);
-    if (white_pen(&c) || !map_qcolor(&c, &m))
+    if ((white_pen(&c) && !map_white) || !map_qcolor(&c, &m))
         return pen;
     qt_pen_copy(tmp, pen);
     qt_pen_set_color(tmp, &m);
@@ -514,6 +514,7 @@ typedef struct {
     uint32_t pen_out[NOTED_PAIRS], pen_in[NOTED_PAIRS], brush_out[NOTED_PAIRS], brush_in[NOTED_PAIRS];
     int pen_n, brush_n, pen_next, brush_next, has_pen, has_brush;
     int badge; /* its brush is a light color kept as it is (see dark_on_badge) */
+    int dark_box; /* its brush is a dark box mapped light (see on_dark_box) */
     qhandle pen, brush; /* the copies last handed out */
 } painter_note;
 static painter_note painter_notes[PAINTERS_MAX];
@@ -524,7 +525,7 @@ static void drop_note(painter_note *n)
         qt_pen_dtor(&n->pen);
     if (n->has_brush)
         qt_brush_dtor(&n->brush);
-    n->pen_n = n->brush_n = n->pen_next = n->brush_next = n->has_pen = n->has_brush = n->badge = 0;
+    n->pen_n = n->brush_n = n->pen_next = n->brush_next = n->has_pen = n->has_brush = n->badge = n->dark_box = 0;
 }
 
 static void note_painter(const void *painter)
@@ -641,6 +642,40 @@ static int dark_on_badge(const void *painter, const qcolor *c)
         return 0;
     badge_kept++;
     return 1;
+}
+
+/* Dark boxes: FontLab fills a label dark and writes on it in white (on the canvas, the glyph's caption while
+ * everything is selected, the measurements shown on hovering). The fill is mapped light, as dark ink is; the
+ * white text, kept white as white pens are (see white_pen), then stood white on light gray, unreadable (the
+ * owner's image 159, 2026-11-26). While the painter's brush is such a box, white pens are mapped with it. A box:
+ * a solid fill, mostly opaque, of little color (a dark colored fill is kept: CONTENT_KEEP_CHROMA), darker than
+ * DARK_BOX_OKL but not black (FontLab's labels: #282828, #434343; black is a glyph's fill, with white marks on
+ * it that stay white). Any other brush ends it. */
+#define DARK_BOX_OKL 0.5
+#define DARK_BOX_MIN_OKL 0.15
+#define DARK_BOX_MIN_ALPHA 128
+
+static int dark_box_color(const qcolor *c)
+{
+    uint32_t argb = painted_rgba(c);
+    double l, chroma;
+    if ((argb >> 24) < DARK_BOX_MIN_ALPHA)
+        return 0;
+    oklab_of(argb & 0xffffffU, &l, &chroma);
+    return l < DARK_BOX_OKL && l >= DARK_BOX_MIN_OKL && chroma < CONTENT_KEEP_CHROMA;
+}
+
+static void note_dark_box(const void *painter, int dark_box)
+{
+    painter_note *n = find_note(painter);
+    if (n)
+        n->dark_box = dark_box;
+}
+
+static int on_dark_box(const void *painter)
+{
+    painter_note *n = find_note(painter);
+    return n != 0 && n->dark_box;
 }
 
 /* The light palette's slot for a color the dark palette holds there, or -1. */
@@ -778,6 +813,39 @@ static int is_picture(const uint8_t *bits, int w, int h, int stride, int format,
     return colored >= PICTURE_MIN && colored * 100 >= visible * PICTURE_SHARE;
 }
 
+/* An icon FontLab draws itself on a hooked surface (its panels' tabs: the node panel's note, the anchors' red
+ * pin): small, on transparency. Mapped color by color with content's tints kept, the node icon's pale yellow note
+ * came out an olive block and the red marks dimmed (the owner's images 161 to 163, 2026-11-26). It is mapped as
+ * dark mode maps every other icon (the script engine's map_image with anchors "icon"): its faces by anchor
+ * blends, its colored marks kept. Straight alpha for the pixel helper, premultiplied again after. */
+#define ICON_MAX_SIDE 32
+static void map_icon_pixels(uint8_t *bits, int w, int h, int format)
+{
+    uint32_t *p = (uint32_t *)bits;
+    int64_t i, n = (int64_t)w * h;
+    if (format == QIMAGE_ARGB32_PREMULTIPLIED) {
+        for (i = 0; i < n; i++) {
+            uint32_t v = p[i], a = v >> 24, r, g, b;
+            if (a == 0 || a == 255)
+                continue;
+            r = ((v >> 16) & 255) * 255 / a;
+            g = ((v >> 8) & 255) * 255 / a;
+            b = (v & 255) * 255 / a;
+            p[i] = (a << 24) | ((r > 255 ? 255 : r) << 16) | ((g > 255 ? 255 : g) << 8) | (b > 255 ? 255 : b);
+        }
+    }
+    freelab_map_anchors(bits, n, w, ANCHORS_ICON, hook_dark_l, hook_light_l, 0.0, hook_dark_l, 1);
+    if (format == QIMAGE_ARGB32_PREMULTIPLIED) {
+        for (i = 0; i < n; i++) {
+            uint32_t v = p[i], a = v >> 24;
+            if (a == 255)
+                continue;
+            p[i] = (a << 24) | (((((v >> 16) & 255) * a + 127) / 255) << 16) | (((((v >> 8) & 255) * a + 127) / 255) << 8)
+                   | (((v & 255) * a + 127) / 255);
+        }
+    }
+}
+
 /* Opaque images up to this many pixels are mapped by anchor blends (the script engine's islands):
  * text smoothed on paper keeps its coverage, which a color-by-color mapping bent (edges too thin). */
 #define ANCHORED_MAX_PIXELS (1 << 20)
@@ -795,6 +863,10 @@ static void map_image_pixels(void *image, int format, int mode, int pictures)
         return;
     if (pictures && mode != SCREEN_SUBPIXEL && color_content && is_picture(bits, w, h, stride, format, clear))
         return; /* a color glyph: drawn as the font has it */
+    if (mode != SCREEN_SUBPIXEL && clear && w <= ICON_MAX_SIDE && h <= ICON_MAX_SIDE && stride == w * 4) {
+        map_icon_pixels(bits, w, h, format);
+        return;
+    }
     if (mode == SCREEN_SUBPIXEL && stride == w * 4) {
         /* opaque ClearType text on paper: the pixel helper's subpixel mapping, as the script engine's */
         freelab_map_anchors(bits, (int64_t)w * h, w, ANCHORS_SUBPIXEL, hook_dark_l, hook_light_l, 0.0,
@@ -1096,7 +1168,8 @@ static void w_set_pen_color(void *p, const qcolor *c)
         if (picked_frame(p, c, &m)) {
             hook_changed[H_SET_PEN_COLOR]++;
             use = &m;
-        } else if ((!white_pen(c) || palette_light_color(c)) && !dark_on_badge(p, c) && map_qcolor(c, &m)) {
+        } else if ((!white_pen(c) || palette_light_color(c) || on_dark_box(p)) && !dark_on_badge(p, c)
+                   && map_qcolor(c, &m)) {
             hook_changed[H_SET_PEN_COLOR]++;
             use = &m;
         }
@@ -1149,7 +1222,7 @@ static void w_set_pen(void *p, const void *pen)
             use = &tmp;
             copied = 1;
         } else if (!dark_on_badge(p, &c))
-            use = mapped_pen(pen, &tmp, &copied);
+            use = mapped_pen(pen, &tmp, &copied, on_dark_box(p));
     } else if (ink_target(p))
         use = ink_pen(pen, &tmp, &copied);
     hook_changed[H_SET_PEN] += copied;
@@ -1185,6 +1258,8 @@ static void w_set_brush(void *p, const void *brush)
 {
     int style = qt_brush_style(brush);
     note_badge(p, hooks_on && style == BRUSH_SOLID && badge_color(qt_color_rgba(qt_brush_color(brush))));
+    note_dark_box(p, hooks_on && style == BRUSH_SOLID && on_screen(p) && !picked_brush(p, brush)
+                     && dark_box_color(qt_brush_color(brush)));
     BRUSH_ON_SCREEN(H_SET_BRUSH, p, (note_brush(p, brush, use), ORIGINAL(H_SET_BRUSH, one_fn)(p, use)))
 }
 
