@@ -1177,6 +1177,10 @@ class FakeHooks(object):
         self.frames = count
         return count
 
+    def freelab_hooks_set_canvas(self, widgets, count, dark_l, paper_l):
+        self.canvas = (count, dark_l, paper_l)
+        return count
+
     def freelab_hooks_add_ink_module(self, module):
         return 2
 

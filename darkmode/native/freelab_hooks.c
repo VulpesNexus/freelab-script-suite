@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 38
+#define FREELAB_HOOKS_VERSION 39
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -312,12 +312,26 @@ static int64_t hook_changed[H_COUNT];
 
 /* Colors as the script maps them (lightness inverted in OKLab, grays to dark mode's grays); clearly
  * colored ones of middle lightness or lighter (selection blues, marks, node colors) kept. */
+/* The glyph canvases: their paper is the canvas' ground. FontLab paints a canvas on the workspace color dark mode
+ * sets (#f0f0f0, mapped to about #2a2a2a), but draws some of its own surfaces there in pure white (TrueType Hinting's
+ * strip of sizes and its pictures), which mapped to the darker #1f1f1f: a dark box on the canvas, where light mode has
+ * white on white (the owner's images 183 and 189, 2026-11-26). On a canvas, a neutral at least as light as the
+ * workspace color (canvas_paper_l) maps to the canvas' ground (canvas_dark_l), and a picture's paper too. */
+#define CANVAS_MAX 64
+static uintptr_t canvas_widgets[CANVAS_MAX];
+static int canvas_count, canvas_paint; /* canvas_paint: the painter screen_mode last looked at is on a canvas */
+static double canvas_dark_l = -1.0, canvas_paper_l = 2.0;
+#define CANVAS_NEUTRAL_CHROMA 0.02
+#define MAP_DARK_L (canvas_paint && canvas_dark_l >= 0.0 ? canvas_dark_l : hook_dark_l)
+
 static uint32_t map_qrgb(uint32_t rgb)
 {
     double l, chroma;
     oklab_of(rgb & 0xffffffU, &l, &chroma);
     if (chroma >= CONTENT_KEEP_CHROMA && l >= CONTENT_KEEP_MIN_OKL)
         return rgb;
+    if (canvas_paint && canvas_dark_l >= 0.0 && l >= canvas_paper_l && chroma < CANVAS_NEUTRAL_CHROMA)
+        return (rgb & 0xff000000U) | (mapped_one(0xffffffU, canvas_dark_l, hook_light_l, 0.0) & 0xffffffU);
     return (rgb & 0xff000000U) | (mapped_one(rgb & 0xffffffU, hook_dark_l, hook_light_l, hook_keep_tint) & 0xffffffU);
 }
 
@@ -374,6 +388,7 @@ static int screen_mode(const void *painter)
 {
     void *device;
     int type;
+    canvas_paint = 0;
     if (!hooks_on)
         return 0;
     device = qt_painter_device(painter);
@@ -386,6 +401,7 @@ static int screen_mode(const void *painter)
         return SCREEN_PLAIN;
     if ((!keep_count || !kept_widget(device)) && !frame_widget(device))
         return 0; /* not one of the hooked surfaces: the script engine's */
+    canvas_paint = canvas_count && in_sorted(canvas_widgets, canvas_count, (uintptr_t)device - QPAINTDEVICE_IN_QWIDGET);
     return subpixel_count && subpixel_widget(device) ? SCREEN_SUBPIXEL : SCREEN_PLAIN;
 }
 
@@ -852,11 +868,12 @@ static int64_t images_mapped, images_reused;
 static uint32_t memo_map(uint32_t rgb)
 {
     uint32_t h = (rgb * 2654435761U) >> 20; /* 12 bits */
-    if (memo_used[h] && memo_in[h] == rgb)
+    uint8_t kind = (uint8_t)(1 + (canvas_paint != 0)); /* (a canvas maps its paper otherwise: kept apart) */
+    if (memo_used[h] == kind && memo_in[h] == rgb)
         return memo_out[h];
     memo_in[h] = rgb;
     memo_out[h] = map_qrgb(rgb | 0xff000000U) & 0xffffffU;
-    memo_used[h] = 1;
+    memo_used[h] = kind;
     return memo_out[h];
 }
 
@@ -956,7 +973,7 @@ static void map_icon_pixels(uint8_t *bits, int w, int h, int format)
             p[i] = (a << 24) | ((r > 255 ? 255 : r) << 16) | ((g > 255 ? 255 : g) << 8) | (b > 255 ? 255 : b);
         }
     }
-    freelab_map_anchors(bits, n, w, ANCHORS_ICON, hook_dark_l, hook_light_l, 0.0, hook_dark_l, 1);
+    freelab_map_anchors(bits, n, w, ANCHORS_ICON, MAP_DARK_L, hook_light_l, 0.0, MAP_DARK_L, 1);
     if (format == QIMAGE_ARGB32_PREMULTIPLIED) {
         for (i = 0; i < n; i++) {
             uint32_t v = p[i], a = v >> 24;
@@ -997,7 +1014,7 @@ static void map_image_pixels(void *image, int format, int mode, int pictures)
     }
     if (!clear && stride == w * 4 && (int64_t)w * h <= ANCHORED_MAX_PIXELS) {
         /* text or glyphs drawn on paper (an installed font's preview): mapped by anchor blends */
-        freelab_map_anchors(bits, (int64_t)w * h, w, ANCHORS_ALL, hook_dark_l, hook_light_l, hook_keep_tint,
+        freelab_map_anchors(bits, (int64_t)w * h, w, ANCHORS_ALL, MAP_DARK_L, hook_light_l, hook_keep_tint,
                             subpixel_background_okl, 1);
         return;
     }
@@ -1044,7 +1061,7 @@ static const void *mapped_image(const void *image, int mode)
         return image;
     if (__sync_lock_test_and_set(&image_busy, 1))
         return image; /* another thread is mapping: drawn as it is this once */
-    key = qt_image_cache_key(image) * 4 + (mode == SCREEN_SUBPIXEL) + 2 * color_content; /* a copy per mapping */
+    key = qt_image_cache_key(image) * 8 + (mode == SCREEN_SUBPIXEL) + 2 * color_content + 4 * (canvas_paint != 0); /* a copy per mapping */
     for (i = 0; i < IMAGE_SLOTS; i++) {
         if (image_cache[i].used && image_cache[i].key == key) {
             image_cache[i].stamp = ++image_clock;
@@ -1107,7 +1124,7 @@ static const void *mapped_pixmap(const void *pixmap, int mode)
     key = qt_pixmap_cache_key(pixmap);
     if (key == 0)
         return pixmap;
-    key = key * 4 + (mode == SCREEN_SUBPIXEL); /* the same copy in color or not: pictures are images' */
+    key = key * 8 + (mode == SCREEN_SUBPIXEL) + 4 * (canvas_paint != 0); /* the same copy in color or not: pictures are images' */
     if (__sync_lock_test_and_set(&image_busy, 1))
         return pixmap;
     for (i = 0; i < PIXMAP_SLOTS; i++) {
@@ -2023,6 +2040,27 @@ EXPORT int freelab_hooks_set_hooked(const uint64_t *widgets, int count)
     }
     keep_count = n;
     hooked_palette_count = 0; /* noted again as FontLab reads them (a deleted widget's may be reused) */
+    return n;
+}
+
+/* The glyph canvases (any order; at most CANVAS_MAX), the lightness their paper maps to, and the lightness from which
+ * a neutral is paper (the workspace color's): see canvas_widgets. A dark_l below 0 leaves canvases as any surface. */
+EXPORT int freelab_hooks_set_canvas(const uint64_t *widgets, int count, double dark_l, double paper_l)
+{
+    int i, j, n = 0;
+    for (i = 0; i < count && n < CANVAS_MAX; i++)
+        canvas_widgets[n++] = (uintptr_t)widgets[i];
+    for (i = 1; i < n; i++) {
+        uintptr_t v = canvas_widgets[i];
+        for (j = i - 1; j >= 0 && canvas_widgets[j] > v; j--)
+            canvas_widgets[j + 1] = canvas_widgets[j];
+        canvas_widgets[j + 1] = v;
+    }
+    canvas_dark_l = dark_l;
+    canvas_paper_l = paper_l;
+    canvas_count = n;
+    for (i = 0; i < MEMO; i++)
+        memo_used[i] = 0;
     return n;
 }
 

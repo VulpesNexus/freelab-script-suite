@@ -739,6 +739,19 @@ def _gray_byte(l):
     return float(_linear_to_byte(l * l * l))
 
 
+def SUBPIXEL_PAPER_OKL():
+    """The lightness TrueType Hinting's preview maps its white paper to: the canvas' own ground (the workspace color
+    dark mode sets, mapped), not the interface's darkest. Mapped to that, the preview stood in a darker box on the
+    canvas (the owner's images 183 and 189, 2026-11-26)."""
+    return oklab(*map_rgb(*_workspace_rgb()))[0]
+
+
+def _workspace_rgb():
+    """WORKSPACE_DARK's (r, g, b), from its #aarrggbb text."""
+    value = int(WORKSPACE_DARK.lstrip("#")[-6:], 16)
+    return (value >> 16) & 255, (value >> 8) & 255, value & 255
+
+
 def map_rgb(r, g, b, keep_tint=0.0, dark_l=None, light_l=None):
     """Map a light-theme color to its dark-theme counterpart (0-255 channels). Must match the native helper."""
     dark_l = DARK_OKL if dark_l is None else dark_l
@@ -2559,7 +2572,8 @@ def _effect_classes():
                     # a field, text typed in the Glyph window's small fields: the owner, November 24).
                     plain = gray and kind == "ink" and dark_ground(pixmap)
                     draw_mapped(painter, mapped_from, offset, whole, 0.0, None, -1.0, self.freelab_keep_tint, None, 0.0, 0,
-                                anchors, None, gray, QRect(whole) if kind in ("ink", "edges") else None, plain,
+                                anchors, SUBPIXEL_PAPER_OKL() if kind == "subpixel" else None, gray,
+                                QRect(whole) if kind in ("ink", "edges") else None, plain,
                                 # A list's rows, a text view's lines: light text ClearType has drawn on the dark ground (dark by
                                 # its stylesheet, or just mapped) keeps its blue and yellow edges through the
                                 # mapping; they are made gray after it. Found by tools/find_fringes.py on a
@@ -5241,7 +5255,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 38
+HOOKS_VERSION = 39
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
@@ -5317,6 +5331,7 @@ def _hooks():
     lib.freelab_hooks_set_picked.argtypes = [ctypes.c_void_p, ctypes.c_int]
     lib.freelab_hooks_set_text_strategy.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
     lib.freelab_hooks_set_frames.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    lib.freelab_hooks_set_canvas.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_double, ctypes.c_double]
     lib.freelab_hooks_add_ink_module.argtypes = [ctypes.c_void_p]
     lib.freelab_hooks_set_subpixel.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_double]
     lib.freelab_hooks_add_svg_module.argtypes = [ctypes.c_void_p]
@@ -5405,10 +5420,11 @@ def _install_hooks(app):
             raise RuntimeError("the native engine could not hook FontLab's calls")
         state["hooked"], state["hooked_lib"] = True, lib
         state["hooked_addresses"], state["ink_addresses"], state["picked_addresses"] = [], [], []
-        state["text_addresses"], state["frame_addresses"] = [], []
+        state["text_addresses"], state["frame_addresses"], state["canvas_addresses"] = [], [], []
         _send_picked(state)  # (none: the library keeps the last list for the FontLab session)
         _send_text_strategy(state)
         _send_frames(state)
+        _send_canvas(state)
         _update_hooked(app)
     except Exception as exc:
         _clear_native_pending()
@@ -5529,6 +5545,9 @@ def _hook_island(widget):
     if pointer and pointer not in state.setdefault("hooked_addresses", []):
         state["hooked_addresses"].append(pointer)
         _send_hooked(state)
+    if pointer and _canvas_island(widget) and pointer not in state.setdefault("canvas_addresses", []):
+        state["canvas_addresses"].append(pointer)  # (its paper the canvas' ground: see _send_canvas)
+        _send_canvas(state)
     if pointer and widget.inherits("QTabBar") and pointer not in state.setdefault("ink_addresses", []):
         # A tab bar's names are drawn by Qt (Qt5Widgets), whose dark pens the hooks map only on the ink list: the
         # document tabs' names came out black on the dark bar, a relaunch or not (the owner's image 179)
@@ -5595,6 +5614,22 @@ def _hook_frame(widget):
     return first
 
 
+def _send_canvas(state):
+    """The glyph canvases to the hooks, with the lightness their paper maps to (the workspace color's, mapped: about
+    #2a2a2a) and the lightness from which a neutral is paper (the workspace color's own): see freelab_hooks.c's
+    canvas_widgets."""
+    import ctypes
+    addresses = state.get("canvas_addresses", [])
+    table = (ctypes.c_uint64 * max(1, len(addresses)))(*addresses)
+    paper_l = oklab(*_workspace_rgb())[0] - 0.001
+    state["hooked_lib"].freelab_hooks_set_canvas(ctypes.addressof(table), len(addresses), SUBPIXEL_PAPER_OKL(), paper_l)
+
+
+def _canvas_island(widget):
+    parent = widget.parentWidget()
+    return _class_name(widget) == "QWidget" and parent is not None and _is_canvas(widget, _class_name(parent))
+
+
 def _send_frames(state):
     import ctypes
     addresses = state.get("frame_addresses", [])
@@ -5627,7 +5662,7 @@ def _update_hooked(app):
     state = _state()
     if state.get("hooked_lib") is None or not state.get("hooked"):
         return
-    addresses, inks, picked, texts, frames = [], [], [], [], []
+    addresses, inks, picked, texts, frames, canvases = [], [], [], [], [], []
     for widget in app.allWidgets():
         try:
             hooked, ink, frame = widget.property(HOOKED_PROP), widget.property(NATIVE_INK_PROP), widget.property(FRAME_PROP)
@@ -5644,6 +5679,8 @@ def _update_hooked(app):
                             picked.append(pointer)
                         if widget.inherits("QTabBar"):
                             inks.append(pointer)  # (its names Qt draws: see _hook_island)
+                        if _canvas_island(widget):
+                            canvases.append(pointer)
                     else:
                         inks.append(pointer)
         except Exception:
@@ -5654,6 +5691,9 @@ def _update_hooked(app):
     if frames != state.get("frame_addresses"):
         state["frame_addresses"] = frames
         _send_frames(state)
+    if canvases != state.get("canvas_addresses"):
+        state["canvas_addresses"] = canvases
+        _send_canvas(state)
     if texts != state.get("text_addresses"):
         state["text_addresses"] = texts
         _send_text_strategy(state)
