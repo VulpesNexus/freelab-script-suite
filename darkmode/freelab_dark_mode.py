@@ -324,7 +324,7 @@ SWEEP_MS = 500  # how often to look for widgets FontLab created or showed (750 w
 FULL_SWEEP_EVERY = 60  # every Nth sweep revisits every widget (replaced stylesheets, new icons): every 30 s
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 145
+NATIVE_VERSION = 147
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -828,8 +828,12 @@ def _native():
                     if pills is not None:
                         pills.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
                         pills.restype = ctypes.c_int64
+                    reground_light = getattr(lib, "freelab_reground_light", None)  # optional, as defringe is
+                    if reground_light is not None:
+                        reground_light.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
+                        reground_light.restype = ctypes.c_int64
                     state["native"] = (mapper, stats, collect, keyed, anchors, defringe, darkest, gray_ct, reground,
-                                       band_text, pills)
+                                       band_text, pills, reground_light)
                 else:
                     _note_error("native", "version mismatch")
             except Exception as exc:
@@ -909,9 +913,14 @@ def _redraw_from(index, name, drawn, mapped):
     return mapped
 
 
-def reground_image(drawn, mapped):
+def reground_image(drawn, mapped, light=False):
     """`mapped` with the colored text of `drawn` drawn again in its own colors over the mapped paper (see
-    freelab_reground)."""
+    freelab_reground); with `light`, light text too, and a sample drawn on a dark ground as it is (see
+    freelab_reground_light, for REGROUND_LIGHT_WIDGETS only)."""
+    if light:
+        native = _native()
+        if native is not None and len(native) > 11 and native[11] is not None:
+            return _redraw_from(11, "reground light", drawn, mapped)
     return _redraw_from(8, "reground", drawn, mapped)
 
 
@@ -931,17 +940,28 @@ def band_text_image(drawn, mapped):
 # Mapped, the colors changed (a dark red came out pink) and their edges broke into dots (the owner, November 25);
 # its widgets' colored text is drawn again in its own colors over the mapping (reground_image).
 REGROUND_WINDOWS = ("ActionOverlay",)
+# Of those, the widgets that show the samples (the list's rows, by its viewport, and the preview): there, a light color
+# picked is text too, and a sample FontLab drew on a dark ground is kept as drawn (the owner, November 26: #e7e3d7 came
+# out hollow in the list and dark olive in the preview). Not the window's other widgets, whose light grays are
+# borders and fields.
+REGROUND_LIGHT_WIDGETS = ("FontPreviewWidget", "ActionOverlayList")  # (the class, or its parent's)
 
 
 def _regrounds(effect):
-    """Whether an effect's widget is in a window whose colored text keeps its colors (REGROUND_WINDOWS), asked once
-    per effect. Never raises."""
+    """Whether an effect's widget is in a window whose colored text keeps its colors (REGROUND_WINDOWS): "light" for
+    REGROUND_LIGHT_WIDGETS, True for the window's others, False elsewhere. Asked once per effect. Never raises."""
     known = getattr(effect, "freelab_reground", None)
     if known is not None:
         return known
     try:
-        window = effect.freelab_widget.window()
+        widget = effect.freelab_widget
+        window = widget.window()
         known = window is not None and _class_name(window) in REGROUND_WINDOWS
+        if known:
+            parent = widget.parentWidget()
+            if _class_name(widget) in REGROUND_LIGHT_WIDGETS or (
+                    parent is not None and _class_name(parent) in REGROUND_LIGHT_WIDGETS):
+                known = "light"
     except Exception:
         known = False
     try:
@@ -2268,7 +2288,7 @@ def _effect_classes():
                 mapped = part if plain else map_image(part, min_l, keys, ink_below, keep_tint, light_l, edge_neutral,
                                                       edge_target, anchors, dark_l)
                 if reground and not plain:
-                    mapped = reground_image(drawn, mapped)
+                    mapped = reground_image(drawn, mapped, light=reground == "light")
                 if anchors == "all" and keep_tint > 0.0 and not plain:  # a canvas: a selected cell's name, anchors' pills
                     mapped = pills_image(drawn, band_text_image(drawn, mapped))
                 return defringe_image(mapped) if defringe else mapped

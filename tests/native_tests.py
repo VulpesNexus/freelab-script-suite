@@ -982,6 +982,95 @@ class ReviewOfNovember24Tests(unittest.TestCase):
         self.assertEqual(at(mapped, 30, 8), at(before, 30, 8), "the pill's gray as mapped")
         self.assertEqual(at(mapped, 31, 8), at(before, 31, 8), "black text as mapped")
 
+    def light_redraw(self, flat, width, name):
+        drawn = pixels(flat)
+        mapped = pixels(flat)
+        array = (ctypes.c_char * len(mapped)).from_buffer(mapped)
+        LIB.freelab_map_anchors(ctypes.addressof(array), len(mapped) // 4, width, 6, dm.DARK_OKL, dm.LIGHT_OKL, 0.0,
+                                dm.DARK_OKL, 1)
+        before = bytes(mapped)
+        function = getattr(LIB, name)
+        function.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
+        function.restype = ctypes.c_int64
+        source = (ctypes.c_char * len(drawn)).from_buffer(drawn)
+        written = function(ctypes.addressof(source), ctypes.addressof(array), len(mapped) // 4, width)
+
+        def at(buf, x, y):
+            return tuple(reversed(struct.unpack_from("<BBB", buf, 4 * (y * width + x))))
+        return written, before, bytes(mapped), at
+
+    def test_a_light_color_picked_keeps_its_own_color_in_a_sample(self):
+        """The owner, November 26: #e7e3d7 picked in Overlay Fonts came out hollow on the selected row (#e9f0ff): too
+        weak to pass for colored text, it was mapped with the paper, and only its smoothing came out light. In the
+        samples, a light color whose edges blend into the paper is text; the pill's white name, on its gray, is not."""
+        paper, text, gray, white = (0xe9, 0xf0, 0xff), (0xe7, 0xe3, 0xd7), (0x9d, 0x9d, 0x9d), (255, 255, 255)
+
+        def mix(a, b, share):
+            return tuple(int(round(x + share * (y - x))) for x, y in zip(a, b))
+
+        width = 60
+        rows = [[paper] * width for _ in range(24)]
+        for y in range(2, 22):  # two smoothed strokes of the light text
+            for x0 in (4, 14):
+                rows[y][x0], rows[y][x0 + 4] = mix(paper, text, 0.5), mix(paper, text, 0.3)
+                for x in range(x0 + 1, x0 + 4):
+                    rows[y][x] = text
+        for y in range(4, 20):  # a gray pill, its white name smoothed into the gray
+            for x in range(34, 58):
+                rows[y][x] = gray
+        for y in range(9, 15):
+            for x in range(40, 52):
+                rows[y][x] = white if x % 3 else mix(gray, white, 0.6)
+        flat = [c for row in rows for c in row]
+        written, before, plain, at = self.light_redraw(flat, width, "freelab_reground")
+        self.assertEqual(written, 0, "too weak for colored text")
+        written, before, after, at = self.light_redraw(flat, width, "freelab_reground_light")
+        self.assertGreater(written, 0)
+        ground = at(after, 26, 10)
+        self.assertLess(sum(ground), 3 * 80, "the paper mapped dark")
+        self.assertEqual(at(after, 6, 10), text, "the text in its own color")
+        half = at(after, 4, 10)
+        for ch in range(3):
+            self.assertAlmostEqual(half[ch], (ground[ch] + text[ch]) / 2.0, delta=4, msg="half of it over the paper")
+        for x, y in ((36, 6), (41, 11), (42, 12), (45, 10)):
+            self.assertEqual(at(after, x, y), at(before, x, y), "the pill and its name as mapped at %d,%d" % (x, y))
+
+    def test_a_sample_drawn_on_a_dark_ground_is_kept_as_drawn(self):
+        """The owner, November 26: Overlay Fonts' preview, which FontLab draws on the dark palette already (#e7e3d7 on
+        #2d2d30), came out dark olive on dark once mapped. With no light paper and a dark ground, it is kept."""
+        ground, text = (0x2d, 0x2d, 0x30), (0xe7, 0xe3, 0xd7)
+        width = 30
+        rows = [[ground] * width for _ in range(20)]
+        for y in range(3, 17):
+            for x in range(8, 12):
+                rows[y][x] = text
+        flat = [c for row in rows for c in row]
+        written, _, _, _ = self.light_redraw(flat, width, "freelab_reground")
+        self.assertEqual(written, 0, "no light paper: nothing for the colored-text pass")
+        written, _, after, at = self.light_redraw(flat, width, "freelab_reground_light")
+        self.assertEqual(written, width * 20)
+        self.assertEqual(at(after, 9, 10), text)
+        self.assertEqual(at(after, 2, 2), ground)
+
+    def test_a_sample_drawn_on_nothing_is_kept_as_drawn(self):
+        """The preview as its effect gets it: light letters on transparent pixels, over the dark window."""
+        text = (0xe7, 0xe3, 0xd7)
+        width = 30
+        drawn = bytearray(4 * width * 20)  # (transparent)
+        for y in range(3, 17):
+            for x in range(8, 12):
+                struct.pack_into("<BBBB", drawn, 4 * (y * width + x), text[2], text[1], text[0], 255)
+        mapped = bytearray(drawn)
+        array = (ctypes.c_char * len(mapped)).from_buffer(mapped)
+        LIB.freelab_map_anchors(ctypes.addressof(array), width * 20, width, 6, dm.DARK_OKL, dm.LIGHT_OKL, 0.0,
+                                dm.DARK_OKL, 1)
+        LIB.freelab_reground_light.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
+        LIB.freelab_reground_light.restype = ctypes.c_int64
+        source = (ctypes.c_char * len(drawn)).from_buffer(drawn)
+        self.assertEqual(LIB.freelab_reground_light(ctypes.addressof(source), ctypes.addressof(array), width * 20,
+                                                    width), width * 20)
+        self.assertEqual(bytes(mapped), bytes(drawn), "as drawn")
+
     def test_a_letter_on_a_colored_disc_keeps_the_disc_around_it(self):
         """The owner, November 25: the Fonts panel's selected style, a dark "R" on a light-blue disc, came out with
         a gray block beside the letter: the disc's pixels by the strokes were taken for the letter's ClearType

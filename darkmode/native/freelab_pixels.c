@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 145
+#define FREELAB_PIXELS_VERSION 147
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -3345,9 +3345,131 @@ static int halo_blend(uint8_t *px, double dark_l, double light_l)
 #define REGROUND_MIN_STEP 3 /* per channel: a pixel this near its paper is paper */
 #define REGROUND_REACH 2 /* a core this near */
 #define REGROUND_PAPER_REACH 4 /* a paper pixel this near (else the main paper) */
+/* Light text (freelab_reground_light: a near-white color picked, #e7e3d7 on the selected row's #e9f0ff, the owner,
+ * 2026-11-26): too weak for the tests above, and frequent enough to pass for a paper, it was mapped with the paper
+ * and its letters came out hollow. In the widgets that show samples, a light color is text when its edges blend
+ * into a paper: its neighbors are mostly paper or the smoothing between that paper and it. A paper's neighbors
+ * are other papers, edge to edge (a row beside a row); a pill's white name sits on the pill's gray. */
+#define REGROUND_LIGHT_PAPERS 6 /* paper candidates looked at, before those that are light text are set aside */
+#define REGROUND_LIGHT_MIN_EDGES 8 /* edge neighbors that are smoothing toward a paper, at least */
+#define REGROUND_LIGHT_SMOOTH 0.15 /* and this share of its edge neighbors, */
+#define REGROUND_LIGHT_ON_PAPER 0.75 /* smoothing and paper together this share at least */
+#define REGROUND_LIGHT_FIT 0.4 /* a light text's line is short: a pixel on it within this share of its length */
+#define REGROUND_LIGHT_PASSES 64 /* sweeps that carry "reaches a paper" through a light text's cores, at most */
+#define REGROUND_DARK_GROUND_HLS 0.4 /* a sample with no light paper, its most frequent color this dark: as drawn */
+#define REGROUND_PAPER_SPAN 0.6 /* on a dark ground, a light paper runs this share of the picture's width on a line */
 static uint32_t reground_keys[REGROUND_TABLE];
 static int64_t reground_counts[REGROUND_TABLE];
 static uint8_t reground_core[MAX_INDEXED];
+static uint8_t reground_asked[REGROUND_TABLE];
+static int64_t reground_smooth[REGROUND_TABLE], reground_papered[REGROUND_TABLE], reground_other[REGROUND_TABLE];
+
+static void rgb_of(uint32_t rgb, int c[3]);
+
+static double reground_tolerance(double len, int light)
+{
+    double tol = 3.0 * REGROUND_FIT * REGROUND_FIT;
+    if (light && REGROUND_LIGHT_FIT * REGROUND_LIGHT_FIT * len < tol)
+        tol = REGROUND_LIGHT_FIT * REGROUND_LIGHT_FIT * len; /* (len: the line's squared length) */
+    return tol;
+}
+
+static int64_t reground_find(uint32_t rgb)
+{
+    uint32_t key = (rgb & 0xffffffU) | 0x1000000U, h = (uint32_t)(key * 2654435761U) >> 18;
+    int probe;
+    for (probe = 0; probe < REGROUND_TABLE; probe++, h = (h + 1) & (REGROUND_TABLE - 1)) {
+        if (reground_keys[h] == key)
+            return (int64_t)h;
+        if (reground_keys[h] == 0)
+            return -1;
+    }
+    return -1;
+}
+
+/* For each color of the table marked in reground_asked, its pixels' four neighbors of another color counted as a
+ * paper, as smoothing from a paper toward it (on the line, short of both ends), or as something else. A neighbor
+ * on the line near the color's own end is its own shade, not counted. */
+static void reground_edges(const uint32_t *p, int64_t count, int64_t width, const uint32_t *papers, int npapers)
+{
+    int64_t i, rows = count / width, last_k = -1;
+    uint32_t last = 0xffffffffU;
+    for (i = 0; i < REGROUND_TABLE; i++)
+        reground_smooth[i] = reground_papered[i] = reground_other[i] = 0;
+    for (i = 0; i < count; i++) {
+        int64_t k, x, y;
+        int d, c[3];
+        uint32_t own;
+        if ((p[i] >> 24) < ANCHOR_MIN_ALPHA)
+            continue;
+        own = p[i] & 0xffffffU;
+        if (own != last) { /* (runs of one color: looked up once) */
+            last = own;
+            last_k = reground_find(own);
+        }
+        k = last_k;
+        if (k < 0 || !reground_asked[k])
+            continue;
+        rgb_of(own, c);
+        x = i % width;
+        y = i / width;
+        for (d = 0; d < 4; d++) {
+            int64_t xx = x + (d == 0) - (d == 1), yy = y + (d == 2) - (d == 3), n;
+            uint32_t near;
+            int m, kind = 0; /* 1 paper, 2 smoothing, 3 its own shade */
+            if (xx < 0 || xx >= width || yy < 0 || yy >= rows)
+                continue;
+            n = yy * width + xx;
+            if ((p[n] >> 24) < ANCHOR_MIN_ALPHA) {
+                reground_other[k]++;
+                continue;
+            }
+            near = p[n] & 0xffffffU;
+            if (near == own)
+                continue;
+            for (m = 0; m < npapers && !kind; m++)
+                if (near == papers[m])
+                    kind = 1;
+            for (m = 0; m < npapers && !kind; m++) {
+                int pp[3], q[3], ch;
+                double dot = 0.0, len = 0.0, share, fit = 0.0;
+                if (papers[m] == own)
+                    continue;
+                rgb_of(papers[m], pp);
+                rgb_of(near, q);
+                for (ch = 0; ch < 3; ch++) {
+                    dot += (double)(q[ch] - pp[ch]) * (double)(c[ch] - pp[ch]);
+                    len += (double)(c[ch] - pp[ch]) * (double)(c[ch] - pp[ch]);
+                }
+                if (len <= 0.0)
+                    continue;
+                share = dot / len;
+                if (share <= 0.05)
+                    continue;
+                for (ch = 0; ch < 3; ch++) {
+                    double dd = (double)(q[ch] - pp[ch]) - (share > 1.0 ? 1.0 : share) * (double)(c[ch] - pp[ch]);
+                    fit += dd * dd;
+                }
+                if (fit <= reground_tolerance(len, 1))
+                    kind = share >= 0.95 ? 3 : 2;
+            }
+            if (kind == 1)
+                reground_papered[k]++;
+            else if (kind == 2)
+                reground_smooth[k]++;
+            else if (kind == 0)
+                reground_other[k]++;
+        }
+    }
+}
+
+static int reground_sits(int64_t k)
+{
+    int64_t total = reground_smooth[k] + reground_papered[k] + reground_other[k];
+    return total > 0 && reground_smooth[k] >= REGROUND_LIGHT_MIN_EDGES
+        && (double)reground_smooth[k] >= REGROUND_LIGHT_SMOOTH * (double)total
+        && (double)(reground_smooth[k] + reground_papered[k]) >= REGROUND_LIGHT_ON_PAPER * (double)total;
+}
 
 static double reground_unmix(const uint8_t *q, const int paper[3], double color[3])
 {
@@ -3401,11 +3523,11 @@ static void rgb_of(uint32_t rgb, int c[3])
     c[2] = (int)(rgb & 255U);
 }
 
-EXPORT int64_t freelab_reground(const uint8_t *orig, uint8_t *out, int64_t count, int64_t width)
+static int64_t reground_run(const uint8_t *orig, uint8_t *out, int64_t count, int64_t width, int light)
 {
     const uint32_t *p = (const uint32_t *)orig;
-    uint32_t papers[REGROUND_PAPERS], texts[REGROUND_TEXTS];
-    int npapers = 0, ntexts = 0, k, j, main_paper[3], main_ground[3], have_ground = 0;
+    uint32_t papers[REGROUND_LIGHT_PAPERS], texts[REGROUND_TEXTS];
+    int npapers = 0, ntexts = 0, k, j, main_paper[3], main_ground[3], have_ground = 0, text_light[REGROUND_TEXTS];
     int64_t i, rows, written = 0, opaque = 0;
     if (count <= 0 || width <= 0 || count > MAX_INDEXED)
         return 0;
@@ -3435,7 +3557,7 @@ EXPORT int64_t freelab_reground(const uint8_t *orig, uint8_t *out, int64_t count
         }
     }
     /* the papers, most frequent first, and the text colors */
-    for (j = 0; j < REGROUND_PAPERS; j++) {
+    for (j = 0; j < (light ? REGROUND_LIGHT_PAPERS : REGROUND_PAPERS); j++) {
         int64_t best = -1;
         for (k = 0; k < REGROUND_TABLE; k++) {
             int c[3], m, taken = 0;
@@ -3454,9 +3576,85 @@ EXPORT int64_t freelab_reground(const uint8_t *orig, uint8_t *out, int64_t count
             break;
         papers[npapers++] = reground_keys[best] & 0xffffffU;
     }
+    if (light) {
+        /* a dark ground: FontLab drew the sample on the dark palette already, in the colors picked (Overlay Fonts'
+         * preview, #e7e3d7 on #2d2d30: mapped, its letters came out dark olive on the dark ground, the owner's report
+         * of 2026-11-26). There, a light color is a paper only if it runs across the picture on some line, as a
+         * list's row does (its letters, frequent enough to pass for a paper, never do); with no paper left, the sample
+         * is drawn as it is */
+        int64_t best = -1;
+        int c[3];
+        for (k = 0; k < REGROUND_TABLE; k++)
+            if (reground_keys[k] && (best < 0 || reground_counts[k] > reground_counts[best]))
+                best = k;
+        if (best >= 0) {
+            rgb_of(reground_keys[best] & 0xffffffU, c);
+            /* (mostly transparent: drawn on nothing, over what is behind it, the dark window; the effect's picture of
+             * the preview) */
+            if (2 * opaque < count || lightness((uint8_t)c[0], (uint8_t)c[1], (uint8_t)c[2]) < REGROUND_DARK_GROUND_HLS) {
+                int kept = 0;
+                for (j = 0; j < npapers; j++) {
+                    int64_t run = 0, longest = 0;
+                    for (i = 0; i < count; i++) {
+                        if (i % width == 0)
+                            run = 0;
+                        run = ((p[i] >> 24) >= ANCHOR_MIN_ALPHA && (p[i] & 0xffffffU) == papers[j]) ? run + 1 : 0;
+                        if (run > longest)
+                            longest = run;
+                    }
+                    if ((double)longest >= REGROUND_PAPER_SPAN * (double)width)
+                        papers[kept++] = papers[j];
+                }
+                npapers = kept;
+                if (!npapers) {
+                    for (i = 0; i < 4 * count; i++)
+                        out[i] = orig[i];
+                    return count;
+                }
+            }
+        }
+    }
     if (!npapers)
         return 0;
+    if (light) {
+        /* a candidate after the first whose edges blend into another is light text, frequent enough to pass for a
+         * paper (large letters in the preview) */
+        int kept = 1;
+        for (k = 0; k < REGROUND_TABLE; k++)
+            reground_asked[k] = 0;
+        for (j = 1; j < npapers; j++) {
+            int64_t at = reground_find(papers[j]);
+            if (at >= 0)
+                reground_asked[at] = 1;
+        }
+        reground_edges(p, count, width, papers, npapers);
+        for (j = 1; j < npapers; j++) {
+            int64_t at = reground_find(papers[j]);
+            if (at >= 0 && reground_sits(at))
+                continue;
+            if (kept < REGROUND_PAPERS)
+                papers[kept++] = papers[j];
+        }
+        npapers = kept;
+    }
     rgb_of(papers[0], main_paper);
+    if (light) {
+        /* the light colors that may be text: frequent, light, no paper, too weak for the tests below */
+        for (k = 0; k < REGROUND_TABLE; k++) {
+            int c[3], m, paper = 0;
+            reground_asked[k] = 0;
+            if (!reground_keys[k] || reground_counts[k] < REGROUND_TEXT_COUNT)
+                continue;
+            for (m = 0; m < npapers; m++)
+                paper |= papers[m] == (reground_keys[k] & 0xffffffU);
+            rgb_of(reground_keys[k] & 0xffffffU, c);
+            if (!paper && lightness((uint8_t)c[0], (uint8_t)c[1], (uint8_t)c[2]) >= REGROUND_PAPER_HLS)
+                reground_asked[k] = 1;
+        }
+        reground_edges(p, count, width, papers, npapers);
+        for (k = 0; k < REGROUND_TABLE; k++)
+            reground_asked[k] = reground_asked[k] && reground_sits(k);
+    }
     /* the text colors, most frequent first; a color on the line from the paper to one already taken is that
      * one's smoothing (a dark color's shades are strong and frequent too: taken in the table's order, they
      * filled the list, and runs of the text itself had no core near them: light pixels at its edges) */
@@ -3473,11 +3671,11 @@ EXPORT int64_t freelab_reground(const uint8_t *orig, uint8_t *out, int64_t count
             q[2] = (uint8_t)c[0];
             q[1] = (uint8_t)c[1];
             q[0] = (uint8_t)c[2];
-            if ((c[0] > c[1] ? (c[0] > c[2] ? c[0] : c[2]) : (c[1] > c[2] ? c[1] : c[2]))
-                    - (c[0] < c[1] ? (c[0] < c[2] ? c[0] : c[2]) : (c[1] < c[2] ? c[1] : c[2])) < REGROUND_TEXT_SPREAD)
-                continue;
-            if (reground_unmix(q, main_paper, color) < REGROUND_TEXT_SHARE)
-                continue;
+            if (((c[0] > c[1] ? (c[0] > c[2] ? c[0] : c[2]) : (c[1] > c[2] ? c[1] : c[2]))
+                    - (c[0] < c[1] ? (c[0] < c[2] ? c[0] : c[2]) : (c[1] < c[2] ? c[1] : c[2])) < REGROUND_TEXT_SPREAD
+                    || reground_unmix(q, main_paper, color) < REGROUND_TEXT_SHARE)
+                    && !(light && reground_asked[k]))
+                continue; /* (weak: a light text's only way in) */
             for (m = 0; m < ntexts && !on_line; m++) {
                 int t[3], ch;
                 double dot = 0.0, len = 0.0, share, fit = 0.0;
@@ -3496,7 +3694,7 @@ EXPORT int64_t freelab_reground(const uint8_t *orig, uint8_t *out, int64_t count
                     double d = (double)(c[ch] - main_paper[ch]) - share * (double)(t[ch] - main_paper[ch]);
                     fit += d * d;
                 }
-                on_line = fit <= 3.0 * REGROUND_FIT * REGROUND_FIT;
+                on_line = fit <= reground_tolerance(len, light);
             }
             if (!on_line)
                 best = k;
@@ -3511,6 +3709,18 @@ EXPORT int64_t freelab_reground(const uint8_t *orig, uint8_t *out, int64_t count
             reground_counts[k] = -reground_counts[k];
     if (!ntexts)
         return 0;
+    for (k = 0; k < ntexts; k++) {
+        int c[3], hi, lo;
+        uint8_t q[4];
+        double color[3];
+        rgb_of(texts[k], c);
+        q[2] = (uint8_t)c[0];
+        q[1] = (uint8_t)c[1];
+        q[0] = (uint8_t)c[2];
+        hi = c[0] > c[1] ? (c[0] > c[2] ? c[0] : c[2]) : (c[1] > c[2] ? c[1] : c[2]);
+        lo = c[0] < c[1] ? (c[0] < c[2] ? c[0] : c[2]) : (c[1] < c[2] ? c[1] : c[2]);
+        text_light[k] = light && (hi - lo < REGROUND_TEXT_SPREAD || reground_unmix(q, main_paper, color) < REGROUND_TEXT_SHARE);
+    }
     for (i = 0; i < count && !have_ground; i++) {
         if ((p[i] >> 24) >= ANCHOR_MIN_ALPHA && (p[i] & 0xffffffU) == papers[0]) {
             main_ground[0] = out[4 * i + 2];
@@ -3558,13 +3768,58 @@ EXPORT int64_t freelab_reground(const uint8_t *orig, uint8_t *out, int64_t count
                 double d = (double)v[ch] - share * (double)(t[ch] - main_paper[ch]);
                 fit += d * d;
             }
-            reground_core[i] = fit <= 3.0 * REGROUND_FIT * REGROUND_FIT;
+            if (fit <= reground_tolerance(len, light))
+                reground_core[i] = text_light[k] ? 2 : 1;
         }
+    }
+    if (light) {
+        /* a light text's core is one only where it reaches a paper, at once or through other such cores: a pill's
+         * white name has light blends of its own on a light text's short line (dark blocks in "Sarabun Regular" on
+         * the pill), and sits on the pill's gray, not on the paper; a large letter's inside reaches it through its
+         * edge */
+        int64_t changed = 1;
+        int pass;
+        for (i = 0; i < count; i++) {
+            int64_t x = i % width, y = i / width, xx, yy;
+            int reach = 0;
+            if (reground_core[i] != 2)
+                continue;
+            for (yy = y - REGROUND_REACH; yy <= y + REGROUND_REACH && !reach; yy++)
+                for (xx = x - REGROUND_REACH; xx <= x + REGROUND_REACH && !reach; xx++) {
+                    int64_t n;
+                    if (xx < 0 || xx >= width || yy < 0 || yy >= rows)
+                        continue;
+                    n = yy * width + xx;
+                    if ((p[n] >> 24) < ANCHOR_MIN_ALPHA)
+                        continue;
+                    for (k = 0; k < npapers && !reach; k++)
+                        reach = (p[n] & 0xffffffU) == papers[k];
+                }
+            if (reach)
+                reground_core[i] = 3; /* (reaches a paper) */
+        }
+        for (pass = 0; pass < REGROUND_LIGHT_PASSES && changed; pass++) {
+            changed = 0;
+            for (i = 0; i < count; i++) /* down and right */
+                if (reground_core[i] == 2 && ((i % width > 0 && reground_core[i - 1] == 3)
+                                              || (i >= width && reground_core[i - width] == 3))) {
+                    reground_core[i] = 3;
+                    changed++;
+                }
+            for (i = count - 1; i >= 0; i--) /* up and left */
+                if (reground_core[i] == 2 && ((i % width < width - 1 && reground_core[i + 1] == 3)
+                                              || (i + width < count && reground_core[i + width] == 3))) {
+                    reground_core[i] = 3;
+                    changed++;
+                }
+        }
+        for (i = 0; i < count; i++)
+            reground_core[i] = reground_core[i] == 2 ? 0 : reground_core[i] != 0;
     }
     for (i = 0; i < count; i++) {
         int64_t x = i % width, y = i / width, xx, yy, nearest = -1;
         int near = 0, ch, paper[3], ground[3], best_text = -1, is_paper = 0, dist = 1 << 30;
-        double best_fit = 1e18, best_share = 0.0;
+        double best_fit = 1e18, best_share = 0.0, best_tol = 0.0;
         uint32_t c = p[i] & 0xffffffU;
         if ((p[i] >> 24) < ANCHOR_MIN_ALPHA)
             continue;
@@ -3632,9 +3887,10 @@ EXPORT int64_t freelab_reground(const uint8_t *orig, uint8_t *out, int64_t count
                 best_fit = fit;
                 best_text = k;
                 best_share = share;
+                best_tol = reground_tolerance(len, light);
             }
         }
-        if (best_text >= 0 && best_fit <= 3.0 * REGROUND_FIT * REGROUND_FIT) {
+        if (best_text >= 0 && best_fit <= best_tol) {
             int t[3];
             rgb_of(texts[best_text], t);
             for (ch = 0; ch < 3; ch++) {
@@ -3669,6 +3925,17 @@ EXPORT int64_t freelab_reground(const uint8_t *orig, uint8_t *out, int64_t count
         }
     }
     return written;
+}
+
+EXPORT int64_t freelab_reground(const uint8_t *orig, uint8_t *out, int64_t count, int64_t width)
+{
+    return reground_run(orig, out, count, width, 0);
+}
+
+/* The same, light text included (see REGROUND_LIGHT_PAPERS): for the widgets that show samples only. */
+EXPORT int64_t freelab_reground_light(const uint8_t *orig, uint8_t *out, int64_t count, int64_t width)
+{
+    return reground_run(orig, out, count, width, 1);
 }
 
 /* Light text on a band of a strong color, on a canvas (a selected cell's name, white on the selection's blue):
