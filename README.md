@@ -81,6 +81,7 @@ It runs every suite under Python 3, then the suites of the scripts FontLab runs 
 - [docs/INSTALL.md](docs/INSTALL.md): both ways to install in full, FreeLang's fonts, macOS, and the test gate.
 - [docs/WINDOWS.md](docs/WINDOWS.md): what every FreeLab window shares, the menu, and tab docking.
 - [docs/FONTLAB-FIXES.md](docs/FONTLAB-FIXES.md): the defects of FontLab itself that FreeLab mends or works around.
+- [docs/NATIVE.md](docs/NATIVE.md): dark mode's native engine, which changes FontLab's colors as it paints, and the pixel engine it falls back to.
 - Each tool's page, linked above.
 - [docs/SOURCES.md](docs/SOURCES.md): the data sources in use, those left out, and those to watch.
 - [docs/COVERAGE-GAPS.md](docs/COVERAGE-GAPS.md): what Font Check knows of and does not check.

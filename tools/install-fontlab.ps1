@@ -12,8 +12,8 @@
 # FreeLab MCP, a separate repository, installs its listener beside these with a
 # startup block of its own: either can be installed or removed without the other.
 #
-# Install also builds dark mode's native pixel helper and the auto kerning core
-# (tools/build-native.ps1)
+# Install also builds dark mode's native pixel helper, its native engine, and the auto kerning
+# core (tools/build-native.ps1)
 # into %LOCALAPPDATA%\FreeLab\bin when it is missing; without a compiler, dark
 # mode still works, with plain inversion in the widgets FontLab paints itself; the
 # auto kerning core is required (the exit status is 1 without it).
@@ -133,6 +133,9 @@ $darkWorkspace = '#fff0f0f0'  # WORKSPACE_DARK in darkmode/freelab_dark_mode.py
 $source = [System.IO.File]::ReadAllText((Join-Path $repo 'darkmode\native\freelab_pixels.c'))
 $pixelsVersion = [regex]::Match($source, '#define FREELAB_PIXELS_VERSION (\d+)').Groups[1].Value
 $nativeName = 'freelab_pixels-v' + $pixelsVersion + '.dll'
+# The native engine's library (darkmode/native/freelab_hooks.c), named after both versions.
+$hooksSource = [System.IO.File]::ReadAllText((Join-Path $repo 'darkmode\native\freelab_hooks.c'))
+$hooksName = 'freelab_hooks-v' + [regex]::Match($hooksSource, '#define FREELAB_HOOKS_VERSION (\d+)').Groups[1].Value + '-' + $pixelsVersion + '.dll'
 # The auto kerning core (kerning/native/freelab_kern.c).
 $kernSource = [System.IO.File]::ReadAllText((Join-Path $repo 'kerning\native\freelab_kern.c'))
 $kernName = 'freelab_kern-v' + [regex]::Match($kernSource, '#define FREELAB_KERN_VERSION (\d+)').Groups[1].Value + '.dll'
@@ -528,6 +531,12 @@ else {
         [void]$degraded.Add('the native pixel helper (dark mode inverts plainly without it)')
     }
 }
+$hooks = Join-Path $BinDir $hooksName
+if (Test-Path $hooks) { Write-Output "Native engine present: $hooks" }
+elseif (Test-Path $native) {  # the same compiler builds it
+    try { & (Join-Path $PSScriptRoot 'build-native.ps1') -Hooks -Out $hooks }
+    catch { Write-Output "Could not build the native engine: $_ (the script engine still works)." }
+}
 $kern = Join-Path $BinDir $kernName
 if (Test-Path $kern) { Write-Output "Auto kerning core present: $kern" }
 elseif (Test-Path $native) {  # the same compiler builds it
@@ -539,17 +548,9 @@ if (-not (Test-Path $kern)) {  # (required: Auto Kerning, Auto Spacing, Kerning 
 }
 if ((Test-Path $native) -and (Test-Path $BinDir)) {
     # Earlier versions: FontLab keeps the one it loaded locked until it quits, so a locked one waits for the next install.
-    foreach ($dll in @(Get-ChildItem $BinDir -Filter 'freelab_pixels*.dll') + @(Get-ChildItem $BinDir -Filter 'freelab_kern*.dll')) {
-        if ($dll.Name -eq $nativeName -or $dll.Name -eq $kernName) { continue }
+    foreach ($dll in @(Get-ChildItem $BinDir -Filter 'freelab_pixels*.dll') + @(Get-ChildItem $BinDir -Filter 'freelab_hooks*.dll') + @(Get-ChildItem $BinDir -Filter 'freelab_kern*.dll')) {
+        if ($dll.Name -eq $nativeName -or $dll.Name -eq $hooksName -or $dll.Name -eq $kernName) { continue }
         try { [System.IO.File]::Delete($dll.FullName); Write-Output "Removed the superseded $($dll.FullName)" } catch { }
-    }
-}
-if (Test-Path $BinDir) {
-    # The retired native engine's libraries (dark mode no longer loads them): one a running FontLab still
-    # holds stays until the next install.
-    foreach ($dll in @(Get-ChildItem $BinDir -Filter 'freelab_hooks*.dll')) {
-        try { [System.IO.File]::Delete($dll.FullName); Write-Output "Removed the retired $($dll.FullName)" }
-        catch { Write-Output "Could not remove the retired $($dll.FullName) (FontLab may hold it): the next install removes it." }
     }
 }
 
