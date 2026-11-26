@@ -149,6 +149,10 @@ ISLAND_CLASSES = frozenset((
     "CellChartScrollBar",  # the cell charts' own light scroll bars
     "YContinueWidget",  # the zigzag edge where a panel's content continues below
     "YNibShape", "YStrokeShape", "YBrushStrokePreview",  # Brush panel previews
+    # Fonts panel: its rows, painted light. Left to the look at start, it was found an island or ink depending on
+    # what it showed then (the fonts still opening); as ink, its text came out doubled and the style dot's letter
+    # light (the owner's image 157, after a relaunch, 2026-11-26)
+    "CIconView",
 ))
 ISLAND_NAMES = frozenset((
     ("QListWidget", "historyList"),  # its selected row is painted light

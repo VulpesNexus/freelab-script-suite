@@ -1768,6 +1768,8 @@ class KindTests(DarkModeCase):
         self.assertEqual(dm.widget_kind(FakeWidget("YContinueWidget", "widgetContinue")), "island")
         self.assertEqual(dm.widget_kind(FakeWidget("YTabWidget", parent=FakeWidget("QSplitter"))), "fill")
         self.assertEqual(dm.widget_kind(FakeWidget("FontCellChart", "fontChartView")), "island")
+        # (the Fonts panel's rows: an island from the start, not whatever its look was then, image 157)
+        self.assertEqual(dm.widget_kind(FakeWidget("CIconView", parent=FakeWidget("CIconViewWidget", "listFonts"))), "island")
         # (Open Installed Fonts' list: its names were garbled as ink, the survey of 2026-11-24)
         self.assertEqual(dm.widget_kind(FakeWidget("QListWidget", "listFonts", inherits=("QListWidget",))), "island")
         # (Add Glyphs' list: an island whose text color is set in its stylesheet, tried live 2026-11-24)
