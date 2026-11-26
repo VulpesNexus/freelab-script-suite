@@ -3044,6 +3044,31 @@ class MorePlanTests(unittest.TestCase):
         self.assertNotIn(u(0x326E), rows, u"but no syllable: no ㉮")
         self.assertNotIn(u(0x3260), plan(FakeFont(NEXT))[1], "none in a Latin font")
 
+    def test_a_counter_measured_between_stems(self):
+        """Rubik Black's thickened small capitals, live on 2026-11-27: the offset closed their counters. The narrowest
+        gap between runs of ink across the glyph bounds it (an H's: between its stems; its bar is crossed once)."""
+        h = [rect(0, 0, 200, 700), rect(500, 0, 700, 700), rect(200, 330, 500, 400)]
+        self.assertEqual(gg.counter_gap(h), 300)
+        self.assertIsNone(gg.counter_gap([rect(0, 0, 200, 700)]), "one stem: no counter")
+
+    def test_circled_content_fits_its_ring(self):
+        """Hahmlet's Black, live on 2026-11-27: its thick ring left less room inside, and the letter at the corpus's
+        size ran into it. Fitted into the counter, a clearance on each side."""
+        heavy = hangul_font()
+        heavy.glyphs["uni25EF"] = (0x25EF, 1000, [rect(40, -80, 960, 840), rect(300, 200, 700, 560)], None)
+        for font, fits in ((hangul_font(), True), (heavy, False)):
+            row = plan(font)[1][u(0x3260)]
+            ring, letter = ink_of(font, row.layout.parts[0]), ink_of(font, row.layout.parts[1])
+            counter = gg.ring_counter(font.polygons("uni25EF"))
+            size = (ring[2] - ring[0]) / float(920)
+            inner = (ring[0] + size * (counter[0] - 40), ring[1] + size * (counter[1] + 80),
+                     ring[0] + size * (counter[2] - 40), ring[1] + size * (counter[3] + 80))
+            self.assertTrue(letter[0] > inner[0] and letter[2] < inner[2] and letter[1] > inner[1]
+                            and letter[3] < inner[3], "inside the counter (%s)" % ("light" if fits else "heavy"))
+            scale = row.layout.parts[1].matrix[3]
+            rule = DATA["rules"]["circled"]["cjk jamo"]["scale"]
+            (self.assertEqual if fits else self.assertLess)(scale, rule)
+
     def test_parenthesized(self):
         font = hangul_font()
         planner, rows = plan(font)
@@ -3061,14 +3086,22 @@ class MorePlanTests(unittest.TestCase):
             middle = gg.union([ink_of(font, p) for p in row.layout.parts[1:-1]])
             near(self, (middle[0] + middle[2]) / 2.0, rule["content x share"] * 1000, 1)
             near(self, (middle[1] + middle[3]) / 2.0, rule["content y"] * 1000, 1)
-            self.assertEqual(row.layout.parts[1].matrix[3], rule["scale"])
+            # at the corpus's size where it fits, else fitted clear of the parentheses (Hahmlet's Black, live): this
+            # font's syllables and 一 are boxes as wide as the em, its parentheses straight bars
+            scaled = row.layout.parts[1].matrix[3]
+            self.assertLessEqual(scaled, rule["scale"])
+            self.assertTrue(middle[0] > left[2] and middle[2] < right[0], "%04X: clear of the parentheses" % code)
+            if code == 0x3200:
+                self.assertEqual(scaled, rule["scale"], "ㄱ fits at the corpus's size")
+            else:
+                self.assertLess(scaled, rule["scale"], "%04X: fitted" % code)
             self.assertTrue(row.draft)
             self.assertIn(gg.SCALED_NOTE, gg.note_text(row))
         word = rows[u(0x321D)].layout.parts
-        near(self, word[1].matrix[0], rules["word"]["scale"] * rules["word"]["squeeze"], 1e-9, u"오전 narrowed")
+        near(self, word[1].matrix[0] / word[1].matrix[3], rules["word"]["squeeze"], 1e-9, u"오전 narrowed")
         self.assertEqual(gg.recipe_text(rows[u(0x3220)], planner.settings),
                          u"ichi at %d%% between parenleft and parenright, in a full-width cell" % round(
-                             100 * rules["ideograph"]["scale"]))
+                             100 * rows[u(0x3220)].layout.parts[1].matrix[3]))
         self.assertNotIn(u(0x3220), plan(hangul_font("ichi", "hei", "sei"))[1], u"㈠: in a font with ideographs only")
 
     def test_half_width_hangul_and_signs(self):

@@ -667,6 +667,54 @@ def stem_width(polygons):
     return runs[len(runs) // 2] if runs else None
 
 
+SMALLCAP_OPEN = 0.5  # a thickened small capital's offset may take at most this share of its narrowest counter
+
+
+def counter_gap(polygons):
+    """The narrowest gap between two runs of ink across a glyph at STEM_HEIGHTS (H's counter between its stems, A's
+    between its legs), in its own units; None where no line crosses ink twice."""
+    box = box_of(polygons)
+    if box is None:
+        return None
+    gaps = []
+    for share in STEM_HEIGHTS:
+        runs = filled_runs(polygons, box[1] + share * (box[3] - box[1]))
+        gaps.extend(b[0] - a[1] for a, b in zip(runs, runs[1:]) if b[0] > a[1])
+    return min(gaps) if gaps else None
+
+
+FIT_CLEARANCE = 0.06  # a share of the room's width left free on each side of the content fitted into it
+
+
+def ring_counter(polygons):
+    """The box of a ring's counter: the largest contour inside its largest one about the same middle, or None (a
+    filled disc, or no contour)."""
+    boxes = [box_of([polygon]) for polygon in polygons if len(polygon) > 2]
+    if len(boxes) < 2:
+        return None
+    area = lambda b: (b[2] - b[0]) * (b[3] - b[1])
+    outer = max(boxes, key=area)
+    middle = ((outer[0] + outer[2]) / 2.0, (outer[1] + outer[3]) / 2.0)
+    reach = 0.15 * (outer[2] - outer[0])
+    inside = [b for b in boxes if b is not outer and b[0] > outer[0] and b[2] < outer[2] and b[1] > outer[1]
+              and b[3] < outer[3] and abs((b[0] + b[2]) / 2.0 - middle[0]) <= reach
+              and abs((b[1] + b[3]) / 2.0 - middle[1]) <= reach]
+    return max(inside, key=area) if inside else None
+
+
+def fitting(ink, room):
+    """The factor (at most 1) that fits an ink box into room (width, height; a height of None: the width only),
+    FIT_CLEARANCE of the width left on each side."""
+    width, height = room
+    fit = 1.0
+    ink_w, ink_h = ink[2] - ink[0], ink[3] - ink[1]
+    if ink_w > 0 and width:
+        fit = min(fit, width * (1.0 - 2 * FIT_CLEARANCE) / ink_w)
+    if ink_h > 0 and height:
+        fit = min(fit, (height - 2 * FIT_CLEARANCE * width) / ink_h)
+    return max(fit, 0.1)
+
+
 def ring_split(polygons, rings=2):
     """(slash, [(outer, counter)] upper ring first, then the others left to right) of a percent sign's contours
     (polygons, by index), or (None, why): a slash and rings, each ring an outer contour and the one counter inside
@@ -1710,6 +1758,17 @@ class Planner(object):
             x += own
         ink = union([(across * (box[0] + at), scale * box[1], across * (box[2] + at), scale * box[3])
                      for _, box, at in placed])
+        # Fitted into the ring's counter: at the corpus's size, a heavy weight's thicker ring left less room inside,
+        # and the character ran into it (Hahmlet's Black, all four circled Hangul; its Regular's ㉼, two syllables,
+        # live on 2026-11-27). Shrunk only as much as it takes to clear the counter by FIT_CLEARANCE of its width.
+        counter = ring_counter(self.font.polygons(ring))
+        if counter is not None:
+            room = (size * (counter[2] - counter[0]), size * (counter[3] - counter[1]))
+            fit = fitting(ink, room)
+            if fit < 1.0:
+                scale, across = scale * fit, across * fit
+                ink = union([(across * (box[0] + at), scale * box[1], across * (box[2] + at), scale * box[3])
+                             for _, box, at in placed])
         # (the content's ink centered on the ring, moved by the corpus's offset: a share of the diameter)
         dx = round(cx + float(rule.get("content x", 0.0)) * diameter - (ink[0] + ink[2]) / 2.0)
         dy = round(cy + float(rule.get("content y", 0.0)) * diameter - (ink[1] + ink[3]) / 2.0)
@@ -1773,6 +1832,12 @@ class Planner(object):
             k = ratio * (tall - stem) / (tall - ratio * stem)
             scale = target / (box[3] + stem * (k - 1.0))
             d = scale * stem * (k - 1.0) / 2.0
+            # At most as thick as keeps half of each counter open: in a heavy weight, the offset closed them (Rubik
+            # Black's ᴀ a blob, ʜ's stems run together, live on 2026-11-27); the top kept at the x-height
+            gap = counter_gap(self.font.polygons(name))
+            if gap and 2 * d > SMALLCAP_OPEN * gap * scale:
+                d = SMALLCAP_OPEN * gap * target / (2.0 * (float(box[3]) + SMALLCAP_OPEN * gap))
+                scale = (target - 2 * d) / float(box[3])
             new = round(advance * scale * float(rule["width"]) + 2 * d)
             out = Layout([Part(name, (scale, 0.0, 0.0, scale, round((new - advance * scale) / 2.0), round(d)),
                                offset=round(d, 2))], new)
@@ -1807,6 +1872,30 @@ class Planner(object):
             x += own
         ink = union([(across * (box[0] + at), scale * box[1], across * (box[2] + at), scale * box[3])
                      for _, box, at in placed])
+        # Fitted between the parentheses' inner edges, as the circled ones are into their ring's counter: a heavy
+        # weight's wider content ran into them (Hahmlet's Black, live on 2026-11-27)
+        # (the parentheses' strokes where the content's middle half stands: their tips curl in above and below it)
+        target = self.em(float(rule["content y"]))
+        heights = [target + share * scale * (max(b[3] for _, b, _ in placed) - min(b[1] for _, b, _ in placed))
+                   for share in (-0.25, 0.0, 0.25)]
+        inner = []
+        for name, box, share, side in ((left, lb, rule["left x share"], 1), (right, rb, rule["right x share"], -1)):
+            px = round(float(share) * advance - wide * (box[0] + box[2]) / 2.0)
+            py = round(y - up * (box[1] + box[3]) / 2.0)
+            polygons = self.font.polygons(name)
+            edges = []
+            for at in heights:
+                runs = filled_runs(polygons, (at - py) / up)
+                if runs:
+                    edges.append(px + wide * (max(e for _, e in runs) if side > 0 else min(s for s, _ in runs)))
+            edge = (max(edges) if side > 0 else min(edges)) if edges else px + wide * (box[2] if side > 0 else box[0])
+            inner.append(edge)
+        if inner[1] > inner[0]:
+            fit = fitting(ink, (inner[1] - inner[0], None))
+            if fit < 1.0:
+                scale, across = scale * fit, across * fit
+                ink = union([(across * (box[0] + at), scale * box[1], across * (box[2] + at), scale * box[3])
+                             for _, box, at in placed])
         dx = round(float(rule["content x share"]) * advance - (ink[0] + ink[2]) / 2.0)
         dy = round(self.em(float(rule["content y"])) - (ink[1] + ink[3]) / 2.0)
         content = [Part(name, (across, 0.0, 0.0, scale, dx + round(across * at), dy)) for name, _, at in placed]
