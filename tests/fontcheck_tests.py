@@ -3362,33 +3362,45 @@ class FakePackage(object):
 
 
 class ReorderShapesTests(unittest.TestCase):
-    """flLayer.reorderShapes is unproven: whichever way it reads its list, the components end in the
-    reference's order and the other shapes stay where they are."""
+    """flLayer.reorderShapes(QList<uint>) takes the shapes' ids in the order wanted (live, 2026-11-26: indexes
+    changed nothing); the components end in the reference's order and the other shapes stay where they are,
+    with the index readings kept as fallbacks."""
 
     def layer(self, reorder):
         layer = FakeLayer([FakeShape(component=u"c"), FakeShape([square(100)]), FakeShape(component=u"a"),
                            FakeShape(component=u"b")])
+        for k, shape in enumerate(layer.shapes):
+            shape.id = 7000 + k  # (FontLab's ids are large numbers, never the indexes)
         layer.reorderShapes = lambda order: reorder(layer, order)
         return layer
 
     def names(self, layer):
         return [s.shapeData.componentGlyph if s.isComponent else u"(contours)" for s in layer.shapes]
 
+    def test_fontlabs_reading_by_ids(self):
+        def by_ids(layer, order):  # (as FontLab: ids it knows reorder, anything else changes nothing)
+            known = dict((s.id, s) for s in layer.shapes)
+            if all(i in known for i in order):
+                layer.shapes = [known[i] for i in order]
+
+        layer = self.layer(by_ids)
+        fc.reorder_components(layer, [u"a", u"b", u"c"])
+        self.assertEqual(self.names(layer), [u"a", u"(contours)", u"b", u"c"])
+
     def test_any_reading(self):
         def take(layer, order):
+            if any(i >= len(layer.shapes) for i in order):
+                return  # (ids: not this reading's)
             layer.shapes = [layer.shapes[k] for k in order]
 
         def put(layer, order):
+            if any(i >= len(layer.shapes) for i in order):
+                return
             shapes = list(layer.shapes)
             for k, at in enumerate(order):
                 layer.shapes[at] = shapes[k]
 
-        def shapes_only(layer, order):
-            if any(isinstance(item, int) for item in order):
-                raise TypeError("expected flShape")
-            layer.shapes = list(order)
-
-        for reorder in (take, put, shapes_only):
+        for reorder in (take, put):
             layer = self.layer(reorder)
             fc.reorder_components(layer, [u"a", u"b", u"c"])  # (a cycle of three: taking and putting differ)
             self.assertEqual(self.names(layer), [u"a", u"(contours)", u"b", u"c"], reorder.__name__)

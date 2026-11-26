@@ -87,9 +87,10 @@ Every FontLab call of the tool is a method of `FontLabCalls`, each with a docstr
 - `italicAngle`, `openTypeOS2WeightClass` (400 and 700), `openTypeOS2WidthClass` (5), and `styleName` read as *Font Info* gives them; a font opened from a TrueType file gives that file as its `path`.
 - Each master kept its source's kerning (2,394 entries and 50 classes each).
 
+- `setGlyphComponents` on a layer that also gets contours (live, 2026-11-26, on scratch layers of a test font): it replaces every shape of the layer, so contours added before it are lost (*O*'s two contours, then an *acute* component: the acute alone), while contours added after it stay (the acute and the two contours). The assembly sets a glyph's components first and copies its contours after (`set_components`, then `copy`), so a glyph of both keeps both.
+
 Not yet proven:
 
-- `setGlyphComponents` on a layer that also gets contours (Sarabun has no glyph of both): check on a font that has one that both stay.
 - The other formats through `requestLoadingFont` (OpenType CFF, WOFF, Type 1, UFO, *.vfc*), and whether each gives its file as `path`.
 - How long reading and assembling take on four static fonts of a few thousand glyphs, and on a CJK family (two fonts of 777 glyphs: under a minute, the comparison included).
 

@@ -336,6 +336,7 @@ How each tool came to work as it does: what it did before, what it does now, and
 - The vertical metrics checks stood right of everything, as tall as the buttons and the strategy, far from the values (report 128). They now stand right of the values, as tall as them, with the strategy under both.
 - The *Vertical metrics* view first put the diagram at the left, most of the window's height, beside the values, where six glyphs with their labels came out about a quarter as tall. The diagram now spans the window, with the values and checks under it.
 - The *Masters* view's *Fix ticked glyphs* and *Fix this* stood under the list of glyphs. They are now in the window's bottom row: *Fix ticked glyphs* at the right, *Fix this* at the left.
+- 2026-11-26: The fix that puts a glyph's components in the reference master's order never worked: `flLayer.reorderShapes` takes the shapes' ids, and the fix passed their indexes (ignored) or the shapes themselves (refused), then reported that FontLab did not reorder them. It now passes the ids, tried live on a composite of three components. The same run found that FontLab's export recomputes the vertical metrics from the master's ascender, descender, and line gap, over what the font info held ([FONT-CHECK.md](FONT-CHECK.md)).
 
 ## Windows and tab docking
 

@@ -3478,8 +3478,9 @@ def inverse(order):
 
 def reorder_components(layer, names):
     """The layer's components put in the order of names (the reference's), its other shapes kept in
-    place, by flLayer.reorderShapes (unproven: its argument's meaning is read back, the indexes taken
-    either way, then the shapes themselves); FixError when the order did not change as wanted."""
+    place, by flLayer.reorderShapes(QList<uint>): the shapes' ids (flShape.id) in the order wanted (live,
+    2026-11-26: indexes changed nothing, and the shapes themselves are refused, so this fix had never worked);
+    indexes are tried after, as a fallback. FixError when the order did not change as wanted."""
     signatures = [shape_signature(shape) for shape in list(layer.shapes)]
     places = [at for at, s in enumerate(signatures) if s[0] == "component"]
     order = component_order(list(names), [signatures[at][1] for at in places])
@@ -3488,7 +3489,7 @@ def reorder_components(layer, names):
     target = list(signatures)
     for place, k in zip(places, order):
         target[place] = signatures[places[k]]
-    for attempt in ("take", "put", "shapes"):
+    for attempt in ("ids", "take", "put"):
         shapes = list(layer.shapes)
         current = [shape_signature(shape) for shape in shapes]
         if current == target:
@@ -3497,7 +3498,7 @@ def reorder_components(layer, names):
             take = permutation_to(current, target)
         except StopIteration:
             raise FixError(u"FontLab changed the layer's shapes")
-        argument = take if attempt == "take" else inverse(take) if attempt == "put" else [shapes[k] for k in take]
+        argument = [shapes[k].id for k in take] if attempt == "ids" else take if attempt == "take" else inverse(take)
         try:
             layer.reorderShapes(argument)
         except Exception:

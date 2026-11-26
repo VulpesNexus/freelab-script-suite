@@ -1379,7 +1379,8 @@ class FontLabCalls(object):
     def set_components(self, package, target, parts, width):
         """Proven: fontlab.GlyphComponent(name) with its transform, then flLayer.setGlyphComponents(list,
         width, package, False) (it builds a component only where its glyph has a layer in that master).
-        Assumed: it keeps the layer's contours added before it (copy_contours is called after it anyway)."""
+        Live (2026-11-26): it replaces every shape of the layer, contours added before it included, so the
+        layer's contours are copied after it (copy_contours: both stay)."""
         made = []
         for name, transform in parts:
             component = self.fontlab.GlyphComponent(name)

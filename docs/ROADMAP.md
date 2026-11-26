@@ -13,7 +13,8 @@
 
 ## Open work the tools' pages record
 
-- The few FontLab calls still not proven live, each listed with how to check it (most were proven on 2026-11-24, Family Audit's *Assemble as masters* run end to end among them): [Family Audit](FAMILY-AUDIT.md#fontlab-calls-proven-live-and-not-yet), [Font Compare](FONT-COMPARE.md#fontlab-calls-not-yet-proven-live), and [Font Check](FONT-CHECK.md#fontlab-calls-not-yet-proven-live).
+- The few FontLab calls still not proven live, each listed with how to check it (most were proven on 2026-11-24, Family Audit's *Assemble as masters* run end to end among them; Font Check's last three and Family Audit's `setGlyphComponents` on 2026-11-26): [Family Audit](FAMILY-AUDIT.md#fontlab-calls-proven-live-and-not-yet) and [Font Compare](FONT-COMPARE.md#fontlab-calls-not-yet-proven-live).
+- Font Check's *Vertical metrics* writes the font info's typo, hhea, and win values, and FontLab's export recomputes them from the master's ascender, descender, and line gap (seen live on 2026-11-26): find how a font keeps its own values through the export (a *Font Info* or export profile setting the Python API does not show), or write the master's metrics where that is what the suggestion means ([FONT-CHECK.md](FONT-CHECK.md#fontlab-calls-not-yet-proven-live)).
 - Glyph Compose's next scope, built on 2026-11-24 and run live that day for six of its eight kinds (superscript letters, signs made of letters, circled letters, small capitals, letters with bars, on a Latin font, a font of three masters, and a Japanese font): the full-width and half-width forms and the small kana are still to build live, on a font with kana that lacks them, and what the scope leaves is still to do (thicker strokes for its scaled glyphs, *‰*, the kanbun marks, the circled and half-width Hangul) ([GLYPH-COMPOSE.md](GLYPH-COMPOSE.md#next)).
 - macOS: nothing has run on a Mac; what is Windows-only is in [INSTALL.md](INSTALL.md#macos).
 
