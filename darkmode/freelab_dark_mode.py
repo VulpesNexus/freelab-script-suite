@@ -447,7 +447,9 @@ NATIVE_INK_PROP = "freelabNativeInk"  # a list whose dark pens the native engine
 # of FontLab's that paints its rows (FontAudit's badges, the Elements tree) keeps the ink effect.
 # LanguagesDelegate: the preferences' FontAudit list (and Font Info's languages): its checked boxes are blue with a white tick,
 # which the ink effect turned dark (the owner's image 202, 2026-11-27); its rows are text Qt draws.
-NATIVE_INK_DELEGATES = ("QStyledItemDelegate", "QItemDelegate", "MetricsDataDelegate", "LanguagesDelegate")
+# ScriptListDelegate: the Scripting panel's list, whose names a partial repaint mapped on its own came out half dark
+# (the owner's image 200, 2026-11-27).
+NATIVE_INK_DELEGATES = ("QStyledItemDelegate", "QItemDelegate", "MetricsDataDelegate", "LanguagesDelegate", "ScriptListDelegate")
 # Islands Qt draws (from their stylesheet), out of the hooks' reach: the script engine's island
 # under either engine (the continue edge's white line stayed white).
 SCRIPT_ISLAND_CLASSES = ("YContinueWidget",)
@@ -3926,6 +3928,7 @@ CURSOR_TREATMENTS = {
 }
 CURSOR_SHADOW_ALPHA = 0.55  # the drop shadow at its densest
 CURSOR_SHADOW_OFFSET = 1  # pixels right and down
+CURSOR_REVISION = 2  # raised when a treatment changes: the treated cursors a session holds are made again
 
 
 def cursor_hash(image):
@@ -4019,7 +4022,7 @@ def _fix_cursor(widget):
         ours = state.setdefault("cursor_keys", set())
         if key in ours:
             return False  # ours already (setting it sends the event again)
-        made = state.setdefault("cursors", {})
+        made = state.setdefault("cursors-%d" % CURSOR_REVISION, {})  # (a module loaded again with other treatments: its own)
         entry = made.get(key)
         if entry is None:
             entry = False
@@ -5447,7 +5450,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 47
+HOOKS_VERSION = 48
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 

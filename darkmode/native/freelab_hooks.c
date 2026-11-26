@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 47
+#define FREELAB_HOOKS_VERSION 48
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -491,6 +491,15 @@ static int white_pen(const qcolor *c)
 {
     return (painted_rgba(c) & 0xffffffU) == 0xffffffU; /* pure white only: near-whites (a tab strip's
                                                           * #edeeef edge) are paper-colored lines */
+}
+
+/* A translucent pure white pen: on a glyph canvas, a halo drawn to stand a mark out from what is under it, invisible on
+ * light mode's white canvas. The Eraser's drop, a black ring in a 40% white halo, came out a light ring in a light glow
+ * on the dark canvas (the owner's images 190 and 191, 2026-11-27): on a canvas, the halo takes the canvas' ground. */
+static int halo_pen(const qcolor *c)
+{
+    uint32_t argb = painted_rgba(c);
+    return (argb & 0xffffffU) == 0xffffffU && (argb >> 24) < 255;
 }
 
 /* The pen to paint with: pen itself, or a mapped copy in tmp (then *copied is 1; destroy it after). */
@@ -1492,7 +1501,7 @@ static void w_set_pen_color(void *p, const qcolor *c)
         if (picked_frame(p, c, &m) || dark_on_box(p, c, &m)) {
             hook_changed[H_SET_PEN_COLOR]++;
             use = &m;
-        } else if ((!white_pen(c) || palette_light_color(c) || on_dark_box(p) || (canvas_paint && on_warning(p)))
+        } else if ((!white_pen(c) || palette_light_color(c) || on_dark_box(p) || (canvas_paint && (on_warning(p) || halo_pen(c))))
                    && !dark_on_badge(p, c) && map_qcolor(c, &m)) {
             hook_changed[H_SET_PEN_COLOR]++;
             use = &m;
@@ -1556,7 +1565,7 @@ static void w_set_pen(void *p, const void *pen)
             copied = 1;
         } else if (!dark_on_badge(p, &c)) {
             qcolor shown;
-            use = mapped_pen(pen, &tmp, &copied, on_dark_box(p) || (canvas_paint && on_warning(p)));
+            use = mapped_pen(pen, &tmp, &copied, on_dark_box(p) || (canvas_paint && (on_warning(p) || halo_pen(&c))));
             qt_pen_color(use, &shown);
             if (qt_pen_is_solid(pen) && box_contrast(p, &c, &shown)) {
                 if (!copied) {
