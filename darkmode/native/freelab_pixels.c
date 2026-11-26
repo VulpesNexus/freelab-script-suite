@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 147
+#define FREELAB_PIXELS_VERSION 150
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -4083,23 +4083,36 @@ EXPORT int64_t freelab_band_text(const uint8_t *orig, uint8_t *out, int64_t coun
 #define PILL_REF_REACH 48
 
 typedef struct {
-    int x0, y0, x1, y1, parent, keep;
+    int x0, y0, x1, y1, parent, keep, warm;
     int64_t n, first;
     uint32_t color;
 } PillPiece;
 
 static int32_t pill_label[MAX_INDEXED]; /* the piece a pixel is in, + 1 (0: none) */
 static int32_t pill_stack[MAX_INDEXED];
-static PillPiece pill_pieces[PILL_MAX_PIECES];
+static int32_t pill_members[MAX_INDEXED]; /* the pixels of the piece being found, but its first */
+static PillPiece pill_pieces[PILL_MAX_PIECES + 1]; /* (the last: "looked at, no piece", never kept) */
 
+/* 2 for a warm gray (a pill's own), 1 for a near neutral one (the translucent pill over the template glyphs' purple
+ * grays: #9c9a9a beside #a09e9c, the owner's report of 2026-11-26: the name broke over that half only), 0 for
+ * neither. The pill is as dark as PILL_MIN_HLS while its anchor is under the mouse (#7e7a72, opaque). */
+#define PILL_MIN_HLS 0.42
+#define PILL_NEUTRAL_STEP 4 /* per channel, between any two: a near neutral gray */
+#define PILL_NEUTRAL_MIN_HEIGHT 3 /* rows: a near neutral piece is part of a pill's body (a dashed line's is 1) */
 static int pill_shade(uint32_t px)
 {
     int r = (int)((px >> 16) & 255U), g = (int)((px >> 8) & 255U), b = (int)(px & 255U);
     double l;
-    if ((px >> 24) < ANCHOR_MIN_ALPHA || r < g || g < b || r - b < 3 || r - b > 14)
+    if ((px >> 24) < ANCHOR_MIN_ALPHA)
         return 0;
     l = lightness((uint8_t)r, (uint8_t)g, (uint8_t)b);
-    return l >= 0.55 && l <= 0.8;
+    if (l < PILL_MIN_HLS || l > 0.8)
+        return 0;
+    if (r >= g && g >= b && r - b >= 3 && r - b <= 14)
+        return 2;
+    /* (the template glyphs' own grays lean blue: #c3c3cb, and they are no pill) */
+    return b <= r + 1 && (r > g ? r - g : g - r) <= PILL_NEUTRAL_STEP && (g > b ? g - b : b - g) <= PILL_NEUTRAL_STEP
+        && (r > b ? r - b : b - r) <= PILL_NEUTRAL_STEP;
 }
 
 static int pill_near(uint32_t a, uint32_t b, int step)
@@ -4123,11 +4136,14 @@ static int pill_root(int k)
 EXPORT int64_t freelab_pills(const uint8_t *orig, uint8_t *out, int64_t count, int64_t width)
 {
     const uint32_t *p = (const uint32_t *)orig;
-    int64_t i, rows, pills = 0;
+    int64_t i, rows, pills = 0, members = 0;
     int npieces = 0, a, b;
     if (count <= 0 || width <= 0 || count > MAX_INDEXED)
         return 0;
     rows = count / width;
+    pill_pieces[PILL_MAX_PIECES].keep = 0;
+    pill_pieces[PILL_MAX_PIECES].warm = 0;
+    pill_pieces[PILL_MAX_PIECES].parent = PILL_MAX_PIECES;
     for (i = 0; i < count; i++)
         pill_label[i] = 0;
     /* pieces: 4-connected pixels of one shade */
@@ -4137,6 +4153,7 @@ EXPORT int64_t freelab_pills(const uint8_t *orig, uint8_t *out, int64_t count, i
         if (pill_label[i] || !pill_shade(p[i]))
             continue;
         pc = &pill_pieces[npieces];
+        members = 0;
         pc->x0 = pc->x1 = (int)(i % width);
         pc->y0 = pc->y1 = (int)(i / width);
         pc->n = 0;
@@ -4144,6 +4161,7 @@ EXPORT int64_t freelab_pills(const uint8_t *orig, uint8_t *out, int64_t count, i
         pc->color = p[i] & 0xffffffU;
         pc->parent = npieces;
         pc->keep = 0;
+        pc->warm = pill_shade(p[i]) == 2;
         pill_label[i] = npieces + 1;
         pill_stack[top++] = (int32_t)i;
         while (top > 0) {
@@ -4163,14 +4181,42 @@ EXPORT int64_t freelab_pills(const uint8_t *orig, uint8_t *out, int64_t count, i
                     continue;
                 pill_label[q] = npieces + 1;
                 pill_stack[top++] = (int32_t)q;
+                pill_members[members++] = (int32_t)q;
             }
+        }
+        {
+            int w = pc->x1 - pc->x0 + 1, h = pc->y1 - pc->y0 + 1;
+            pc->keep = w >= PILL_PIECE_MIN_WIDTH && h <= PILL_MAX_HEIGHT && (double)pc->n >= PILL_PIECE_FILL * w * h
+                && (pc->warm || h >= PILL_NEUTRAL_MIN_HEIGHT);
+        }
+        if (!pc->keep) {
+            /* no part of a pill: its pixels marked as looked at, its slot given back (the canvas' smoothed gray lines
+             * are near neutral pieces by the thousand, and filled the slots before the scan reached a pill lower
+             * down: "b.uni0326" on the baseline was missed) */
+            int64_t m;
+            pill_label[i] = PILL_MAX_PIECES + 1;
+            for (m = 0; m < members; m++)
+                pill_label[pill_members[m]] = PILL_MAX_PIECES + 1;
+            continue;
         }
         npieces++;
     }
+    /* a near neutral piece is kept only beside a warm one it could be joined to (no chain of neutral pieces) */
     for (a = 0; a < npieces; a++) {
-        PillPiece *pc = &pill_pieces[a];
-        int w = pc->x1 - pc->x0 + 1, h = pc->y1 - pc->y0 + 1;
-        pc->keep = w >= PILL_PIECE_MIN_WIDTH && h <= PILL_MAX_HEIGHT && (double)pc->n >= PILL_PIECE_FILL * w * h;
+        PillPiece *pa = &pill_pieces[a];
+        int beside = 0;
+        if (!pa->keep || pa->warm)
+            continue;
+        for (b = 0; b < npieces && !beside; b++) {
+            PillPiece *pb = &pill_pieces[b];
+            if (b == a || !pb->keep || !pb->warm)
+                continue;
+            beside = !(pb->y0 - pa->y1 > PILL_JOIN_GAP || pa->y0 - pb->y1 > PILL_JOIN_GAP
+                       || pb->x0 - pa->x1 > PILL_JOIN_GAP || pa->x0 - pb->x1 > PILL_JOIN_GAP)
+                && pill_near(pa->color, pb->color, PILL_JOIN_SHADES);
+        }
+        if (!beside)
+            pa->keep = 0;
     }
     for (a = 0; a < npieces; a++)
         for (b = a + 1; b < npieces; b++) {
@@ -4184,7 +4230,7 @@ EXPORT int64_t freelab_pills(const uint8_t *orig, uint8_t *out, int64_t count, i
             pill_pieces[pill_root(b)].parent = pill_root(a);
         }
     for (a = 0; a < npieces; a++) {
-        int x0 = 1 << 30, y0 = 1 << 30, x1 = -1, y1 = -1, main = -1, y;
+        int x0 = 1 << 30, y0 = 1 << 30, x1 = -1, y1 = -1, main = -1, y, warm = 0;
         int64_t main_n = 0;
         uint8_t ground[3];
         if (!pill_pieces[a].keep || pill_root(a) != a)
@@ -4201,7 +4247,10 @@ EXPORT int64_t freelab_pills(const uint8_t *orig, uint8_t *out, int64_t count, i
                 main_n = pb->n;
                 main = b;
             }
+            warm |= pb->warm;
         }
+        if (!warm) /* (a pill has a warm part: near neutral grays alone are the canvas' own) */
+            continue;
         if (main < 0 || y1 - y0 + 1 < PILL_MIN_HEIGHT || y1 - y0 + 1 > PILL_MAX_HEIGHT || x1 - x0 + 1 < PILL_MIN_WIDTH
             || x1 - x0 < y1 - y0)
             continue;

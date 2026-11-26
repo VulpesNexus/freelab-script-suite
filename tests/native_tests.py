@@ -1137,6 +1137,50 @@ class ReviewOfNovember24Tests(unittest.TestCase):
         self.assertEqual(at(mapped, 26, 2), at(before, 26, 2), "the contour outside the pill as mapped")
         self.assertEqual(at(mapped, 2, 2), at(before, 2, 2), "the canvas as mapped")
 
+    def pill_pass(self, rows, width):
+        flat = [c for row in rows for c in row]
+        drawn, mapped = pixels(flat), pixels(flat)
+        array = (ctypes.c_char * len(mapped)).from_buffer(mapped)
+        LIB.freelab_map_anchors(ctypes.addressof(array), len(mapped) // 4, width, 1, dm.DARK_OKL, dm.LIGHT_OKL, 1.0,
+                                dm.DARK_OKL, 1)
+        LIB.freelab_pills.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
+        LIB.freelab_pills.restype = ctypes.c_int64
+        source = (ctypes.c_char * len(drawn)).from_buffer(drawn)
+        found = LIB.freelab_pills(ctypes.addressof(source), ctypes.addressof(array), len(mapped) // 4, width)
+
+        def at(x, y):
+            return tuple(reversed(struct.unpack_from("<BBB", mapped, 4 * (y * width + x))))
+        return found, at
+
+    def test_a_pills_half_over_the_template_glyphs_and_a_hovered_pill_keep_their_names_light(self):
+        """The owner, November 26: a pill's name broke over its half that lies over the template glyphs (the
+        translucent pill there #9c9a9a, near neutral, beside #a09e9c), and the darker pill of an anchor under the
+        mouse (#7e7a72) was no pill at all. Smoothed gray lines above them, by the hundred, take no slot."""
+        ground, name = (240, 240, 240), (239, 238, 238)
+        width = 200
+        rows = [[ground] * width for _ in range(190)]
+        for y in range(0, 150, 2):  # smoothed gray lines: near neutral pieces, more than the slots (4,096)
+            for x in range(0, width - 1, 3):
+                rows[y][x], rows[y][x + 1] = (150, 150, 150), (160, 160, 160)
+        for y in range(156, 170):  # a pill: its left half over the template (near neutral), its right half warm
+            for x in range(10, 70):
+                rows[y][x] = (156, 154, 154) if x < 40 else (160, 158, 156)
+            if 158 <= y < 168:
+                for x in (20, 21, 50, 51):
+                    rows[y][x] = name
+        for y in range(174, 188):  # a hovered pill
+            for x in range(10, 70):
+                rows[y][x] = (126, 122, 114)
+            if 176 <= y < 186:
+                for x in (20, 21, 50, 51):
+                    rows[y][x] = name
+        found, at = self.pill_pass(rows, width)
+        self.assertEqual(found, 2)
+        for x, y in ((30, 162), (60, 162), (30, 180), (60, 180)):
+            self.assertLess(sum(at(x, y)), 3 * 130, "the pill's gray, dark, at %d,%d" % (x, y))
+        for x, y in ((20, 162), (50, 162), (20, 180), (50, 180)):
+            self.assertGreater(sum(at(x, y)), 3 * 200, "the name light, at %d,%d" % (x, y))
+
     def test_a_selected_cells_name_is_drawn_again_from_its_coverage(self):
         """The owner, November 25: a selected cell's name, white on the selection's blue, was fringed, with a black
         pixel in its g. Each pixel of light text on the band: its channels' mean share of the way from the band to
