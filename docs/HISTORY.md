@@ -86,7 +86,7 @@ How each tool came to work as it does: what it did before, what it does now, and
 - An earlier version of the check on the owner's test font read only the font's glyph pairs and missed its class kerning, so it favored the FreeLab method wrongly. The check now reads the kerning as HarfBuzz applies it, classes included, and contour distance comes closer on the kerned pairs.
 - Before every tool read each kerning key's direction from its own glyphs, Kerning Check measured an Arabic key's ink gap on the wrong sides, and Font Compare drew a Hebrew pair the wrong way round. Kerning Check, Font Compare, and Proof now read every font's keys by `RTL_RANGES` and `direction_char`, an Arabic font's included.
 - 2026-11-24: Kerning Classes (*Suggest classes…*) told users to close the font without saving to take a write back. Tried live on a font opened afresh, one *Edit > Undo* takes a created class back. Its two writes now record the font in FontLab's History first, as Auto Kerning's write does, and its status line says *Edit > Undo* takes them back.
-- 2026-11-26: Kerning Check's previews kept room for a third pair (a collision's base pair) when only two were drawn, so *Now* and *Adjusted* sat in the left two thirds (the owner's image 167). The third column now goes while only two pairs are drawn, and the two share the width, each centered in its half.
+- 2026-11-26: Kerning Check's previews kept room for a third pair (a collision's base pair) when only two were drawn, so *Now* and *Adjusted* sat in the left two thirds (the owner's image 167). The third column now goes while only two pairs are drawn, and the two share the width, each centered in its half. Hidden, its empty column at first still took its third of the width, the line between the two at a third (image 170); its share now goes with it, the line in the middle.
 - 2026-11-26: *Quick Overlay* now has a group of its own in *Scripts > FreeLab*, between the font tools and dark mode and tab docking (the owner's image 164).
 
 ## Auto Spacing
@@ -177,6 +177,7 @@ How each tool came to work as it does: what it did before, what it does now, and
 - IBM Plex Sans KR's en dash had both its vertical presentation form and a turned proportional copy in vrt2, and the copy was built for nothing (seen live). A glyph that has a vertical form now takes that form in vrt2, and no turned copy is built for it.
 - The previews drew a character the font lacks as an empty box, and the owner found Noto Sans's previews all empty boxes, where CJK Spacing "only shows the glyphs it can display". Such characters are now left out.
 - On Bellefair, a font with no CJK glyph, the Korean sample showed a comma and a period, and nothing said why (owner's report 148). The log now says which of the sample's characters the previews show and what the font lacks.
+- 2026-11-26: That note (CJK Spacing's too) counted each use of a character, while its parentheses named each character once: *12 CJK punctuation marks* named six, each used twice in the sample, and *2 characters* named the one horizontal bar (the owner's images 168 and 169). It now counts characters, each once. *And others* stood for a single seventh mark; one left is now named.
 
 ## Feature Code
 
@@ -238,6 +239,7 @@ How each tool came to work as it does: what it did before, what it does now, and
 - The *Kerning* tab's *Differing values* chip was named *Other values*. It was renamed, and made the only kind shown at first, at the owner's request.
 - *Show the features that are alike* stayed usable when no feature was alike, and the owner saw no change on ticking it (image 293). It is now grayed then, its tooltip saying why.
 - A font compared from the *Features* tab had its code shown dimmed until another feature was selected (the owner's image 233): the view is grayed while comparing, and its colors were read then. The code is now written in the view's colors as they are when it is usable.
+- 2026-11-26: Quick Overlay's dialog said which font it works on in plain text, unlike the other tools (the owner's image 171): the font's name is now bold, and *Overlay Fonts* in italics. *And the glyphs flagged* read as if glyphs were typed above, which may be empty; it is now *Choose flagged glyphs*. *Overlay* was clickable with nothing typed and no flag chosen (image 172); it is now grayed out until there is something to overlay.
 
 ## Family Audit
 

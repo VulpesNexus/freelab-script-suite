@@ -989,12 +989,15 @@ SAMPLE_SHOWN_MOST = 6  # characters named in the note's parentheses at most
 def character_words(chars, most=SAMPLE_SHOWN_MOST):
     """A few characters named in words, the distinct ones in their order: a punctuation mark or a symbol
     by its name ("the comma", "the period", "the left corner bracket"), anything else between quotation
-    marks; "and others" past most. A bare mark in parentheses, "(, .)", read oddly (live pass)."""
+    marks; "and others" past most, for two or more left (one left is named: "and others" stood for a single
+    mark, owner's image 169). A bare mark in parentheses, "(, .)", read oddly (live pass)."""
     import unicodedata
     distinct = []
     for ch in chars:
         if ch not in distinct:
             distinct.append(ch)
+    if len(distinct) == most + 1:
+        most += 1
     words = []
     for ch in distinct[:most]:
         try:
@@ -1020,10 +1023,13 @@ def preview_note(text, names, bold=lambda text: text, escape=lambda text: text):
     character. names: {code point: glyph}; bold: how a
     count is set off, with its noun (owner's images 297 and 301); escape: the sample's characters made
     safe in rich text (ak.html), as bold makes it rich."""
-    shown, lacking = [], []
+    # Each character once: the counts are of characters, as the parentheses name them (owner's image 168: "12 CJK
+    # punctuation marks" named six, each used twice in the sample; image 169: "2 characters (the horizontal bar)")
+    shown, lacking, seen = [], [], set()
     for code, ch in code_points(text):
-        if ch.isspace():
+        if ch.isspace() or code in seen:
             continue
+        seen.add(code)
         (shown if code in names else lacking).append((code, ch))
     if not lacking:
         return u""

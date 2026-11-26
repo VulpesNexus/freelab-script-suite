@@ -5359,6 +5359,9 @@ class KerningCheckPreviewRuleTests(unittest.TestCase):
         dialog.package = object()
         dialog.update_buttons_soon = lambda: None
         dialog.pair_picture = lambda left, right, value, room=False, width=None: self.Picture()
+        dialog.preview_slots = [0, 2, 4]  # (the columns' places in the row, lines between)
+        dialog.preview_row = type("Row", (), {"stretch": {}, "setStretch": lambda row, at, factor: row.stretch.__setitem__(at, factor)})()
+        dialog.preview_row.stretch = {}
         return dialog
 
     @staticmethod
@@ -5381,6 +5384,8 @@ class KerningCheckPreviewRuleTests(unittest.TestCase):
                          "no line beside the third preview's empty room, nor its caption")
         self.assertEqual([label.visible for label in dialog.previews], [True, True, False],
                          "two pairs: the third column goes, the two share the width, each centered (image 167)")
+        self.assertEqual(dialog.preview_row.stretch, {0: 1, 2: 1, 4: 0},
+                         "its stretch too: hidden, its empty column kept its third, the line at a third (image 170)")
         selected[0] = None  # (nothing selected: only the hint, if any, in the middle preview's room)
         dialog.update_previews()
         self.assertEqual(self.shown(dialog), ([False] * 3, [False] * 2), "emptied: hidden again")
@@ -5411,7 +5416,8 @@ class KerningCheckPreviewRuleTests(unittest.TestCase):
         with io.open(kc.__file__, encoding="utf-8") as handle:
             source = handle.read()
         init = source.split(u"class KerningCheckDialog")[1].split(u"\n    def current_font")[0]
-        built = init.split(u"self.preview_parts = []")[1].split(u"layout.addLayout(previews)")[0]
+        built = init.split(u"self.preview_parts, self.preview_slots, self.preview_row = [], [], previews")[1].split(
+            u"layout.addLayout(previews)")[0]
         self.assertIn(u"self.preview_parts[-1].append(self.ak.separator(vertical=True))", built)
         self.assertIn(u"self.preview_parts[-1].append(caption)", built)
         self.assertIn(u"self.ak.preview_filled(self.preview_parts[-1], False)", built)

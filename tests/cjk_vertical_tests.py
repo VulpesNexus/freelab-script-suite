@@ -2038,7 +2038,7 @@ class PreviewNoteTests(unittest.TestCase):
         import freelab_cjk_spacing
         korean = [s for s in freelab_cjk_spacing.SAMPLES if s[0] == "ko"][0][2]  # (the sample the owner saw)
         names = {0x2C: u"comma", 0x2E: u"period"}
-        syllables = sum(1 for ch in korean if 0xAC00 <= ord(ch) <= 0xD7A3)
+        syllables = len(set(ch for ch in korean if 0xAC00 <= ord(ch) <= 0xD7A3))  # (each once)
         self.assertEqual(cv.preview_note(korean, names),
                          u"The previews show only the 2 characters of the sample the font has (the comma and the period): it lacks %d Hangul "
                          u"syllables and 2 CJK punctuation marks (the left corner bracket and the right corner bracket)." % syllables)
@@ -2063,6 +2063,13 @@ class PreviewNoteTests(unittest.TestCase):
         # Live pass: "(, .)" read oddly; marks by their names, anything else quoted
         self.assertEqual(cv.character_words(u"a,.a"), u"“a”, the comma, and the period")
         self.assertEqual(cv.character_words(u"abcdefgh", 2), u"“a”, “b”, and others")
+        # (owner's image 169: "and others" for a single seventh mark; one left is named)
+        self.assertEqual(cv.character_words(u"abc", 2), u"“a”, “b”, and “c”")
+        # (owner's images 168 and 169: the counts are of characters, each once, as the parentheses name them)
+        self.assertEqual(cv.preview_note(u"、。、。ー ー", {0x30FC: u"bar"}),
+                         u"The previews show only the 1 character of the sample the font has (“ー”): it lacks 2 CJK "
+                         u"punctuation marks (the ideographic comma and the ideographic full stop)."
+                         .replace(u"full stop", u"period"))
 
 
 class LacksNoteTests(unittest.TestCase):

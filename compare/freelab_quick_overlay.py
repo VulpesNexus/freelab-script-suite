@@ -21,7 +21,7 @@ import sys
 TITLE = u"FreeLab Quick Overlay"
 STYLE = u"Quick Overlay"  # the new font's style: its family is the current font's, so Add Family Members lists them
 PROMPT = u"Glyphs to compare (characters, or /names):"
-FLAG_PROMPT = u"And the glyphs flagged:"
+FLAG_PROMPT = u"Choose flagged glyphs:"  # (not "And the glyphs flagged": the field above may be empty, image 171)
 NO_FLAG = u"None"
 NO_FLAG_IN_FONT = u"None (no glyph of the font is flagged)"
 # FontLab's flags (its Flag menu: a glyph's mark, a hue plus one; 0 for none), named as FreeLab's lists name them
@@ -572,6 +572,20 @@ def flag_icon(mark):
     return QIcon(pixmap)
 
 
+def note_text(family):
+    """The dialog's note, in rich text as the other tools say what they work on (the owner's image 171): the font's
+    family in bold, FontLab's command in italics."""
+    name = (family or u"").replace(u"&", u"&amp;").replace(u"<", u"&lt;").replace(u">", u"&gt;")
+    return (u"<i>Overlay Fonts</i> opened on a new font holding only these glyphs of %s, with its family's fonts "
+            u"added: each change then shows at once (on the whole font, FontLab works again on every glyph)."
+            % (u"<b>%s</b>" % name if name else u"the current font"))
+
+
+def can_overlay(text, flag_index):
+    """Whether there is anything to overlay: glyphs typed, or a flag chosen (its index in the dropdown, past None)."""
+    return bool((text or u"").strip()) or flag_index > 0
+
+
 def ask_glyphs(family, choices):
     """(the glyphs typed, the flag chosen or 0) of the dialog, or None on Cancel. choices: flag_choices of the
     font's glyphs."""
@@ -586,9 +600,8 @@ def ask_glyphs(family, choices):
     flags = int(dialog.windowFlags()) if callable(dialog.windowFlags) else int(dialog.windowFlags)
     dialog.setWindowFlags(Qt.WindowFlags(flags & ~int(Qt.WindowContextHelpButtonHint)))
     layout = QVBoxLayout(dialog)
-    note = QLabel(u"Overlay Fonts opened on a new font holding only these glyphs of %s, with its family's fonts "
-                  u"added: each change then shows at once (on the whole font, FontLab works again on every glyph)."
-                  % (family or u"the current font"))
+    note = QLabel(note_text(family))
+    note.setTextFormat(Qt.RichText)
     note.setWordWrap(True)
     layout.addWidget(note)
     layout.addWidget(QLabel(PROMPT))
@@ -615,6 +628,18 @@ def ask_glyphs(family, choices):
     layout.addLayout(row)
     ok.connect("clicked()", dialog.accept)
     cancel.connect("clicked()", dialog.reject)
+
+    def update_ok(*_args):  # (nothing typed and no flag chosen: nothing to overlay, the owner's image 172)
+        try:
+            index = combo.currentIndex() if callable(combo.currentIndex) else combo.currentIndex
+            ok.setEnabled(can_overlay(u"%s" % field.text, index))
+        except Exception:
+            pass  # a slot must not raise
+
+    held().append(update_ok)  # (held: PythonQt drops a slot no Python object holds)
+    field.connect("textChanged(QString)", update_ok)
+    combo.connect("currentIndexChanged(int)", update_ok)
+    update_ok()
     dialog.setMinimumWidth(420)
     accepted = dialog.exec_()
     text = u"%s" % field.text

@@ -728,7 +728,7 @@ class KerningCheckDialog(object):
         self.previews, self.preview_captions = [], []
         # Each preview's caption and the line before it, shown only while that preview has a pair drawn
         # (update_previews: no line or caption over nothing, the review of November 23, image 12)
-        self.preview_parts = []
+        self.preview_parts, self.preview_slots, self.preview_row = [], [], previews
         for number in range(3):
             self.preview_parts.append([])
             if number:
@@ -750,6 +750,7 @@ class KerningCheckDialog(object):
                                u"without its entry (<i>Cleanup</i>), beside its base pair; its glyphs are drawn see-through, "
                                u"so where their ink overlaps it is denser.")
             column.addWidget(label, 1)
+            self.preview_slots.append(previews.count())  # (its place in the row: its stretch, update_previews)
             previews.addLayout(column, 1)
             self.previews.append(label)
         layout.addLayout(previews)
@@ -1553,8 +1554,13 @@ class KerningCheckDialog(object):
             if index < len(captions):  # (over the picture, quiet: the shared preview_caption)
                 captions[index].setText(caption)
             # Two pairs drawn: the third column goes, and the two share the width, each centered in its half (as
-            # three, they sat in the left two thirds: the owner's image 167)
-            label.setVisible(index < len(shown) or not shown)
+            # three, they sat in the left two thirds: the owner's image 167). Its stretch goes too: hidden, its
+            # empty column still took its third, the line between the two at a third (image 170)
+            used = index < len(shown) or not shown
+            label.setVisible(used)
+            slots, row = getattr(self, "preview_slots", []), getattr(self, "preview_row", None)
+            if row is not None and index < len(slots):
+                row.setStretch(slots[index], 1 if used else 0)
         if not shown:  # (the room the pictures take, said what it is for: it read as an empty band, live)
             self.previews[1].setText(self.preview_hint())
         self.update_buttons_soon()

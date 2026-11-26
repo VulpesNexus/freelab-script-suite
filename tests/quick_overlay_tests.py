@@ -44,6 +44,27 @@ class FlagTests(unittest.TestCase):
         self.assertEqual(qo.flagged(marks, 0), [], "none chosen")
 
 
+class DialogTests(unittest.TestCase):
+    """The owner's images 171 and 172: the note formatted as the other tools' (the font's name bold, FontLab's command
+    in italics), the flags' line a choice of its own, and Overlay grayed out while there is nothing to overlay."""
+
+    def test_the_note_names_the_font_in_bold_and_the_command_in_italics(self):
+        note = qo.note_text(u"Sarabun")
+        self.assertTrue(note.startswith(u"<i>Overlay Fonts</i> opened"))
+        self.assertIn(u"glyphs of <b>Sarabun</b>, with", note)
+        self.assertIn(u"<b>A &amp; B</b>", qo.note_text(u"A & B"), "the name made safe in rich text")
+        self.assertIn(u"of the current font,", qo.note_text(None))
+
+    def test_the_flags_line_stands_alone(self):
+        self.assertEqual(qo.FLAG_PROMPT, u"Choose flagged glyphs:")
+
+    def test_overlay_only_with_something_to_overlay(self):
+        self.assertFalse(qo.can_overlay(u"", 0))
+        self.assertFalse(qo.can_overlay(u"   ", 0), "spaces are nothing")
+        self.assertTrue(qo.can_overlay(u"Ag", 0))
+        self.assertTrue(qo.can_overlay(u"", 1), "a flag chosen alone")
+
+
 class ComponentTests(unittest.TestCase):
     def test_the_glyphs_components_draw_come_first(self):
         parts = {u"Aacute": [u"A", u"acutecomb"], u"acutecomb": [], u"A": [], u"Ccedilla": [u"C", u"cedilla"],
