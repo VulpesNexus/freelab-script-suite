@@ -1151,6 +1151,10 @@ class FakeHooks(object):
         self.texts = (count, strategy)
         return count
 
+    def freelab_hooks_set_frames(self, widgets, count):
+        self.frames = count
+        return count
+
     def freelab_hooks_add_ink_module(self, module):
         return 2
 

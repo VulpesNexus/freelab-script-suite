@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 36
+#define FREELAB_HOOKS_VERSION 37
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -357,6 +357,19 @@ static int map_qcolor(const qcolor *c, qcolor *out)
  * second entry of QPaintDevice's table of virtual functions (after the destructor). */
 #define SCREEN_PLAIN 1
 #define SCREEN_SUBPIXEL 2
+/* Containers whose own painting is mapped (the dock, the panels, the Font window), apart from the islands: their
+ * painting is mapped as an island's, but their palettes are not answered light outside painting. FontLab reads the
+ * Font window's palette to color its document tab's name: answered light (black), the names came out black on the
+ * dark tab bar (the owner's image 179, 2026-11-26). */
+#define FRAME_MAX 256
+static uintptr_t frame_widgets[FRAME_MAX];
+static int frame_count;
+
+static int frame_widget(const void *device)
+{
+    return frame_count && in_sorted(frame_widgets, frame_count, (uintptr_t)device - QPAINTDEVICE_IN_QWIDGET);
+}
+
 static int screen_mode(const void *painter)
 {
     void *device;
@@ -371,7 +384,7 @@ static int screen_mode(const void *painter)
         return 0;
     if (type != DEVICE_WIDGET)
         return SCREEN_PLAIN;
-    if (!keep_count || !kept_widget(device))
+    if ((!keep_count || !kept_widget(device)) && !frame_widget(device))
         return 0; /* not one of the hooked surfaces: the script engine's */
     return subpixel_count && subpixel_widget(device) ? SCREEN_SUBPIXEL : SCREEN_PLAIN;
 }
@@ -1986,6 +1999,22 @@ EXPORT int freelab_hooks_set_hooked(const uint64_t *widgets, int count)
     }
     keep_count = n;
     hooked_palette_count = 0; /* noted again as FontLab reads them (a deleted widget's may be reused) */
+    return n;
+}
+
+/* The containers whose own painting is mapped (any order; at most FRAME_MAX): see frame_widgets. */
+EXPORT int freelab_hooks_set_frames(const uint64_t *widgets, int count)
+{
+    int i, j, n = 0;
+    for (i = 0; i < count && n < FRAME_MAX; i++)
+        frame_widgets[n++] = (uintptr_t)widgets[i];
+    for (i = 1; i < n; i++) {
+        uintptr_t v = frame_widgets[i];
+        for (j = i - 1; j >= 0 && frame_widgets[j] > v; j--)
+            frame_widgets[j + 1] = frame_widgets[j];
+        frame_widgets[j + 1] = v;
+    }
+    frame_count = n;
     return n;
 }
 

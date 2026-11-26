@@ -5105,7 +5105,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 36
+HOOKS_VERSION = 37
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
@@ -5180,6 +5180,7 @@ def _hooks():
     lib.freelab_hooks_set_ink.argtypes = [ctypes.c_void_p, ctypes.c_int]
     lib.freelab_hooks_set_picked.argtypes = [ctypes.c_void_p, ctypes.c_int]
     lib.freelab_hooks_set_text_strategy.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+    lib.freelab_hooks_set_frames.argtypes = [ctypes.c_void_p, ctypes.c_int]
     lib.freelab_hooks_add_ink_module.argtypes = [ctypes.c_void_p]
     lib.freelab_hooks_set_subpixel.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_double]
     lib.freelab_hooks_add_svg_module.argtypes = [ctypes.c_void_p]
@@ -5268,9 +5269,10 @@ def _install_hooks(app):
             raise RuntimeError("the native engine could not hook FontLab's calls")
         state["hooked"], state["hooked_lib"] = True, lib
         state["hooked_addresses"], state["ink_addresses"], state["picked_addresses"] = [], [], []
-        state["text_addresses"] = []
+        state["text_addresses"], state["frame_addresses"] = [], []
         _send_picked(state)  # (none: the library keeps the last list for the FontLab session)
         _send_text_strategy(state)
+        _send_frames(state)
         _update_hooked(app)
     except Exception as exc:
         _clear_native_pending()
@@ -5379,7 +5381,7 @@ def _hook_island(widget):
     first = widget.property(HOOKED_PROP) is None
     _clear_effect(widget, _record(widget))  # an effect dark mode set before it was found in a hooked island
     widget.setProperty(HOOKED_PROP, True)
-    if NATIVE_GRAY_TEXT:
+    if NATIVE_GRAY_TEXT and not widget.inherits("QTabBar"):  # (tab titles keep ClearType: see TITLE_TEXT_STRATEGY)
         _gray_text(widget)
     _protect(widget)  # dark as it is painted: an effect around it (the font window's ink) must not map it again
     _darken_sheet(widget)
@@ -5402,10 +5404,11 @@ FRAME_KINDS = ("title", "keyed")  # the panels (TITLE_CLASSES) and the dock (KEY
 
 
 # A panel's title text, drawn by the panel and mapped by the hooks, is drawn in this smoothing (QFont::StyleStrategy):
-# the hooks set it on the font FontLab hands to the painter, as it is drawn (freelab_hooks_set_text_strategy). With
-# ClearType, the light capitals had blue and orange edges. Set on the panel's own font, it reached the title only as
-# the panel was next laid out (FontLab keeps a copy of the font), and changed the text inside the panel too.
-TITLE_TEXT_STRATEGY = 256  # QFont::NoAntialias
+# the hooks set it on the font FontLab hands to the painter, as it is drawn (freelab_hooks_set_text_strategy). Set on
+# the panel's own font, it reached the title only as the panel was next laid out (FontLab keeps a copy of the font),
+# and changed the text inside the panel too. ClearType, as the tab titles: of seven smoothings compared side by side
+# (grayscale, ClearType, each with three hintings, and none), the owner chose ClearType (image 182, 2026-11-26).
+TITLE_TEXT_STRATEGY = 1  # QFont::PreferDefault (ClearType)
 
 
 FRAME_MIN_PIXELS = 500000  # a FontLab container found to need the ink effect, this large or more: hooked instead
@@ -5444,11 +5447,18 @@ def _hook_frame(widget):
     if pointer and _class_name(widget) in TITLE_CLASSES and pointer not in state.setdefault("text_addresses", []):
         state["text_addresses"].append(pointer)  # (its title in TITLE_TEXT_STRATEGY, set as it is drawn)
         _send_text_strategy(state)
-    if pointer and pointer not in state.setdefault("hooked_addresses", []):
-        state["hooked_addresses"].append(pointer)
-        _send_hooked(state)
+    if pointer and pointer not in state.setdefault("frame_addresses", []):
+        state["frame_addresses"].append(pointer)  # (not an island: its palette is not answered light, see _send_frames)
+        _send_frames(state)
         widget.update()
     return first
+
+
+def _send_frames(state):
+    import ctypes
+    addresses = state.get("frame_addresses", [])
+    table = (ctypes.c_uint64 * max(1, len(addresses)))(*addresses)
+    state["hooked_lib"].freelab_hooks_set_frames(ctypes.addressof(table), len(addresses))
 
 
 def _send_text_strategy(state):
@@ -5476,23 +5486,31 @@ def _update_hooked(app):
     state = _state()
     if state.get("hooked_lib") is None or not state.get("hooked"):
         return
-    addresses, inks, picked, texts = [], [], [], []
+    addresses, inks, picked, texts, frames = [], [], [], [], []
     for widget in app.allWidgets():
         try:
-            hooked, ink = widget.property(HOOKED_PROP) or widget.property(FRAME_PROP), widget.property(NATIVE_INK_PROP)
-            if hooked or ink:
+            hooked, ink, frame = widget.property(HOOKED_PROP), widget.property(NATIVE_INK_PROP), widget.property(FRAME_PROP)
+            if hooked or ink or frame:
                 pointer = _sci_pointer(widget)
                 if pointer:
-                    (addresses if hooked else inks).append(pointer)
-                    if hooked and widget.property(PICKED_PROP):
-                        picked.append(pointer)
-                    if widget.property(FRAME_PROP) and _class_name(widget) in TITLE_CLASSES:
-                        texts.append(pointer)
+                    if frame:
+                        frames.append(pointer)
+                        if _class_name(widget) in TITLE_CLASSES:
+                            texts.append(pointer)
+                    elif hooked:
+                        addresses.append(pointer)
+                        if widget.property(PICKED_PROP):
+                            picked.append(pointer)
+                    else:
+                        inks.append(pointer)
         except Exception:
             pass
     if addresses != state.get("hooked_addresses"):
         state["hooked_addresses"] = addresses
         _send_hooked(state)
+    if frames != state.get("frame_addresses"):
+        state["frame_addresses"] = frames
+        _send_frames(state)
     if texts != state.get("text_addresses"):
         state["text_addresses"] = texts
         _send_text_strategy(state)
