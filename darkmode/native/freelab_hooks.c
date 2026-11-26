@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 35
+#define FREELAB_HOOKS_VERSION 36
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -113,6 +113,13 @@ static uintptr_t picked_widgets[PICKED_MAX];
 static int picked_count;
 #define PICKED_INTERFACE_GRAY 0xa0a2a4U /* the pill behind a row's font name */
 
+/* Widgets whose text is drawn with dark mode's smoothing (the panels' titles): a font FontLab hands to setFont on
+ * one is drawn as a copy with text_strategy (QFont::StyleStrategy) set. FontLab keeps a copy of a panel's font,
+ * read again only as the panel is laid out, so a strategy set on the panel itself reached the title late or never. */
+#define TEXT_STRATEGY_MAX 128
+static uintptr_t text_strategy_widgets[TEXT_STRATEGY_MAX];
+static int text_strategy_count, text_strategy;
+
 static int picked_target(const void *painter);
 
 static int in_sorted(const uintptr_t *set, int count, uintptr_t value)
@@ -192,6 +199,9 @@ static void *(*qt_pixmap_from_image)(void *, const void *, int);
 static void (*qt_pixmap_dtor)(void *);
 static int (*qt_palette_current_group)(const void *);
 static void *(*qt_image_convert)(const void *, void *, int, int);
+static void *(*qt_font_copy)(void *, const void *);
+static void (*qt_font_dtor)(void *);
+static void (*qt_font_set_strategy)(void *, int);
 
 static struct {
     const char *name;
@@ -228,6 +238,9 @@ static struct {
     {"??1QPixmap@@UEAA@XZ", (void **)&qt_pixmap_dtor},
     {"?currentColorGroup@QPalette@@QEBA?AW4ColorGroup@1@XZ", (void **)&qt_palette_current_group},
     {"?convertToFormat@QImage@@QEBA?AV1@W4Format@1@V?$QFlags@W4ImageConversionFlag@Qt@@@@@Z", (void **)&qt_image_convert},
+    {"??0QFont@@QEAA@AEBV0@@Z", (void **)&qt_font_copy},
+    {"??1QFont@@QEAA@XZ", (void **)&qt_font_dtor},
+    {"?setStyleStrategy@QFont@@QEAAXW4StyleStrategy@1@@Z", (void **)&qt_font_set_strategy},
 };
 #define QT_NEEDED (int)(sizeof(qt_needed) / sizeof(qt_needed[0]))
 
@@ -239,7 +252,7 @@ enum {
     H_PALETTE_COLOR_GROUP, H_PALETTE_COLOR, H_PALETTE_BRUSH_GROUP,
     H_DRAW_PIXMAP_RECT, H_DRAW_PIXMAP_PT, H_PAINTER_ON, H_PAINTER_OFF, H_PAINTER_BEGIN, H_PAINTER_END,
     H_WIDGET_PALETTE, /* from Qt5Widgets: the only one */
-    H_PAINTER_PEN, H_PAINTER_BRUSH, H_SET_PEN_STYLE, H_SET_BRUSH_STYLE,
+    H_PAINTER_PEN, H_PAINTER_BRUSH, H_SET_PEN_STYLE, H_SET_BRUSH_STYLE, H_SET_FONT,
     H_COUNT
 };
 static const char *hook_names[H_COUNT] = {
@@ -274,6 +287,7 @@ static const char *hook_names[H_COUNT] = {
     "?brush@QPainter@@QEBAAEBVQBrush@@XZ",
     "?setPen@QPainter@@QEAAXW4PenStyle@Qt@@@Z",
     "?setBrush@QPainter@@QEAAXW4BrushStyle@Qt@@@Z",
+    "?setFont@QPainter@@QEAAXAEBVQFont@@@Z",
 };
 
 static const char *hook_dll(int index)
@@ -1394,6 +1408,26 @@ static void w_set_pen_style(void *p, int style)
     ORIGINAL(H_SET_PEN_STYLE, style_fn)(p, style);
 }
 
+/* setFont on a widget of text_strategy_widgets: a copy with dark mode's smoothing (FontLab's font never changes). */
+#define QFONT_SIZE 64 /* room for a QFont (16 bytes in Qt 5) */
+static void w_set_font(void *p, const void *font)
+{
+    void *device;
+    hook_calls[H_SET_FONT]++;
+    if (hooks_on && text_strategy_count && (device = qt_painter_device(p)) != 0
+        && ((int (*)(const void *))((void ***)device)[0][1])(device) == DEVICE_WIDGET
+        && in_sorted(text_strategy_widgets, text_strategy_count, (uintptr_t)device - QPAINTDEVICE_IN_QWIDGET)) {
+        int64_t storage[QFONT_SIZE / 8];
+        qt_font_copy(storage, font);
+        qt_font_set_strategy(storage, text_strategy);
+        hook_changed[H_SET_FONT]++;
+        ORIGINAL(H_SET_FONT, one_fn)(p, storage);
+        qt_font_dtor(storage);
+        return;
+    }
+    ORIGINAL(H_SET_FONT, one_fn)(p, font);
+}
+
 static void w_set_brush_style(void *p, int style)
 {
     qcolor black, m;
@@ -1691,7 +1725,7 @@ static void *wrappers[H_COUNT] = {
     (void *)w_draw_image_rectf, (void *)w_palette_color_group, (void *)w_palette_color, (void *)w_palette_brush_group,
     (void *)w_draw_pixmap_rect, (void *)w_draw_pixmap_pt, (void *)w_painter_on, (void *)w_painter_off,
     (void *)w_painter_begin, (void *)w_painter_end, (void *)w_widget_palette, (void *)w_painter_pen,
-    (void *)w_painter_brush, (void *)w_set_pen_style, (void *)w_set_brush_style,
+    (void *)w_painter_brush, (void *)w_set_pen_style, (void *)w_set_brush_style, (void *)w_set_font,
 };
 
 static void *wrapper_for(int module, int index)
@@ -1891,6 +1925,23 @@ EXPORT int freelab_hooks_set_picked(const uint64_t *widgets, int count)
         picked_widgets[j + 1] = v;
     }
     picked_count = n;
+    return n;
+}
+
+/* The widgets whose text setFont gives strategy (any order; at most TEXT_STRATEGY_MAX), see text_strategy_widgets. */
+EXPORT int freelab_hooks_set_text_strategy(const uint64_t *widgets, int count, int strategy)
+{
+    int i, j, n = 0;
+    for (i = 0; i < count && n < TEXT_STRATEGY_MAX; i++)
+        text_strategy_widgets[n++] = (uintptr_t)widgets[i];
+    for (i = 1; i < n; i++) {
+        uintptr_t v = text_strategy_widgets[i];
+        for (j = i - 1; j >= 0 && text_strategy_widgets[j] > v; j--)
+            text_strategy_widgets[j + 1] = text_strategy_widgets[j];
+        text_strategy_widgets[j + 1] = v;
+    }
+    text_strategy = strategy;
+    text_strategy_count = n;
     return n;
 }
 

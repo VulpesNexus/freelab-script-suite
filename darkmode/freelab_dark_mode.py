@@ -402,8 +402,13 @@ SCRIPT_ISLAND_CLASSES = ("YContinueWidget",)
 QT_DRAWN_BASES = ("QLineEdit", "QAbstractButton", "QAbstractScrollArea", "QAbstractSpinBox", "QComboBox",
                   "QLabel", "QAbstractSlider", "QTabBar")
 PICKED_PROP = "freelabPicked"  # a hooked island showing colors the user picked, drawn as they are (see PICKED_WIDGETS)
+# A container whose own painting the native engine maps, its children left as they are (not an island: see
+# _hook_frame). The dock's frame lines and the panels' backgrounds and title strips were effects, which drew the
+# whole dock offscreen and mapped it at every repaint inside it: 132 ms for a panel's preview, 1 ms without
+# (measured live, 2026-11-26).
+FRAME_PROP = "freelabHookedFrame"
 PROPS = (ID_PROP, SEEN_PROP, QUEUED_PROP, WATCHED_PROP, CHECKED_PROP, ISLAND_PROP, SHEET_PROP, DARK_SHEET_PROP, HOOKED_PROP, NATIVE_INK_PROP,
-         PICKED_PROP)
+         PICKED_PROP, FRAME_PROP)
 
 NAMED_COLORS = {
     "white": (255, 255, 255), "black": (0, 0, 0), "whitesmoke": (245, 245, 245),
@@ -3625,11 +3630,27 @@ def _freelab_text(widget):
         return False
 
 
+def _icon_only_button(widget):
+    """A tool button that shows its icon alone (Qt::ToolButtonIconOnly, with an icon): its text, kept for its tooltip,
+    is never drawn, so there is no text to defringe. 64 of FontLab's had the defringe effect, each drawn offscreen at
+    every repaint for nothing (a tab switch to a Font window: 139 effect draws, 375 of its 505 ms; 2026-11-26).
+    Never raises."""
+    try:
+        if not widget.inherits("QToolButton"):
+            return False
+        icon = _prop(widget, "icon")
+        return int(_prop(widget, "toolButtonStyle")) == 0 and icon is not None and not icon.isNull()
+    except Exception:
+        return False
+
+
 def _ui_text_widget(widget):
     """Whether a widget is text Qt draws on the dark interface, to be drawn through the defringe effect. Never
     raises."""
     try:
         if not any(widget.inherits(c) for c in UI_TEXT_CLASSES) or not _free_or_defringed(widget):
+            return False
+        if _icon_only_button(widget):
             return False
         if _has_defringe(widget):
             return True  # (decided before: not rendered again)
@@ -4540,6 +4561,8 @@ def process(widget):
             kind = found
     if kind is None and _ui_text_widget(widget):
         kind = "defringe"  # (see UI_TEXT_CLASSES)
+    elif kind is None and _has_defringe(widget) and _icon_only_button(widget):
+        _forget_effect(widget)  # (one an earlier version gave it: see _icon_only_button)
     if kind == "ink" and widget.property(ISLAND_PROP) == "ink" and _light_faced_text_button(widget):
         # (found to paint light, by either look above: see BUTTON_INK)
         _dark_button_text(widget)
@@ -4550,6 +4573,8 @@ def process(widget):
         _hook_island(widget)  # (a list's viewport whose rows FontLab paints: see PICKED_WIDGETS)
     elif kind == "ink" and _native_ink_target(widget):
         _native_ink(widget)
+    elif (kind in FRAME_KINDS or (kind == "ink" and _ink_frame(widget))) and _native_hooked():
+        _hook_frame(widget)  # (its own painting mapped at the source: see FRAME_PROP)
     elif kind in ("ink", "edges", "title", "subpixel", "defringe"):
         _set_effect(widget, _record(widget), kind)
     elif kind == "keyed" and widget.isVisible():
@@ -5080,7 +5105,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 35
+HOOKS_VERSION = 36
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
@@ -5154,6 +5179,7 @@ def _hooks():
     lib.freelab_hooks_set_hooked.argtypes = [ctypes.c_void_p, ctypes.c_int]
     lib.freelab_hooks_set_ink.argtypes = [ctypes.c_void_p, ctypes.c_int]
     lib.freelab_hooks_set_picked.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    lib.freelab_hooks_set_text_strategy.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
     lib.freelab_hooks_add_ink_module.argtypes = [ctypes.c_void_p]
     lib.freelab_hooks_set_subpixel.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_double]
     lib.freelab_hooks_add_svg_module.argtypes = [ctypes.c_void_p]
@@ -5177,7 +5203,7 @@ def _hooks():
     return lib
 
 
-HOOKS_MIN_FOUND = 25  # of 31: FontLab 7.2's program imports all of them
+HOOKS_MIN_FOUND = 25  # of 32: FontLab 7.2's program imports all of them
 
 
 def _palette_table(palette):
@@ -5242,7 +5268,9 @@ def _install_hooks(app):
             raise RuntimeError("the native engine could not hook FontLab's calls")
         state["hooked"], state["hooked_lib"] = True, lib
         state["hooked_addresses"], state["ink_addresses"], state["picked_addresses"] = [], [], []
+        state["text_addresses"] = []
         _send_picked(state)  # (none: the library keeps the last list for the FontLab session)
+        _send_text_strategy(state)
         _update_hooked(app)
     except Exception as exc:
         _clear_native_pending()
@@ -5370,6 +5398,66 @@ def _hook_island(widget):
         widget.update()
 
 
+FRAME_KINDS = ("title", "keyed")  # the panels (TITLE_CLASSES) and the dock (KEYED_CLASSES)
+
+
+# A panel's title text, drawn by the panel and mapped by the hooks, is drawn in this smoothing (QFont::StyleStrategy):
+# the hooks set it on the font FontLab hands to the painter, as it is drawn (freelab_hooks_set_text_strategy). With
+# ClearType, the light capitals had blue and orange edges. Set on the panel's own font, it reached the title only as
+# the panel was next laid out (FontLab keeps a copy of the font), and changed the text inside the panel too.
+TITLE_TEXT_STRATEGY = 256  # QFont::NoAntialias
+
+
+FRAME_MIN_PIXELS = 500000  # a FontLab container found to need the ink effect, this large or more: hooked instead
+
+
+def _ink_frame(widget):
+    """A large container of FontLab's own class found to paint light (kind "ink"), whose own painting the hooks can
+    map: the Font window (2.28 million pixels), whose ink effect drew it whole offscreen at every repaint, 294 of a
+    tab switch's 411 ms (measured live, 2026-11-26). Never raises."""
+    try:
+        if _class_name(widget).startswith("Q") or widget.inherits("QAbstractScrollArea") or not _hookable(widget):
+            return False
+        return _prop(widget, "width") * _prop(widget, "height") >= FRAME_MIN_PIXELS
+    except Exception:
+        return False
+
+
+def _hook_frame(widget):
+    """Leave a container's own painting to the hooks (its frames, background, title strip), with no effect; its
+    children are processed as anywhere else (an island would have its FontLab-class children hooked too). The first
+    time, what is inside it is looked at again: a child the container's effect mapped, unlooked at as mapped from
+    above, may need a treatment of its own now. True the first time."""
+    first = not widget.property(FRAME_PROP)
+    _clear_effect(widget, _record(widget))
+    widget.setProperty(FRAME_PROP, True)
+    if first:
+        inside = _child_widgets(widget)
+        for child in inside:
+            try:
+                child.setProperty(CHECKED_PROP, None)
+            except Exception:
+                pass
+        _enqueue([w for w in inside if w.isVisible()], "dark")
+    state = _state()
+    pointer = _sci_pointer(widget)
+    if pointer and _class_name(widget) in TITLE_CLASSES and pointer not in state.setdefault("text_addresses", []):
+        state["text_addresses"].append(pointer)  # (its title in TITLE_TEXT_STRATEGY, set as it is drawn)
+        _send_text_strategy(state)
+    if pointer and pointer not in state.setdefault("hooked_addresses", []):
+        state["hooked_addresses"].append(pointer)
+        _send_hooked(state)
+        widget.update()
+    return first
+
+
+def _send_text_strategy(state):
+    import ctypes
+    addresses = state.get("text_addresses", [])
+    table = (ctypes.c_uint64 * max(1, len(addresses)))(*addresses)
+    state["hooked_lib"].freelab_hooks_set_text_strategy(ctypes.addressof(table), len(addresses), TITLE_TEXT_STRATEGY)
+
+
 def _native_hooked():
     state = _state()
     return state.get("engine") == "native" and bool(state.get("hooked"))
@@ -5388,21 +5476,26 @@ def _update_hooked(app):
     state = _state()
     if state.get("hooked_lib") is None or not state.get("hooked"):
         return
-    addresses, inks, picked = [], [], []
+    addresses, inks, picked, texts = [], [], [], []
     for widget in app.allWidgets():
         try:
-            hooked, ink = widget.property(HOOKED_PROP), widget.property(NATIVE_INK_PROP)
+            hooked, ink = widget.property(HOOKED_PROP) or widget.property(FRAME_PROP), widget.property(NATIVE_INK_PROP)
             if hooked or ink:
                 pointer = _sci_pointer(widget)
                 if pointer:
                     (addresses if hooked else inks).append(pointer)
                     if hooked and widget.property(PICKED_PROP):
                         picked.append(pointer)
+                    if widget.property(FRAME_PROP) and _class_name(widget) in TITLE_CLASSES:
+                        texts.append(pointer)
         except Exception:
             pass
     if addresses != state.get("hooked_addresses"):
         state["hooked_addresses"] = addresses
         _send_hooked(state)
+    if texts != state.get("text_addresses"):
+        state["text_addresses"] = texts
+        _send_text_strategy(state)
     if picked != state.get("picked_addresses"):
         state["picked_addresses"] = picked
         _send_picked(state)

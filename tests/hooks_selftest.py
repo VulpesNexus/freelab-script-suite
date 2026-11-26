@@ -21,7 +21,7 @@ k32 = ctypes.WinDLL("kernel32")
 k32.GetModuleHandleW.restype = c_void_p
 base = k32.GetModuleHandleW("Qt5Gui.dll")
 widgets_base = k32.GetModuleHandleW("Qt5Widgets.dll")
-HOOKS = 31
+HOOKS = 32
 hooks.freelab_hooks_set_hooked.argtypes = [c_void_p, c_int]
 WIDGET, PIXMAP, IMAGE = 1, 2, 3
 

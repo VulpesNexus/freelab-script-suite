@@ -1147,6 +1147,10 @@ class FakeHooks(object):
         self.picked = count
         return count
 
+    def freelab_hooks_set_text_strategy(self, widgets, count, strategy):
+        self.texts = (count, strategy)
+        return count
+
     def freelab_hooks_add_ink_module(self, module):
         return 2
 
@@ -1590,12 +1594,15 @@ class EngineTests(DarkModeCase):
         self.assertEqual(hooks.calls[:2], ["set_palette", "install"])
         self.assertIsNone(self.kind(self.search), "an island FontLab paints: hooked, no effect")
         self.assertTrue(self.search.property(dm.HOOKED_PROP))
-        self.assertIn(self.search, list(self.dock.effect.freelab_protect.values()),
-                      "dark as it is painted: the dock's effect must not map it again")
+        self.assertIsNone(self.dock.effect, "the dock's own painting hooked: no effect drawing it all offscreen")
+        self.assertTrue(self.dock.property(dm.FRAME_PROP))
+        self.assertIsNone(self.dock.property(dm.HOOKED_PROP), "a frame, not an island: what is inside is not hooked")
         self.assertTrue(self.canvas.property(dm.HOOKED_PROP))
         self.assertTrue(popup.property(dm.HOOKED_PROP), "FontLab's own painting inside a hooked island: hooked too")
         self.assertIsNone(self.edit.property(dm.HOOKED_PROP), "a line edit (Qt draws it) inside one: processed as any")
-        self.assertEqual(self.kind(self.panel), "title", "the script engine's other effects stay")
+        self.assertIsNone(self.panel.effect, "a panel's own painting hooked too (2026-11-26: 132 ms a repaint before)")
+        self.assertTrue(self.panel.property(dm.FRAME_PROP))
+        self.assertEqual(hooks.texts[1], dm.TITLE_TEXT_STRATEGY, "its title drawn in dark mode's smoothing")
         self.assertNotEqual(self.search.styleSheet, u"QWidget{background:white;}", "Qt draws stylesheets: darkened as ever")
         self.assertTrue(self.settings().get("native_pending"), "guarded until it has run a while")
         settle = [cb for ms, cb in qtfakes.QTimer.single_shots if ms == dm.NATIVE_SETTLE_MS]
@@ -1605,6 +1612,26 @@ class EngineTests(DarkModeCase):
         self.off()
         self.assertIn("remove", hooks.calls)
         self.assertFalse(dm.status()["hooked"])
+
+    def test_icon_only_buttons_and_large_ink_containers_cost_no_effect(self):
+        """2026-11-26, a tab switch to a Font window: 64 icon-only tool buttons had the defringe effect for text they
+        never draw, and the Font window's ink effect drew 2.28 million pixels offscreen at each repaint (294 of 411 ms)."""
+        class Button(object):
+            def __init__(self, style, icon):
+                self.toolButtonStyle, self.icon = style, icon
+
+            def inherits(self, name):
+                return name in ("QToolButton", "QAbstractButton")
+
+        self.assertTrue(dm._icon_only_button(Button(0, FakeIcon())))
+        self.assertFalse(dm._icon_only_button(Button(0, None)), "no icon: Qt draws the text")
+        self.assertFalse(dm._icon_only_button(Button(2, FakeIcon())), "text beside the icon: drawn")
+        big = FakeWidget("FontWindow", parent=self.main, width=1715, height=1329)
+        small = FakeWidget("YSelector", parent=self.main, width=44, height=16)
+        qt_own = FakeWidget("QFrame", parent=self.main, width=1715, height=1329)
+        self.assertTrue(dm._ink_frame(big))
+        self.assertFalse(dm._ink_frame(small), "small: its effect costs little")
+        self.assertFalse(dm._ink_frame(qt_own), "Qt draws it: the hooks would not see its painting")
 
     def test_hooks_that_cannot_all_go_in_fall_back_to_the_script_engine(self):
         hooks = FakeHooks()
