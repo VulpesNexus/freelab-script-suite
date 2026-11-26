@@ -235,79 +235,18 @@ class ShadeAndPickerTests(DarkModeCase):
         dm.run_queue()
         self.assertEqual(self.content.styleSheet, PANEL_SHEET)
 
-    def test_a_cursors_light_glow_is_made_a_dark_one(self):
-        """The owner, November 25: a light shadow beside the arrow over the dark canvas. FontLab's cursors carry
-        a white glow for a light canvas."""
-        class Color(object):
-            def __init__(self, r, g, b, a=255):
-                self.rgba = (r, g, b, a)
-
-            @staticmethod
-            def fromRgba(value):
-                return Color((value >> 16) & 255, (value >> 8) & 255, value & 255, (value >> 24) & 255)
-
-            def alpha(self):
-                return self.rgba[3]
-
-            def red(self):
-                return self.rgba[0]
-
-            def green(self):
-                return self.rgba[1]
-
-            def blue(self):
-                return self.rgba[2]
-
-        class Picture(object):
-            def __init__(self, rows):
-                self.rows = [list(row) for row in rows]
-
-            def width(self):
-                return len(self.rows[0])
-
-            def height(self):
-                return len(self.rows)
-
-            def pixel(self, x, y):
-                return self.rows[y][x]
-
-            def setPixelColor(self, x, y, color):
-                r, g, b, a = color.rgba
-                self.rows[y][x] = (a << 24) | (r << 16) | (g << 8) | b
-
-        self.patch("_gui", lambda name: Color if name == "QColor" else None)
-        clear, white, black, glow, edge, red = 0x00000000, 0xffffffff, 0xff000000, 0x60ffffff, 0x80101010, 0xffe02020
-
-        def shape(fill, rim):  # a 3 by 3 fill inside a rim, a glow around it, a smoothed pixel and a red mark
-            rows = [[glow] * 7]
-            rows += [[glow, rim, rim, rim, rim, rim, glow]]
-            rows += [[glow, rim, fill, fill, fill, rim, glow] for _ in range(3)]
-            rows += [[glow, rim, rim, rim, rim, rim, glow]]
-            rows += [[clear, edge, red, clear, clear, clear, clear]]
-            return rows
-
-        picture = Picture(shape(black, white))
-        self.assertTrue(dm.glow_to_shadow(picture))
-        self.assertEqual(picture.rows, [[0x60000000 if c == glow else c for c in row] for row in shape(white, black)],
-                         "FontLab's black arrow white with black edges (the owner, November 25: the black arrow's "
-                         "white edges looked jagged); the glow black at the opacity it had; the outline's smoothing "
-                         "and a tool's red as drawn")
-        picture = Picture(shape(white, black))
-        self.assertTrue(dm.glow_to_shadow(picture))
-        self.assertEqual(picture.rows, [[0x60000000 if c == glow else c for c in row] for row in shape(white, black)],
-                         "a white arrow with a black outline kept: turned over, it came out black")
-        seam = 0xff9f9f9f  # the outline's smoothing into the glow, on a white arrow's right side
-        rows = shape(white, black)
-        rows[3][6] = seam
-        picture = Picture(rows)
-        dm.glow_to_shadow(picture)
-        self.assertEqual(picture.rows[3][6], black, "the gray seam beside the glow made black with it (the owner, "
-                                                    "November 25: edges of mixed black and white)")
-        self.assertEqual(picture.rows[3][3], white, "the arrow's inside kept")
-        thin = Picture([[clear, black, clear], [black, clear, black], [clear, black, white]])
-        self.assertTrue(dm.glow_to_shadow(thin))
-        self.assertEqual(thin.rows[0][1], white, "a thin dark outline (the magnifier's) turned over by all its pixels")
-        self.assertFalse(dm.glow_to_shadow(Picture([[clear, edge, red]])), "nothing to make")
+    def test_fontlabs_cursors_are_never_altered(self):
+        """The owner, 2026-11-26: the tools' cursors, turned for the dark canvas, looked inverted and bad; "they
+        should probably be safeguarded to never be altered". Only a copy an earlier dark mode left is undone."""
+        with open(os.path.join(os.path.dirname(HERE), "darkmode", "freelab_dark_mode.py"), "rb") as handle:
+            source = handle.read().decode("utf-8")
+        self.assertNotIn("glow_to_shadow", source)
+        self.assertEqual(source.count(".setCursor("), 1, "only _restore_cursor sets a cursor: FontLab's own, back")
+        canvas = FakeWidget("GlyphCanvas")
+        calls = []
+        canvas.setCursor = lambda cursor: calls.append(cursor)
+        self.assertFalse(dm._fix_cursor(canvas))
+        self.assertEqual(calls, [], "a cursor change leaves FontLab's cursor as it is")
 
     def test_an_effect_drawn_again_from_inside_its_own_drawing_draws_its_widget_as_it_is(self):
         """The owner, November 25: dragging a color in Overlay Fonts ran FontLab's stack out after a few seconds,

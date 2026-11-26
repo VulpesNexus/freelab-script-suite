@@ -74,7 +74,7 @@ The native engine covers what FontLab paints itself, 96 surfaces in the session 
 - Lists whose rows FontLab's own delegates paint (FontAudit's badges, the Elements tree), list headers, the zigzag edge where a panel continues, and the History list.
 - Dialogs, and the interface's fields, selectors, and text boxes (some 600 ink and defringe effects in the session measured): the same under both engines.
 - TrueType Hinting's preview (ClearType on purpose: the subpixel effect).
-- Cursors: FontLab paints them into pictures, which the hooks leave light; dark mode's replacements (made by the pixel engine's rules) serve both.
+- Cursors: FontLab paints them into pictures, which the hooks leave as they are; neither engine alters them.
 - A color font's pictures are drawn as they are only while that font is the current one (one flag for all of FontLab).
 
 ### When one engine takes the other's place

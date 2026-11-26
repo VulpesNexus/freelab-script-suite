@@ -1031,6 +1031,10 @@ class MenuOrderTests(unittest.TestCase):
                           "Toggle Dark Mode", "Dark Mode Settings", None, "Start Listener", None, "Something New"])
         self.assertEqual(ak.menu_order(["Auto Kerning"]), ["Auto Kerning"], "no separator around a lone group")
 
+    def test_quick_overlay_on_its_own_between_the_font_tools_and_dark_mode(self):
+        texts = ["Dark Mode", "Quick Overlay", "Proof", "Tab Docking"]
+        self.assertEqual(ak.menu_order(texts), ["Proof", None, "Quick Overlay", None, "Dark Mode", "Tab Docking"])
+
     def test_font_check_follows_feature_code(self):
         texts = ["Proof", "Font Check", "Kerning Check", "Feature Code"]
         self.assertEqual(ak.menu_order(texts), ["Kerning Check", "Feature Code", "Font Check", "Proof"])
@@ -5375,6 +5379,8 @@ class KerningCheckPreviewRuleTests(unittest.TestCase):
         dialog.update_previews()
         self.assertEqual(self.shown(dialog), ([True, True, False], [True, False]),
                          "no line beside the third preview's empty room, nor its caption")
+        self.assertEqual([label.visible for label in dialog.previews], [True, True, False],
+                         "two pairs: the third column goes, the two share the width, each centered (image 167)")
         selected[0] = None  # (nothing selected: only the hint, if any, in the middle preview's room)
         dialog.update_previews()
         self.assertEqual(self.shown(dialog), ([False] * 3, [False] * 2), "emptied: hidden again")
@@ -5451,13 +5457,16 @@ class KerningCheckTableTests(unittest.TestCase):
         # tool's empty previews say anything)
         class Label(object):
             def __init__(self):
-                self.text = None
+                self.text, self.visible = None, True
 
             def clear(self):
                 self.text = u""
 
             def setText(self, text):
                 self.text = text
+
+            def setVisible(self, on):
+                self.visible = on
 
         dialog = kc.KerningCheckDialog.__new__(kc.KerningCheckDialog)
         dialog.previews = [Label(), Label(), Label()]

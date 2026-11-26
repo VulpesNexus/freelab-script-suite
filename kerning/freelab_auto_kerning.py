@@ -1984,8 +1984,9 @@ def history_state(package):
 # compared, checked (Font Check), and proofed.
 MENU_GROUPS = (("Font Builder", "Glyph Compose", "Auto Spacing", "CJK Spacing", "CJK Vertical", "Auto Kerning", "Kerning Check",
                 "Feature Code", "Feature Check", "Font Compare", "Family Audit", "Font Check", "Proof"),
+               ("Quick Overlay",),  # (FontLab's Overlay Fonts made quick: on its own, the owner, 2026-11-26)
                ("Dark Mode", "Toggle Dark Mode", "Dark Mode Settings", "Tab Docking", "Toggle Tab Docking",
-                "Tab Docking Settings", "Quick Overlay"),  # (FontLab's interface helped: Quick Overlay's Overlay Fonts)
+                "Tab Docking Settings"),
                ("Start MCP Listener", "Stop MCP Listener", "Start Listener", "Stop Listener"),  # (FreeLab MCP's, old names too)
                ("Set Up FreeLab",))  # (a release's folder dropped in by hand: windows/freelab_setup.py)
 MENU_TITLE, SCRIPTS_MENU = "FreeLab", "menuScripts"

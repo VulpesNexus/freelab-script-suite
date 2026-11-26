@@ -1552,6 +1552,9 @@ class KerningCheckDialog(object):
                 label.clear()
             if index < len(captions):  # (over the picture, quiet: the shared preview_caption)
                 captions[index].setText(caption)
+            # Two pairs drawn: the third column goes, and the two share the width, each centered in its half (as
+            # three, they sat in the left two thirds: the owner's image 167)
+            label.setVisible(index < len(shown) or not shown)
         if not shown:  # (the room the pictures take, said what it is for: it read as an empty band, live)
             self.previews[1].setText(self.preview_hint())
         self.update_buttons_soon()

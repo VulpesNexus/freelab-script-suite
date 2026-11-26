@@ -3677,119 +3677,26 @@ def _in_fontlab_view(widget):
         return False
 
 
-# FontLab's own cursors over a canvas (its arrow, its tools') are pictures with a white glow around them, for
-# a light canvas: there it lifts the cursor off the outlines, and on the dark canvas it stood out as a light
-# shadow beside the arrow, "inverted" (the owner, November 25). The glow is made a dark one: each light pixel
-# that is not opaque turns black at the opacity it had. FontLab sets another cursor at each change of tool,
-# so the canvas is watched for it (CURSOR_CHANGE_EVENT), and each picture is made once.
+# FontLab's cursors are never altered: they are drawn as FontLab has them, its black arrow and tools with their
+# white glow, whatever the canvas. Dark mode once made copies for the dark canvas (the glow made a shadow, the
+# arrow turned white with black edges), which looked inverted and bad (the owner, 2026-11-26: "they should
+# probably be safeguarded to never be altered"). What remains only undoes such a copy, which an earlier version of
+# dark mode may have left on a canvas in this FontLab session, at the canvas' next cursor change
+# (CURSOR_CHANGE_EVENT) or as dark mode switches off.
 CURSOR_CHANGE_EVENT = 183  # QEvent::CursorChange
 BITMAP_CURSOR = 24  # Qt::BitmapCursor: a cursor made of a picture
-CURSOR_GLOW_L = 0.5  # a glow's pixel: this light (HLS), and neither clear nor opaque
-CURSOR_MAX_SIDE = 128
-
-
-CURSOR_GRAY_SPREAD = 30  # an opaque pixel of the arrow itself: low color (a tool's red mark is kept)
-CURSOR_INNER_MIN = 4  # pixels inside the shape (opaque all around) enough to tell its fill
-CURSOR_SEAM_L = 0.85  # an opaque gray this dark at most, beside the glow, kept light inside: the outline's smoothing
-CURSOR_REVISION = 4  # raised when glow_to_shadow changes: the cursors an earlier one made are let go
-
-
-def glow_to_shadow(image):
-    """A cursor's picture made for the dark canvas, in place: its light glow made dark, and a dark shape (the
-    arrow: black with white edges) turned over, white with black edges, as dark interfaces draw theirs (only the
-    glow turned, the black arrow kept its white edges, which looked jagged: the owner, November 25). A shape
-    already light inside (a white arrow with a black outline) is kept: turned over, it came out black. Dark or
-    light by its inner pixels (opaque all around), or by all its pixels for a thin one (the magnifier's
-    outline). True when a pixel changed."""
-    QColor = _gui("QColor")
-    width, height = image.width(), image.height()
-    colors = [[QColor.fromRgba(image.pixel(x, y)) for x in range(width)] for y in range(height)]
-
-    def gray(color):
-        return color.alpha() == 255 and \
-            max(color.red(), color.green(), color.blue()) - min(color.red(), color.green(), color.blue()) <= CURSOR_GRAY_SPREAD
-
-    def dark(color):
-        return _lightness(color.red(), color.green(), color.blue()) < 0.5
-
-    inner = [0, 0]
-    every = [0, 0]
-    for y in range(height):
-        for x in range(width):
-            color = colors[y][x]
-            if not gray(color):
-                continue
-            every[dark(color)] += 1
-            if 0 < x < width - 1 and 0 < y < height - 1 and all(
-                    colors[y + dy][x + dx].alpha() == 255 for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))):
-                inner[dark(color)] += 1
-    counts = inner if inner[0] + inner[1] >= CURSOR_INNER_MIN else every
-    turn = counts[1] > counts[0]
-
-    def on_glow(x, y):  # beside a pixel that is not opaque (the glow, or nothing)
-        return any(not (0 <= x + dx < width and 0 <= y + dy < height) or colors[y + dy][x + dx].alpha() < 255
-                   for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))
-
-    changed = False
-    for y in range(height):
-        for x in range(width):
-            color = colors[y][x]
-            alpha = color.alpha()
-            red, green, blue = color.red(), color.green(), color.blue()
-            if 0 < alpha < 255 and _lightness(red, green, blue) >= CURSOR_GLOW_L:
-                image.setPixelColor(x, y, QColor(0, 0, 0, alpha))
-                changed = True
-            elif turn and gray(color):
-                image.setPixelColor(x, y, QColor(255 - red, 255 - green, 255 - blue, alpha))
-                changed = True
-            elif not turn and gray(color) and _lightness(red, green, blue) < CURSOR_SEAM_L and on_glow(x, y):
-                # the outline's smoothing into the white glow: a gray seam between the black outline and the
-                # glow made dark (the owner, November 25: edges of mixed black and white)
-                image.setPixelColor(x, y, QColor(0, 0, 0, alpha))
-                changed = True
-    return changed
 
 
 def _fix_cursor(widget):
-    """The widget's cursor replaced by its copy without the light glow, if it is one of FontLab's pictures.
-    Never raises (it runs from an event filter)."""
+    """FontLab's own cursor back on the widget if an earlier version of dark mode replaced it; nothing else (a
+    cursor is never altered). Never raises (it runs from an event filter)."""
     try:
-        state = _state()
-        if not state["on"] or not state.get("canvas", True):
-            return False
-        cursor = getattr(widget, "cursor", None)
-        cursor = cursor() if callable(cursor) else cursor
-        if cursor is None or int(cursor.shape()) != BITMAP_CURSOR:
-            return False
-        pixmap = cursor.pixmap()
-        if pixmap is None or pixmap.isNull() or max(pixmap.width(), pixmap.height()) > CURSOR_MAX_SIDE:
-            return False
-        key = pixmap.cacheKey()
-        ours = state.setdefault("cursor_keys", set())
-        if key in ours:
-            return False  # ours already (setting it sends the event again)
-        made = state.setdefault("cursors", {})
-        entry = made.get(key)
-        if entry is None:
-            image = pixmap.toImage().convertToFormat(_gui("QImage").Format_ARGB32)
-            entry = False
-            if glow_to_shadow(image):
-                fixed_pixmap = _gui("QPixmap").fromImage(image)
-                spot = cursor.hotSpot()
-                fixed = _gui("QCursor")(fixed_pixmap, spot.x(), spot.y())
-                ours.add(fixed_pixmap.cacheKey())
-                ours.add(fixed.pixmap().cacheKey())
-                entry = (fixed, fixed_pixmap)  # (held: Qt keeps no reference Python can count on)
-            made[key] = entry
-        if not entry:
-            return False
         record = _record(widget)
-        record["cursor"] = _gui("QCursor")(cursor)
-        widget.setCursor(entry[0])
-        return True
+        if "cursor" in record:
+            _restore_cursor(widget, record)
     except Exception as exc:
         _note_error("cursor", exc)
-        return False
+    return False
 
 
 def _restore_cursor(widget, record):
@@ -4552,7 +4459,7 @@ def process(widget):
     if kind == "island":
         _island(widget)
         if is_content(widget):
-            _watch(widget)  # (FontLab gives a canvas another cursor at each change of tool)
+            _watch(widget)  # (a cursor an earlier dark mode replaced, given back: _fix_cursor)
             _fix_cursor(widget)
         elif widget.inherits("QTabBar"):
             _watch(widget)  # (its close crosses follow the mouse: _on_tab_mouse)
@@ -5863,10 +5770,6 @@ def apply_dark():
         raise RuntimeError("No Qt application is running.")
     state = _state()
     _forget_map_cache()  # (mapped for another shade, or by an earlier module)
-    if state.get("cursor_revision") != CURSOR_REVISION:  # (cursors made by an earlier glow_to_shadow)
-        state.pop("cursors", None)
-        state.pop("cursor_keys", None)
-        state["cursor_revision"] = CURSOR_REVISION
     if state["saved"] is None:
         state["saved"] = {
             # Under widget stylesheets app.style() is Qt's QStyleSheetStyle wrapper, whose name is empty.
