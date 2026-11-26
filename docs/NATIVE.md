@@ -46,13 +46,38 @@ Fixed since the owner's tests of version 10, and waiting for the owner's look: t
 
 ## The two engines
 
-| | Script engine | Native engine |
+Measured on 2026-11-26 in one FontLab session on the owner's desktop (FontLab 7.2.0.7649, the main window with its tabs and panels as the owner had them, the same fonts open), switching between the engines and light mode with nothing else changed. Times are wall-clock, from inside FontLab; each figure is a range or the median of several runs.
+
+| | Light mode (dark mode off) | Native engine | Pixel ("script") engine |
+|---|---|---|---|
+| **Switching tabs** (median of 8) | 276 ms | 677 to 832 ms (two runs) | 1,319 ms |
+| **Repainting the main window**, maps cleared first | 30 to 118 ms | 135 to 194 ms | 236 to 291 ms |
+| **The same, maps kept** | 29 to 112 ms | 83 to 114 ms | 169 to 191 ms |
+| **Switching dark mode on** (until every widget is looked at) | | 4.4 s, done after 23 s | 12.8 s, done after 36 s |
+| **Memory** (working set, private) | 532 MB, 701 MB | 549 to 585 MB, 728 to 751 MB | 605 MB, 771 MB |
+
+| | Native engine | Pixel engine |
 |---|---|---|
-| **How** | Maps the pixels the islands drew, after the fact | Maps the colors FontLab hands to Qt on the islands, before drawing |
-| **Text** | ClearType text drawn for light, remapped: fringes need rules (defringe, subpixel, syntax) | Qt draws light text on dark itself: smoothing as in any dark application |
-| **Partial repaints** | A small repaint can map differently from a full one (lists kept dark remnants while scrolling) | Each color is mapped the same way every time |
-| **Speed** | Every island is drawn offscreen and mapped | A color mapped per call, an image once |
-| **Reach** | Anything drawn, cached images included | Colors FontLab passes to Qt on the islands, and the images it draws there; the rest is the script engine's |
-| **Risk** | Python and Qt effects only: a mistake looks wrong | Native code inside FontLab: a mistake in a wrapper can crash FontLab (the start guard then falls back) |
-| **Compatibility** | Any FontLab 7 build whose widgets it knows | Qt 5.14.2 (MSVC x64) only; its version and the names it hooks are checked at start (not its layout), script engine otherwise |
-| **Maturity** | Tuned on most of FontLab's surfaces | Compared with the script engine on the main window; dialogs share the script engine's handling |
+| **How** | Maps the colors FontLab hands to Qt while it paints its own surfaces, before anything is drawn | Draws each surface in FontLab's light look and maps the pixels after |
+| **Correctness** | Nothing to recognize: every mark FontLab draws (pills, measurement boxes, a tool's live values, lines over template glyphs) comes out dark as drawn, and Qt draws light text on dark itself, with no ClearType fringes | Each kind of mark is recognized after the fact by a rule of its own; their states and overlaps keep producing cases no rule covers (the canvas reviews of November 25 and 26) |
+| **Partial repaints** | Each color is mapped the same way every time | A small repaint can map differently from a full one (lists kept dark remnants while scrolling) |
+| **Speed** | About 1.7 times the cost of light mode on repaints | About 3 times |
+| **Stability** | Native code patches FontLab's import table in memory: a fault in a wrapper ends FontLab, and the start guard then falls back to the pixel engine for later sessions. The self-test calls all 29 wrappers on FontLab's own Qt; no crash in this session | Python and Qt effects only. This month's crashes came from effects and PythonQt (wrappers freed twice, an effect's source asked for outside its drawing, nested drawing while a color was dragged), each fixed |
+| **Compatibility** | Qt 5.14.2 (64-bit, FontLab 7.2's) only; checked at start, and the pixel engine runs otherwise | Any FontLab 7 build whose widgets it knows |
+| **Screenshots from inside FontLab** | Qt's own grabs (a widget's picture, FreeLab MCP's) render FontLab's surfaces light: the hooks map only painting on screen. The screen itself is dark | As on screen |
+
+### What the native engine leaves to the pixel engine
+
+The native engine covers what FontLab paints itself, 96 surfaces in the session measured (canvases, font cells, rulers, previews, the tool bar, tab strips, the Fonts panel), and the rows of 53 lists whose drawing Qt does from FontLab's colors. These stay the pixel engine's under either engine, so a defect there shows under both (the owner's image 147, *Overlay Fonts*' samples):
+
+- Lists whose rows FontLab's own delegates paint (*Overlay Fonts*' samples, FontAudit's badges, the Elements tree), list headers, the zigzag edge where a panel continues, and the History list.
+- Dialogs, and the interface's fields, selectors, and text boxes (some 600 ink and defringe effects in the session measured): the same under both engines.
+- TrueType Hinting's preview (ClearType on purpose: the subpixel effect).
+- Cursors: FontLab paints them into pictures, which the hooks leave light; dark mode's replacements (made by the pixel engine's rules) serve both.
+- A color font's pictures are drawn as they are only while that font is the current one (one flag for all of FontLab).
+
+### When one engine takes the other's place
+
+- The native engine cannot start (its library missing, another Qt): the pixel engine runs, and the reason is in `status()["errors"]`.
+- FontLab closed while the native engine was starting: the next launch, and every one after, runs the pixel engine, and the *Output* panel says so, until *Native* is chosen again in *Dark Mode Settings*.
+- *Mixed* leaves the canvases, cells, and previews light under either engine.
