@@ -1259,7 +1259,7 @@ def _darken_sheet(widget):
         widget.setStyleSheet(dark)
 
 
-WATCHER_REVISION = 3  # raised when the filter below learns another event: a session that loaded an older one
+WATCHER_REVISION = 4  # raised when the filter below learns another event: a session that loaded an older one
 TAB_MOUSE_EVENTS = (2, 3, 5, 10, 11, 127, 128, 129)  # press, release, move, enter, leave, and the hover ones
 
 
@@ -1301,7 +1301,11 @@ def _watcher():
             def eventFilter(self, obj, event):
                 try:
                     kind = event.type()
-                    if kind == STYLE_CHANGE_EVENT:
+                    if kind in MOVE_GUARD_EVENTS and obj.property(MOVE_GUARD_PROP):
+                        module = _module()
+                        if module is not None:
+                            return bool(module._on_guarded_mouse(obj, event, kind))
+                    elif kind == STYLE_CHANGE_EVENT:
                         module = _module()
                         if module is not None:
                             module._on_style_change(obj)
@@ -1347,6 +1351,8 @@ def _watch(widget):
 
 
 def _unwatch(widget):
+    if widget.property(MOVE_GUARD_PROP):
+        return  # its mouse moves are still guarded, dark mode on or off
     if widget.property(WATCHED_PROP) is not None:
         widget.removeEventFilter(_watcher())
         for old in _state().get("old_watchers", ()):
@@ -1355,6 +1361,78 @@ def _unwatch(widget):
             except Exception:
                 pass
         widget.setProperty(WATCHED_PROP, None)
+
+
+# FontLab's own crash, guarded here whether dark mode is on or off: Overlay Fonts applies the color of its color
+# bar (barColor) at each mouse move of a drag on it, and lets the event loop run while it does, so the next move
+# is handled inside the one before. A quick drag nested about forty moves, some 26 KB of stack each, and the main
+# thread's 1 MB overflowed (crash dumps of November 25, dark mode off, and November 26, on; the size of the font
+# changes nothing). In the windows named here, a move that comes while one is handled is held back, and only the
+# latest is handled once that one is over: one move at a time, the bar following the mouse as fast as FontLab
+# applies a color.
+MOVE_GUARD_WINDOWS = ("ActionOverlay",)
+MOVE_GUARD_PROP = "freelab_move_guard"
+MOUSE_MOVE_EVENT = 5
+MOVE_GUARD_EVENTS = (2, 3, 4, 5)  # press, release, double click, move
+
+
+def _guard_focus(now):
+    """QApplication.focusChanged: a window named in MOVE_GUARD_WINDOWS has its widgets' moves guarded as it
+    takes focus (again at each focus change in it, for widgets it made since). Never raises."""
+    try:
+        if now is None:
+            return
+        window = now.window()
+        if window is None or _class_name(window) not in MOVE_GUARD_WINDOWS:
+            return
+        for widget in [window] + _descendants(window):
+            if not widget.property(MOVE_GUARD_PROP):
+                widget.setProperty(MOVE_GUARD_PROP, True)
+            _watch(widget)
+    except Exception as exc:
+        _note_error("move guard", exc)
+
+
+def _on_guarded_mouse(widget, event, kind):
+    """A guarded widget's mouse event (see MOVE_GUARD_WINDOWS): True when it is held back. A move with a button
+    held is sent again from here, so that what it leads to is known to be over when sendEvent returns; a move
+    that comes meanwhile is held back, kept if it is the latest, and sent once that one is over. The same move
+    passed on to a parent that ignored it goes on; a press or release drops a move held back before it."""
+    moves = _state().setdefault("moves", {"busy": False, "pending": None, "passing": False, "at": None})
+    if kind != MOUSE_MOVE_EVENT:
+        moves["pending"] = None
+        return False
+    if moves["passing"]:
+        moves["passing"] = False
+        return False  # the move sent below
+    if not int(event.buttons()):
+        return False  # (no drag: as it is)
+    screen = event.screenPos()
+    if moves["busy"]:
+        if moves["at"] == (screen.x(), screen.y()):
+            return False  # the move being sent, passed on to a parent
+        moves["pending"] = (widget, event.localPos(), screen, event.button(), event.buttons(), event.modifiers())
+        return True
+    app = _qt()[0].instance()
+    QMouseEvent, QEvent = _gui("QMouseEvent"), _core("QEvent")
+    move = (widget, event.localPos(), screen, event.button(), event.buttons(), event.modifiers())
+    moves["busy"] = True
+    try:
+        while move is not None:
+            target, local, screen, button, held, modifiers = move
+            moves["pending"] = None
+            moves["at"] = (screen.x(), screen.y())
+            moves["passing"] = True
+            try:
+                app.sendEvent(target, QMouseEvent(QEvent.MouseMove, local, screen, button, held, modifiers))
+            finally:
+                moves["passing"] = False
+            move = moves["pending"]
+    finally:
+        moves["busy"] = False
+        moves["pending"] = None
+        moves["at"] = None
+    return True
 
 
 def _on_style_change(widget):
@@ -4479,10 +4557,12 @@ def _module():
     return sys.modules.get(MODULE_NAME) or _state().get("module")
 
 
-def _focus_hook(*_args):
+def _focus_hook(*args):
     """QApplication.focusChanged: a new window or tab usually takes focus as it opens."""
     module = _module()
     if module is not None:
+        if len(args) > 1:
+            module._guard_focus(args[1])
         module._on_focus()
 
 
@@ -5364,6 +5444,9 @@ def startup():
     """Called by FontLab's startup script: apply dark mode if it was left on, or if following Windows and it is dark."""
     settings = load_settings()
     follow = bool(settings.get("follow_windows"))
+    app = _qt()[0].instance()
+    if app is not None:
+        _hook_focus(app)  # (Overlay Fonts' moves guarded, dark mode on or off: see MOVE_GUARD_WINDOWS)
     if (windows_is_dark() if follow else settings.get("enabled")):
         apply_dark()
         schedule_reapply()

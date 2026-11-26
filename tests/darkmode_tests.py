@@ -2994,5 +2994,107 @@ def _ancestors(widget):
         parent = parent.parentWidget()
 
 
+class MoveGuardTests(unittest.TestCase):
+    """Overlay Fonts' color bar handles each move of a drag while letting the event loop run: FontLab nested the
+    moves until its stack overflowed (crash dump of November 26). The guard handles them one at a time."""
+
+    class Point(object):
+        def __init__(self, x, y):
+            self._x, self._y = x, y
+
+        def x(self):
+            return self._x
+
+        def y(self):
+            return self._y
+
+    class Event(object):
+        def __init__(self, kind, x, buttons=1):
+            self.kind, self.at, self.held = kind, MoveGuardTests.Point(x, 5), buttons
+
+        def type(self):
+            return self.kind
+
+        def buttons(self):
+            return self.held
+
+        def button(self):
+            return 0
+
+        def screenPos(self):
+            return self.at
+
+        def localPos(self):
+            return self.at
+
+        def modifiers(self):
+            return 0
+
+    def setUp(self):
+        tests = self
+        self.state = {}
+        self.handled, self.depth, self.deepest = [], [0], [0]
+        self.arriving = []  # (handled count at which it arrives, event): what FontLab's processEvents delivers
+
+        class App(object):
+            def sendEvent(self, target, event):
+                tests.deliver(target, event)
+
+        def mouse_event(kind, local, screen, button, held, modifiers):
+            return tests.Event(kind, screen.x(), held)
+
+        saved = (dm._state, dm._qt, dm._gui, dm._core)
+        dm._state = lambda: self.state
+        dm._qt = lambda: (type("QApplication", (), {"instance": staticmethod(lambda: App())}),)
+        dm._gui = lambda name: {"QMouseEvent": mouse_event}[name]
+        dm._core = lambda name: {"QEvent": type("QEvent", (), {"MouseMove": 5})}[name]
+
+        def restore():
+            dm._state, dm._qt, dm._gui, dm._core = saved
+        self.addCleanup(restore)
+
+    def deliver(self, target, event):
+        """Qt's delivery: the filter first, then FontLab's handler, which runs the event loop as it applies the color."""
+        if dm._on_guarded_mouse(target, event, event.type()):
+            return
+        if event.type() != 5:
+            self.handled.append(("button", event.type()))
+            return
+        self.depth[0] += 1
+        self.deepest[0] = max(self.deepest[0], self.depth[0])
+        self.handled.append(event.at.x())
+        while self.arriving and self.arriving[0][0] <= len(self.handled):
+            self.deliver(target, self.arriving.pop(0)[1])
+        self.depth[0] -= 1
+
+    def test_moves_arriving_while_one_is_handled_wait_and_only_the_latest_is_handled(self):
+        self.arriving = [(1, self.Event(5, 2)), (1, self.Event(5, 3)), (1, self.Event(5, 4)), (2, self.Event(5, 5))]
+        self.deliver("bar", self.Event(5, 1))
+        self.assertEqual(self.handled, [1, 4, 5], "2 and 3 were overtaken by 4 before they could be handled")
+        self.assertEqual(self.deepest[0], 1, "never one move inside another")
+        self.assertFalse(self.state["moves"]["busy"])
+
+    def test_a_release_drops_the_move_held_back_before_it(self):
+        self.arriving = [(1, self.Event(5, 2)), (1, self.Event(3, 2, buttons=0))]
+        self.deliver("bar", self.Event(5, 1))
+        self.assertEqual(self.handled, [1, ("button", 3)], "no move of the drag after its release")
+
+    def test_a_move_without_a_button_is_left_alone(self):
+        self.assertFalse(dm._on_guarded_mouse("bar", self.Event(5, 1, buttons=0), 5))
+
+    def test_the_move_sent_passed_on_to_a_parent_goes_on(self):
+        seen = []
+
+        def deliver(target, event):
+            if dm._on_guarded_mouse(target, event, 5):
+                return
+            seen.append(target)
+            if target == "bar":  # the bar ignored it: Qt passes the same move on to its parent
+                deliver("frame", event)
+        self.deliver = deliver
+        deliver("bar", self.Event(5, 1))
+        self.assertEqual(seen, ["bar", "frame"])
+
+
 if __name__ == "__main__":
     unittest.main()

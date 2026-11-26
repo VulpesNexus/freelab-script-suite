@@ -13,7 +13,7 @@ At each change in *Overlay Fonts* (a color, the opacity, an offset), FontLab wor
 | The same copy | 1,374 | itself and two styles of 11,697 glyphs | 344 ms |
 | FreeLang Essential | 11,697 | itself | 14.5 s |
 
-A drag on the color field asks for one change per mouse move, so on a large font FontLab stops answering, and a long drag can crash it (a stack overflow, seen with dark mode on and off).
+A drag on the color field asks for one change per mouse move, so on a large font FontLab stops answering. (A quick drag on any font could also crash FontLab, its moves nesting until its stack overflowed; FreeLab's dark mode file now hands it one move at a time, dark mode on or off: see [DARKMODE.md](DARKMODE.md).)
 
 ## Using it
 
