@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 150
+#define FREELAB_PIXELS_VERSION 157
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -3353,16 +3353,27 @@ static int halo_blend(uint8_t *px, double dark_l, double light_l)
 #define REGROUND_LIGHT_PAPERS 6 /* paper candidates looked at, before those that are light text are set aside */
 #define REGROUND_LIGHT_MIN_EDGES 8 /* edge neighbors that are smoothing toward a paper, at least */
 #define REGROUND_LIGHT_SMOOTH 0.15 /* and this share of its edge neighbors, */
-#define REGROUND_LIGHT_ON_PAPER 0.75 /* smoothing and paper together this share at least */
+#define REGROUND_LIGHT_ON_PAPER 0.75 /* smoothing and paper together this share at least, around a group of its pixels */
+#define REGROUND_LIGHT_COLOR_ON_PAPER 0.5 /* and around all of the color's pixels */
+#define REGROUND_LIGHT_COLOR_SOLID 0.6 /* the color's pixels inside a solid run, this share at most (a list's dark empty
+                                        * part, taken as a text color, made near-white text its smoothing; the text with
+                                        * a pill of its own gray: some 60%) */
 #define REGROUND_LIGHT_FIT 0.4 /* a light text's line is short: a pixel on it within this share of its length */
 #define REGROUND_LIGHT_PASSES 64 /* sweeps that carry "reaches a paper" through a light text's cores, at most */
 #define REGROUND_DARK_GROUND_HLS 0.4 /* a sample with no light paper, its most frequent color this dark: as drawn */
+/* In the samples, two rules and no gap between them (the owner, 2026-11-26): a color is text by the strong-color
+ * test, or else by its shape, whatever its lightness. A light rule from 0.75 up had left a pale yellow (#dfde92, at
+ * 0.72) to neither, mapped dark with light edges, and a dark gray pick (#202020) came out light. By its shape: */
+#define REGROUND_LIGHT_SOLID 0.5 /* this share of its pixels inside a solid run at most: strokes (the pill's gray on
+                                  * the row is a solid block) */
 #define REGROUND_PAPER_SPAN 0.6 /* on a dark ground, a light paper runs this share of the picture's width on a line */
 static uint32_t reground_keys[REGROUND_TABLE];
 static int64_t reground_counts[REGROUND_TABLE];
 static uint8_t reground_core[MAX_INDEXED];
+static int32_t reground_group[MAX_INDEXED]; /* a group of light cores being looked at */
 static uint8_t reground_asked[REGROUND_TABLE];
 static int64_t reground_smooth[REGROUND_TABLE], reground_papered[REGROUND_TABLE], reground_other[REGROUND_TABLE];
+static int64_t reground_inner[REGROUND_TABLE], reground_pixels[REGROUND_TABLE];
 
 static void rgb_of(uint32_t rgb, int c[3]);
 
@@ -3395,10 +3406,10 @@ static void reground_edges(const uint32_t *p, int64_t count, int64_t width, cons
     int64_t i, rows = count / width, last_k = -1;
     uint32_t last = 0xffffffffU;
     for (i = 0; i < REGROUND_TABLE; i++)
-        reground_smooth[i] = reground_papered[i] = reground_other[i] = 0;
+        reground_smooth[i] = reground_papered[i] = reground_other[i] = reground_inner[i] = reground_pixels[i] = 0;
     for (i = 0; i < count; i++) {
         int64_t k, x, y;
-        int d, c[3];
+        int d, c[3], same;
         uint32_t own;
         if ((p[i] >> 24) < ANCHOR_MIN_ALPHA)
             continue;
@@ -3413,6 +3424,7 @@ static void reground_edges(const uint32_t *p, int64_t count, int64_t width, cons
         rgb_of(own, c);
         x = i % width;
         y = i / width;
+        same = 0;
         for (d = 0; d < 4; d++) {
             int64_t xx = x + (d == 0) - (d == 1), yy = y + (d == 2) - (d == 3), n;
             uint32_t near;
@@ -3425,8 +3437,10 @@ static void reground_edges(const uint32_t *p, int64_t count, int64_t width, cons
                 continue;
             }
             near = p[n] & 0xffffffU;
-            if (near == own)
+            if (near == own) {
+                same++;
                 continue;
+            }
             for (m = 0; m < npapers && !kind; m++)
                 if (near == papers[m])
                     kind = 1;
@@ -3460,15 +3474,22 @@ static void reground_edges(const uint32_t *p, int64_t count, int64_t width, cons
             else if (kind == 0)
                 reground_other[k]++;
         }
+        reground_pixels[k]++;
+        if (same == 4)
+            reground_inner[k]++;
     }
 }
 
 static int reground_sits(int64_t k)
 {
     int64_t total = reground_smooth[k] + reground_papered[k] + reground_other[k];
+    /* (whether its pixels are strokes lying on the paper is asked of each group of them, more strictly: a pick of the
+     * pill's own gray is the text's color and the pill's, whose white name pulls the color's share down. Without this
+     * looser test of the color, smoothed shades near the paper took the text colors' slots) */
     return total > 0 && reground_smooth[k] >= REGROUND_LIGHT_MIN_EDGES
         && (double)reground_smooth[k] >= REGROUND_LIGHT_SMOOTH * (double)total
-        && (double)(reground_smooth[k] + reground_papered[k]) >= REGROUND_LIGHT_ON_PAPER * (double)total;
+        && (double)(reground_smooth[k] + reground_papered[k]) >= REGROUND_LIGHT_COLOR_ON_PAPER * (double)total
+        && (double)reground_inner[k] <= REGROUND_LIGHT_COLOR_SOLID * (double)reground_pixels[k];
 }
 
 static double reground_unmix(const uint8_t *q, const int paper[3], double color[3])
@@ -3639,17 +3660,22 @@ static int64_t reground_run(const uint8_t *orig, uint8_t *out, int64_t count, in
     }
     rgb_of(papers[0], main_paper);
     if (light) {
-        /* the light colors that may be text: frequent, light, no paper, too weak for the tests below */
+        /* the colors that may be text by their shape: frequent, no paper, and not the picture's ground (its most
+         * frequent color: a list's dark empty part, taken as a text color, made near-white text its smoothing) */
+        int64_t ground_k = -1;
+        for (k = 0; k < REGROUND_TABLE; k++)
+            if (reground_keys[k] && (ground_k < 0 || reground_counts[k] > reground_counts[ground_k]))
+                ground_k = k;
         for (k = 0; k < REGROUND_TABLE; k++) {
             int c[3], m, paper = 0;
             reground_asked[k] = 0;
-            if (!reground_keys[k] || reground_counts[k] < REGROUND_TEXT_COUNT)
+            if (!reground_keys[k] || reground_counts[k] < REGROUND_TEXT_COUNT || k == ground_k)
                 continue;
             for (m = 0; m < npapers; m++)
                 paper |= papers[m] == (reground_keys[k] & 0xffffffU);
             rgb_of(reground_keys[k] & 0xffffffU, c);
-            if (!paper && lightness((uint8_t)c[0], (uint8_t)c[1], (uint8_t)c[2]) >= REGROUND_PAPER_HLS)
-                reground_asked[k] = 1;
+            if (!paper)
+                reground_asked[k] = 1; /* (any color: what the strong-color test below leaves, this one takes) */
         }
         reground_edges(p, count, width, papers, npapers);
         for (k = 0; k < REGROUND_TABLE; k++)
@@ -3695,6 +3721,14 @@ static int64_t reground_run(const uint8_t *orig, uint8_t *out, int64_t count, in
                     fit += d * d;
                 }
                 on_line = fit <= reground_tolerance(len, light);
+                if (light && on_line) {
+                    /* near the paper, every line from it passes close: within a share of its own distance (a
+                     * near-white text color counted as the smoothing of the pill's gray, taken first) */
+                    double own = 0.0;
+                    for (ch = 0; ch < 3; ch++)
+                        own += (double)(c[ch] - main_paper[ch]) * (double)(c[ch] - main_paper[ch]);
+                    on_line = fit <= reground_tolerance(own, 1);
+                }
             }
             if (!on_line)
                 best = k;
@@ -3813,8 +3847,68 @@ static int64_t reground_run(const uint8_t *orig, uint8_t *out, int64_t count, in
                     changed++;
                 }
         }
+        /* and each group of such cores is strokes, not a solid block: a gray pick near the pill's gray took the pill
+         * as text, and its name broke (no color tells them apart when the pick is the pill's gray; the shape does) */
+        /* and lies on the paper: around a letter is paper, or smoothing from the paper toward its own color (the
+         * pill's smoothed rim, as light as a #c0c0c0 pick, has the pill's gray on its inner side) */
+        for (i = 0; i < count; i++) {
+            int64_t head = 0, n = 0, inner = 0, papered = 0, other = 0, m;
+            if (reground_core[i] != 3)
+                continue;
+            reground_core[i] = 5; /* (in the group being found) */
+            reground_group[n++] = (int32_t)i;
+            while (head < n) {
+                int64_t j = reground_group[head++], x = j % width, y = j / width;
+                int d, around = 0, own[3];
+                rgb_of(p[j] & 0xffffffU, own);
+                for (d = 0; d < 4; d++) {
+                    int64_t xx = x + (d == 0) - (d == 1), yy = y + (d == 2) - (d == 3), q;
+                    int ch, on = 0;
+                    if (xx < 0 || xx >= width || yy < 0 || yy >= rows)
+                        continue;
+                    q = yy * width + xx;
+                    if (reground_core[q] == 3) {
+                        reground_core[q] = 5;
+                        reground_group[n++] = (int32_t)q;
+                    }
+                    if (reground_core[q] == 5) {
+                        around++;
+                        continue;
+                    }
+                    if ((p[q] >> 24) >= ANCHOR_MIN_ALPHA) {
+                        int near[3];
+                        double dot = 0.0, len = 0.0, share, fit = 0.0;
+                        for (k = 0; k < npapers && !on; k++)
+                            on = (p[q] & 0xffffffU) == papers[k];
+                        rgb_of(p[q] & 0xffffffU, near);
+                        for (ch = 0; ch < 3 && !on; ch++) {
+                            dot += (double)(near[ch] - main_paper[ch]) * (double)(own[ch] - main_paper[ch]);
+                            len += (double)(own[ch] - main_paper[ch]) * (double)(own[ch] - main_paper[ch]);
+                        }
+                        if (!on && len > 0.0) {
+                            share = dot / len;
+                            for (ch = 0; ch < 3; ch++) {
+                                double dd = (double)(near[ch] - main_paper[ch]) - share * (double)(own[ch] - main_paper[ch]);
+                                fit += dd * dd;
+                            }
+                            on = share > -0.05 && share <= 1.05 && fit <= reground_tolerance(len, 1);
+                        }
+                        on = on || reground_core[q] == 1;
+                    }
+                    if (on)
+                        papered++;
+                    else
+                        other++;
+                }
+                if (around == 4)
+                    inner++;
+            }
+            for (m = 0; m < n; m++)
+                reground_core[reground_group[m]] = ((double)inner > REGROUND_LIGHT_SOLID * (double)n
+                    || (double)papered < REGROUND_LIGHT_ON_PAPER * (double)(papered + other)) ? 2 : 4;
+        }
         for (i = 0; i < count; i++)
-            reground_core[i] = reground_core[i] == 2 ? 0 : reground_core[i] != 0;
+            reground_core[i] = reground_core[i] == 1 || reground_core[i] == 4;
     }
     for (i = 0; i < count; i++) {
         int64_t x = i % width, y = i / width, xx, yy, nearest = -1;

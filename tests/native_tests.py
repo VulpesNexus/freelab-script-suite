@@ -1035,6 +1035,36 @@ class ReviewOfNovember24Tests(unittest.TestCase):
         for x, y in ((36, 6), (41, 11), (42, 12), (45, 10)):
             self.assertEqual(at(after, x, y), at(before, x, y), "the pill and its name as mapped at %d,%d" % (x, y))
 
+    def test_any_color_picked_is_text_by_one_rule_or_the_other(self):
+        """The owner, November 26: a pale yellow (#dfde92) fell between the strong-color rule and the light one, and
+        "two rules are fine, but they should meet at a crossroad that leaves no possible value uncovered". Every
+        pick, light or dark, comes out in its own color; a pill of the pick's own gray stays the pill."""
+        paper, gray = (0xe9, 0xf0, 0xff), (0x9d, 0x9d, 0x9d)
+
+        def mix(a, b, share):
+            return tuple(int(round(x + share * (y - x))) for x, y in zip(a, b))
+
+        for text in ((0xdf, 0xde, 0x92), (0x20, 0x20, 0x20), (0x80, 0x80, 0x80), gray, (0xc0, 0xc0, 0xc0)):
+            width = 60
+            rows = [[paper] * width for _ in range(24)]
+            for y in range(2, 22):
+                for x0 in (4, 14):
+                    rows[y][x0], rows[y][x0 + 4] = mix(paper, text, 0.5), mix(paper, text, 0.3)
+                    for x in range(x0 + 1, x0 + 4):
+                        rows[y][x] = text
+            for y in range(4, 20):  # a gray pill, its smoothed rim, its white name
+                for x in range(34, 58):
+                    rows[y][x] = mix(paper, gray, 0.5) if y in (4, 19) or x in (34, 57) else gray
+            for y in range(9, 15):
+                for x in range(40, 52, 2):
+                    rows[y][x] = (255, 255, 255)
+            flat = [c for row in rows for c in row]
+            written, before, after, at = self.light_redraw(flat, width, "freelab_reground_light")
+            self.assertEqual(at(after, 6, 10), text, "#%02x%02x%02x in its own color" % text)
+            for x, y in ((36, 8), (34, 10), (40, 10), (45, 5)):
+                self.assertEqual(at(after, x, y), at(before, x, y),
+                                 "the pill as mapped at %d,%d with #%02x%02x%02x" % ((x, y) + text))
+
     def test_a_sample_drawn_on_a_dark_ground_is_kept_as_drawn(self):
         """The owner, November 26: Overlay Fonts' preview, which FontLab draws on the dark palette already (#e7e3d7 on
         #2d2d30), came out dark olive on dark once mapped. With no light paper and a dark ground, it is kept."""
