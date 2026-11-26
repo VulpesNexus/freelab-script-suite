@@ -2467,6 +2467,7 @@ def _effect_classes():
                         side = pixmap.height() - 2  # the swatch: a square at the left, inside a 2-px frame
                         image = pixmap.toImage()
                         draw_mapped(painter, pixmap, offset, whole, 0.0, None, -1.0, 0.0, None, 0.0, 0, "all")
+                        border = None  # (the swatch's own smoothed border, drawn in its color last: see below)
                         if side > 6:
                             inside = QRect(3, 3, side - 4, side - 4)  # the swatch within the frame FontLab paints light
                             probe_x, probe_y = side // 4 + 1, side // 4 + 1  # off the "no color" diagonal
@@ -2479,6 +2480,7 @@ def _effect_classes():
                                 ring = dark_ring_image(image, inside)
                                 if ring is not None:
                                     painter.drawImage(offset, ring)
+                                border = (inside, _gui("QColor").fromRgba(image.pixel(probe_x, probe_y)))
                             painter.drawPixmap(inside.translated(offset), pixmap, inside)
                         # Around that square, only the light frame is mapped: a picker that paints its
                         # swatch at full height (the mark color's) keeps its color to the edges.
@@ -2486,6 +2488,18 @@ def _effect_classes():
                         colored = _colored_part(image, QRect(0, 0, split, pixmap.height()))
                         if colored is not None:
                             painter.drawImage(offset, colored)
+                        if border is not None:
+                            # The swatch's one-pixel border, a blend of its color and the light frame, kept as a
+                            # color by the pass above: a lighter or off-colored line around every color slot on the
+                            # dark frame (the owner's images 180 and 181, 2026-11-26). Drawn in the swatch's own color:
+                            # a crisp edge on the dark frame.
+                            rect, color = border
+                            edge = rect.adjusted(-1, -1, 1, 1).translated(offset)
+                            for line in (QRect(edge.left(), edge.top(), edge.width(), 1),
+                                         QRect(edge.left(), edge.bottom(), edge.width(), 1),
+                                         QRect(edge.left(), edge.top(), 1, edge.height()),
+                                         QRect(edge.right(), edge.top(), 1, edge.height())):
+                                painter.fillRect(line, color)
                         return
                     if kind == "defringe":  # dark already (its stylesheet): only its text's fringes made gray
                         area = whole
