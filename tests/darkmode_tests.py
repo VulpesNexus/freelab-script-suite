@@ -235,18 +235,40 @@ class ShadeAndPickerTests(DarkModeCase):
         dm.run_queue()
         self.assertEqual(self.content.styleSheet, PANEL_SHEET)
 
-    def test_fontlabs_cursors_are_never_altered(self):
-        """The owner, 2026-11-26: the tools' cursors, turned for the dark canvas, looked inverted and bad; "they
-        should probably be safeguarded to never be altered". Only a copy an earlier dark mode left is undone."""
+    def test_fontlabs_cursors_are_left_alone_but_three(self):
+        """The owner, 2026-11-26: the tools' cursors, all turned for the dark canvas, looked inverted and bad; "leave
+        cursors up to FontLab", except the Contour and Eraser tools' (a jarring light glow: a standard drop shadow, or
+        the Eraser's cross inverted) and TrueType Hinting's rough outline. Known by their pixels' hash only."""
         with open(os.path.join(os.path.dirname(HERE), "darkmode", "freelab_dark_mode.py"), "rb") as handle:
             source = handle.read().decode("utf-8")
         self.assertNotIn("glow_to_shadow", source)
-        self.assertEqual(source.count(".setCursor("), 1, "only _restore_cursor sets a cursor: FontLab's own, back")
+        self.assertEqual(sorted(dm.CURSOR_TREATMENTS.values()), ["invert", "rim", "shadow"])
         canvas = FakeWidget("GlyphCanvas")
         calls = []
         canvas.setCursor = lambda cursor: calls.append(cursor)
         self.assertFalse(dm._fix_cursor(canvas))
-        self.assertEqual(calls, [], "a cursor change leaves FontLab's cursor as it is")
+        self.assertEqual(calls, [], "no bitmap cursor of the three: FontLab's cursor as it is")
+        white_glow, black, clear = 0x60ffffff, 0xff000000, 0x00000000
+        # a 3 by 3 black shape in a glow, on 7 by 7
+        pixels = [clear] * 49
+        for y in range(1, 6):
+            for x in range(1, 6):
+                pixels[y * 7 + x] = white_glow
+        for y in range(2, 5):
+            for x in range(2, 5):
+                pixels[y * 7 + x] = black
+        shadow = dm.treated_cursor_pixels(pixels, 7, 7, "shadow")
+        self.assertEqual(shadow[3 * 7 + 3], black, "the shape as it is")
+        self.assertTrue((shadow[1 * 7 + 1] & 0xffffff) == 0 and (shadow[1 * 7 + 1] >> 24) < 16,
+                        "the light glow taken out (above and left: a trace of the shadow at most)")
+        corner = shadow[5 * 7 + 5]
+        self.assertTrue(0 < (corner >> 24) < 255 and (corner & 0xffffff) == 0, "a soft black shadow below and right")
+        inverted = dm.treated_cursor_pixels(pixels, 7, 7, "invert")
+        self.assertEqual(inverted[3 * 7 + 3], 0xffffffff, "the Eraser's cross white")
+        self.assertEqual(inverted[1 * 7 + 1], clear, "its glow out")
+        rim = [clear] * 9
+        rim[4], rim[1] = 0xffffffff, black  # (a white pixel with one dark neighbor: an outline's staircase step)
+        self.assertEqual(dm.treated_cursor_pixels(rim, 3, 3, "rim")[4] >> 24, 140)
 
     def test_an_effect_drawn_again_from_inside_its_own_drawing_draws_its_widget_as_it_is(self):
         """The owner, November 25: dragging a color in Overlay Fonts ran FontLab's stack out after a few seconds,

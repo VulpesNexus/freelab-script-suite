@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 37
+#define FREELAB_HOOKS_VERSION 38
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -668,19 +668,43 @@ static void note_badge(const void *painter, int badge)
         n->badge = badge;
 }
 
-/* On a dark box mapped light (see on_dark_box), dark and middle grays stay as they are too, so the text keeps its
- * contrast with the box: the glyph's caption while its window is active and everything is selected is #1f1f1f at
- * 70% under #646464 text, which came out #969696 under #919191, unreadable (the owner's image 173, 2026-11-26). */
+/* On a dark box mapped light (see on_dark_box), dark and middle grays are drawn darker still, so the text stands out
+ * from the box: the glyph's caption, selected or with the mouse near it, is #1f1f1f at 70% under #646464 and #404040
+ * text. Mapped as anywhere, the text came out #919191 on the box's #969696 (the owner's image 173, 2026-11-26); kept
+ * as it was, #646464 on that mid gray still hardly read (the owner's recording, the same evening: the box is
+ * translucent, so over the dark canvas it ends mid gray, not light). Such a pen is drawn at the mapping's dark end,
+ * its hue kept. */
 #define DARK_BOX_KEEP_OKL 0.6
+
+static int dark_on_box(const void *painter, const qcolor *c, qcolor *m)
+{
+    painter_note *n = find_note(painter);
+    double l, chroma, a, b;
+    uint32_t argb;
+    uint8_t r8, g8, b8;
+    if (!n || !n->dark_box)
+        return 0;
+    argb = painted_rgba(c);
+    oklab_of(argb & 0xffffffU, &l, &chroma);
+    if (l >= DARK_BOX_KEEP_OKL)
+        return 0;
+    if (l > hook_dark_l)
+        l = hook_dark_l;
+    oklab_ab(argb & 0xffffffU, &a, &b);
+    oklab_to_bytes(l, a, b, &r8, &g8, &b8);
+    set_qcolor(m, (argb & 0xff000000U) | ((uint32_t)r8 << 16) | ((uint32_t)g8 << 8) | b8);
+    badge_kept++;
+    return 1;
+}
 
 static int dark_on_badge(const void *painter, const qcolor *c)
 {
     painter_note *n;
     double l, chroma;
-    if (!(n = find_note(painter)) || !(n->badge || n->dark_box))
+    if (!(n = find_note(painter)) || !n->badge)
         return 0;
     oklab_of(painted_rgba(c) & 0xffffffU, &l, &chroma);
-    if (l >= (n->badge ? BADGE_DARK_OKL : DARK_BOX_KEEP_OKL))
+    if (l >= BADGE_DARK_OKL)
         return 0;
     badge_kept++;
     return 1;
@@ -1275,7 +1299,7 @@ static void w_set_pen_color(void *p, const qcolor *c)
     const qcolor *use = c;
     hook_calls[H_SET_PEN_COLOR]++;
     if (on_screen(p)) {
-        if (picked_frame(p, c, &m)) {
+        if (picked_frame(p, c, &m) || dark_on_box(p, c, &m)) {
             hook_changed[H_SET_PEN_COLOR]++;
             use = &m;
         } else if ((!white_pen(c) || palette_light_color(c) || on_dark_box(p)) && !dark_on_badge(p, c)
@@ -1332,7 +1356,7 @@ static void w_set_pen(void *p, const void *pen)
     if (on_screen(p)) {
         qcolor c, frame;
         qt_pen_color(pen, &c);
-        if (qt_pen_is_solid(pen) && picked_frame(p, &c, &frame)) {
+        if (qt_pen_is_solid(pen) && (picked_frame(p, &c, &frame) || dark_on_box(p, &c, &frame))) {
             qt_pen_copy(&tmp, pen);
             qt_pen_set_color(&tmp, &frame);
             use = &tmp;

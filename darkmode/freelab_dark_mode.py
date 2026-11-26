@@ -3727,26 +3727,148 @@ def _in_fontlab_view(widget):
         return False
 
 
-# FontLab's cursors are never altered: they are drawn as FontLab has them, its black arrow and tools with their
-# white glow, whatever the canvas. Dark mode once made copies for the dark canvas (the glow made a shadow, the
-# arrow turned white with black edges), which looked inverted and bad (the owner, 2026-11-26: "they should
-# probably be safeguarded to never be altered"). What remains only undoes such a copy, which an earlier version of
-# dark mode may have left on a canvas in this FontLab session, at the canvas' next cursor change
-# (CURSOR_CHANGE_EVENT) or as dark mode switches off.
+# FontLab's cursors are left as FontLab has them, its black arrow and tools with their white glow, whatever the
+# canvas. Dark mode once made copies of all of them for the dark canvas (the glow made a shadow, the arrow turned white
+# with black edges), which looked inverted and bad (the owner, 2026-11-26: "they should probably be safeguarded to
+# never be altered"); only the three of CURSOR_TREATMENTS are replaced, at the canvas' cursor change
+# (CURSOR_CHANGE_EVENT), and FontLab's own comes back as dark mode switches off.
 CURSOR_CHANGE_EVENT = 183  # QEvent::CursorChange
 BITMAP_CURSOR = 24  # Qt::BitmapCursor: a cursor made of a picture
 
 
+# Three exceptions, at the owner's request (2026-11-26): the Contour and Eraser tools' cursors carry a wide white
+# glow that reads as a jarring light halo on the dark canvas, and the TrueType Hinting tool's white outline is rough.
+# Each is known by its pixels (the hash of FontLab's own picture, 0xAARRGGBB, row by row), so no other cursor is ever
+# touched: "shadow" takes the light glow out and gives the shape a soft standard drop shadow; "invert" turns the
+# Eraser's thin cross white, the glow out (its black cross and a shadow nearly vanished on the dark canvas); "rim"
+# softens the outline's staircase.
+CURSOR_TREATMENTS = {
+    "b06ff714172f45d24fc438352410e791": "shadow",  # Contour (32 px)
+    "71f9b22028c0149036fb60d179d6de91": "invert",  # Eraser (16 px)
+    "207990417a87cfdce111db75d3a21776": "rim",  # TrueType Hinting (32 px)
+}
+CURSOR_SHADOW_ALPHA = 0.55  # the drop shadow at its densest
+CURSOR_SHADOW_OFFSET = 1  # pixels right and down
+
+
+def cursor_hash(image):
+    """The md5 of a Format_ARGB32 QImage's pixels as 0xAARRGGBB hex, row by row (CURSOR_TREATMENTS' keys)."""
+    import hashlib
+    parts = []
+    for y in range(image.height()):
+        for x in range(image.width()):
+            parts.append("%08x" % (image.pixel(x, y) & 0xffffffff))
+    return hashlib.md5("".join(parts).encode("ascii")).hexdigest()
+
+
+def treated_cursor_pixels(pixels, width, height, treatment):
+    """pixels: [0xAARRGGBB] row by row; the treated pixels (CURSOR_TREATMENTS), same size."""
+    def channels(v):
+        return (v >> 24) & 255, (v >> 16) & 255, (v >> 8) & 255, v & 255
+
+    def light(v):
+        _a, r, g, b = channels(v)
+        return (r + g + b) / 3.0 > 128
+
+    if treatment == "rim":
+        out = list(pixels)
+        for y in range(height):
+            for x in range(width):
+                a, r, g, b = channels(pixels[y * width + x])
+                if a < 255 or (r + g + b) / 3.0 < 200:
+                    continue
+                inside = 0
+                for yy in range(y - 1, y + 2):
+                    for xx in range(x - 1, x + 2):
+                        if (xx, yy) != (x, y) and 0 <= xx < width and 0 <= yy < height:
+                            na, nr, ng, nb = channels(pixels[yy * width + xx])
+                            inside += na == 255 and (nr + ng + nb) / 3.0 < 100
+                if inside <= 2:
+                    out[y * width + x] = ((140 if inside <= 1 else 210) << 24) | (pixels[y * width + x] & 0xffffff)
+        return out
+    # the shape: what is not the light glow
+    shape = [0.0] * (width * height)
+    for k, v in enumerate(pixels):
+        a = (v >> 24) & 255
+        if a == 255 or (a and not light(v)):
+            shape[k] = a / 255.0
+
+    def blur(m):
+        n = [0.0] * (width * height)
+        for y in range(height):
+            for x in range(width):
+                s = 0.0
+                for yy in range(y - 1, y + 2):
+                    for xx in range(x - 1, x + 2):
+                        if 0 <= xx < width and 0 <= yy < height:
+                            s += m[yy * width + xx]
+                n[y * width + x] = s / 9.0
+        return n
+
+    strength = CURSOR_SHADOW_ALPHA if treatment == "shadow" else 0.0
+    soft = blur(blur(shape)) if strength else shape
+    out = [0] * (width * height)
+    for y in range(height):
+        for x in range(width):
+            k = y * width + x
+            sx, sy = x - CURSOR_SHADOW_OFFSET, y - CURSOR_SHADOW_OFFSET
+            sa = soft[sy * width + sx] * strength if strength and 0 <= sx < width and 0 <= sy < height else 0.0
+            fa = shape[k]
+            alpha = fa + sa * (1 - fa)
+            if alpha <= 0:
+                continue
+            _a, r, g, b = channels(pixels[k])
+            r, g, b = (int(round(c * fa / alpha)) for c in (r, g, b))
+            if treatment == "invert":
+                r, g, b = 255 - r, 255 - g, 255 - b
+            out[k] = (int(round(alpha * 255)) << 24) | (r << 16) | (g << 8) | b
+    return out
+
+
 def _fix_cursor(widget):
-    """FontLab's own cursor back on the widget if an earlier version of dark mode replaced it; nothing else (a
-    cursor is never altered). Never raises (it runs from an event filter)."""
+    """The widget's cursor: FontLab's own, never altered, but for the three of CURSOR_TREATMENTS, replaced by their
+    treated copy while dark mode is on (made once each, held). Never raises (it runs from an event filter)."""
     try:
-        record = _record(widget)
-        if "cursor" in record:
-            _restore_cursor(widget, record)
+        state = _state()
+        if not state["on"]:
+            return False
+        cursor = getattr(widget, "cursor", None)
+        cursor = cursor() if callable(cursor) else cursor
+        if cursor is None or int(cursor.shape()) != BITMAP_CURSOR:
+            return False
+        pixmap = cursor.pixmap()
+        if pixmap is None or pixmap.isNull():
+            return False
+        key = pixmap.cacheKey()
+        ours = state.setdefault("cursor_keys", set())
+        if key in ours:
+            return False  # ours already (setting it sends the event again)
+        made = state.setdefault("cursors", {})
+        entry = made.get(key)
+        if entry is None:
+            entry = False
+            image = pixmap.toImage().convertToFormat(_gui("QImage").Format_ARGB32)
+            treatment = CURSOR_TREATMENTS.get(cursor_hash(image))
+            if treatment:
+                w, h = image.width(), image.height()
+                pixels = [image.pixel(x, y) & 0xffffffff for y in range(h) for x in range(w)]
+                for k, v in enumerate(treated_cursor_pixels(pixels, w, h, treatment)):
+                    image.setPixel(k % w, k // w, v)
+                fixed_pixmap = _gui("QPixmap").fromImage(image)
+                spot = cursor.hotSpot()
+                fixed = _gui("QCursor")(fixed_pixmap, spot.x(), spot.y())
+                ours.add(fixed_pixmap.cacheKey())
+                ours.add(fixed.pixmap().cacheKey())
+                entry = (fixed, fixed_pixmap)  # (held: Qt keeps no reference Python can count on)
+            made[key] = entry
+        if not entry:
+            return False
+        _record(widget)["cursor"] = _gui("QCursor")(cursor)
+        widget.setCursor(entry[0])
+        return True
     except Exception as exc:
         _note_error("cursor", exc)
-    return False
+        return False
 
 
 def _restore_cursor(widget, record):
@@ -5119,7 +5241,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 37
+HOOKS_VERSION = 38
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
@@ -5407,6 +5529,11 @@ def _hook_island(widget):
     if pointer and pointer not in state.setdefault("hooked_addresses", []):
         state["hooked_addresses"].append(pointer)
         _send_hooked(state)
+    if pointer and widget.inherits("QTabBar") and pointer not in state.setdefault("ink_addresses", []):
+        # A tab bar's names are drawn by Qt (Qt5Widgets), whose dark pens the hooks map only on the ink list: the
+        # document tabs' names came out black on the dark bar, a relaunch or not (the owner's image 179)
+        state["ink_addresses"].append(pointer)
+        _send_ink(state)
     if pointer and _picked_surface(widget) and pointer not in state.setdefault("picked_addresses", []):
         widget.setProperty(PICKED_PROP, True)
         state["picked_addresses"].append(pointer)
@@ -5515,6 +5642,8 @@ def _update_hooked(app):
                         addresses.append(pointer)
                         if widget.property(PICKED_PROP):
                             picked.append(pointer)
+                        if widget.inherits("QTabBar"):
+                            inks.append(pointer)  # (its names Qt draws: see _hook_island)
                     else:
                         inks.append(pointer)
         except Exception:
