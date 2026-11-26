@@ -5063,7 +5063,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 20
+HOOKS_VERSION = 25
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
@@ -5159,7 +5159,7 @@ def _hooks():
     return lib
 
 
-HOOKS_MIN_FOUND = 25  # of 29: FontLab 7.2's program imports all of them
+HOOKS_MIN_FOUND = 25  # of 31: FontLab 7.2's program imports all of them
 
 
 def _palette_table(palette):

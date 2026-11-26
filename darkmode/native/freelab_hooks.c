@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 20
+#define FREELAB_HOOKS_VERSION 25
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -151,6 +151,9 @@ static qcolor *(*qt_pen_color)(const void *, qcolor *);
 static void *(*qt_pen_copy)(void *, const void *);
 static void (*qt_pen_set_color)(void *, const qcolor *);
 static void (*qt_pen_dtor)(void *);
+static void *(*qt_pen_from_style)(void *, int);
+static int (*qt_pen_style)(const void *);
+static char (*qt_painter_active)(const void *);
 static int (*qt_brush_style)(const void *);
 static const qcolor *(*qt_brush_color)(const void *);
 static void *(*qt_brush_copy)(void *, const void *);
@@ -183,6 +186,9 @@ static struct {
     {"??0QPen@@QEAA@AEBV0@@Z", (void **)&qt_pen_copy},
     {"?setColor@QPen@@QEAAXAEBVQColor@@@Z", (void **)&qt_pen_set_color},
     {"??1QPen@@QEAA@XZ", (void **)&qt_pen_dtor},
+    {"??0QPen@@QEAA@W4PenStyle@Qt@@@Z", (void **)&qt_pen_from_style},
+    {"?style@QPen@@QEBA?AW4PenStyle@Qt@@XZ", (void **)&qt_pen_style},
+    {"?isActive@QPainter@@QEBA_NXZ", (void **)&qt_painter_active},
     {"?style@QBrush@@QEBA?AW4BrushStyle@Qt@@XZ", (void **)&qt_brush_style},
     {"?color@QBrush@@QEBAAEBVQColor@@XZ", (void **)&qt_brush_color},
     {"??0QBrush@@QEAA@AEBV0@@Z", (void **)&qt_brush_copy},
@@ -213,7 +219,7 @@ enum {
     H_PALETTE_COLOR_GROUP, H_PALETTE_COLOR, H_PALETTE_BRUSH_GROUP,
     H_DRAW_PIXMAP_RECT, H_DRAW_PIXMAP_PT, H_PAINTER_ON, H_PAINTER_OFF, H_PAINTER_BEGIN, H_PAINTER_END,
     H_WIDGET_PALETTE, /* from Qt5Widgets: the only one */
-    H_PAINTER_PEN, H_PAINTER_BRUSH,
+    H_PAINTER_PEN, H_PAINTER_BRUSH, H_SET_PEN_STYLE, H_SET_BRUSH_STYLE,
     H_COUNT
 };
 static const char *hook_names[H_COUNT] = {
@@ -246,6 +252,8 @@ static const char *hook_names[H_COUNT] = {
     "?palette@QWidget@@QEBAAEBVQPalette@@XZ",
     "?pen@QPainter@@QEBAAEBVQPen@@XZ",
     "?brush@QPainter@@QEBAAEBVQBrush@@XZ",
+    "?setPen@QPainter@@QEAAXW4PenStyle@Qt@@@Z",
+    "?setBrush@QPainter@@QEAAXW4BrushStyle@Qt@@@Z",
 };
 
 static const char *hook_dll(int index)
@@ -289,16 +297,22 @@ static void set_qcolor(qcolor *out, uint32_t argb)
     out->pad = 0;
 }
 
-/* out = the dark-mode counterpart of c; returns 1 when it differs. */
+/* A color as Qt paints it: an invalid QColor (QColor(), a color FontLab never set) is painted black
+ * (setPen(QColor()) is QPen(Qt::black); a brush of it fills opaque black). FontLab writes the Fonts
+ * panel's file names after setPen(QColor()): skipped as invalid, they stayed black on the dark list. */
+static uint32_t painted_rgba(const qcolor *c)
+{
+    return c->spec == QCOLOR_INVALID ? 0xff000000U : qt_color_rgba(c);
+}
+
+/* out = the dark-mode counterpart of c; returns 1 when it differs (an invalid color: always). */
 static int map_qcolor(const qcolor *c, qcolor *out)
 {
     uint32_t argb, mapped;
     *out = *c;
-    if (c->spec == QCOLOR_INVALID)
-        return 0;
-    argb = qt_color_rgba(c);
+    argb = painted_rgba(c);
     mapped = map_qrgb(argb);
-    if (mapped == argb)
+    if (mapped == argb && c->spec != QCOLOR_INVALID)
         return 0;
     set_qcolor(out, mapped);
     return 1;
@@ -349,7 +363,7 @@ static int ink_target(const void *painter)
  * fills are still mapped (they are the paper). */
 static int white_pen(const qcolor *c)
 {
-    return (qt_color_rgba(c) & 0xffffffU) == 0xffffffU; /* pure white only: near-whites (a tab strip's
+    return (painted_rgba(c) & 0xffffffU) == 0xffffffU; /* pure white only: near-whites (a tab strip's
                                                           * #edeeef edge) are paper-colored lines */
 }
 
@@ -361,7 +375,7 @@ static const void *mapped_pen(const void *pen, qhandle *tmp, int *copied)
     if (!qt_pen_is_solid(pen))
         return pen; /* a gradient or texture pen: setColor would replace it */
     qt_pen_color(pen, &c);
-    if (c.spec == QCOLOR_INVALID || white_pen(&c) || !map_qcolor(&c, &m))
+    if (white_pen(&c) || !map_qcolor(&c, &m))
         return pen;
     qt_pen_copy(tmp, pen);
     qt_pen_set_color(tmp, &m);
@@ -428,6 +442,7 @@ static int hooked_painter_count;
 typedef struct {
     uint32_t pen_out[NOTED_PAIRS], pen_in[NOTED_PAIRS], brush_out[NOTED_PAIRS], brush_in[NOTED_PAIRS];
     int pen_n, brush_n, pen_next, brush_next, has_pen, has_brush;
+    int badge; /* its brush is a light color kept as it is (see dark_on_badge) */
     qhandle pen, brush; /* the copies last handed out */
 } painter_note;
 static painter_note painter_notes[PAINTERS_MAX];
@@ -438,7 +453,7 @@ static void drop_note(painter_note *n)
         qt_pen_dtor(&n->pen);
     if (n->has_brush)
         qt_brush_dtor(&n->brush);
-    n->pen_n = n->brush_n = n->pen_next = n->brush_next = n->has_pen = n->has_brush = 0;
+    n->pen_n = n->brush_n = n->pen_next = n->brush_next = n->has_pen = n->has_brush = n->badge = 0;
 }
 
 static void note_painter(const void *painter)
@@ -506,9 +521,9 @@ static int noted_source(const uint32_t *outs, const uint32_t *ins, int n, uint32
 static void note_pen(const void *painter, const qcolor *in, const qcolor *out)
 {
     painter_note *n;
-    if (in == out || in->spec == QCOLOR_INVALID || !(n = find_note(painter)))
+    if (in == out || !(n = find_note(painter)))
         return;
-    note_pair(n->pen_out, n->pen_in, &n->pen_n, &n->pen_next, qt_color_rgba(out), qt_color_rgba(in));
+    note_pair(n->pen_out, n->pen_in, &n->pen_n, &n->pen_next, qt_color_rgba(out), painted_rgba(in));
 }
 
 static void note_brush(const void *painter, const void *in, const void *out)
@@ -518,6 +533,43 @@ static void note_brush(const void *painter, const void *in, const void *out)
         return;
     note_pair(n->brush_out, n->brush_in, &n->brush_n, &n->brush_next, qt_color_rgba(qt_brush_color(out)),
               qt_color_rgba(qt_brush_color(in)));
+}
+
+/* Badges: FontLab fills a shape with a light, clearly colored brush and writes on it in black (the
+ * Fonts panel's style dot, pale blue with a black "R"). The color rule keeps such a fill as it is
+ * (CONTENT_KEEP_CHROMA), so the dark text written on it stays dark too: mapped light, it was pale on
+ * pale blue. Only while the painter's brush is that fill; any other brush ends it. */
+#define BADGE_MIN_OKL 0.7
+#define BADGE_DARK_OKL 0.5
+static int64_t badge_kept;
+
+static int badge_color(uint32_t argb)
+{
+    double l, chroma;
+    if ((argb >> 24) < 128)
+        return 0;
+    oklab_of(argb & 0xffffffU, &l, &chroma);
+    return chroma >= CONTENT_KEEP_CHROMA && l >= BADGE_MIN_OKL;
+}
+
+static void note_badge(const void *painter, int badge)
+{
+    painter_note *n = find_note(painter);
+    if (n)
+        n->badge = badge;
+}
+
+static int dark_on_badge(const void *painter, const qcolor *c)
+{
+    painter_note *n;
+    double l, chroma;
+    if (!(n = find_note(painter)) || !n->badge)
+        return 0;
+    oklab_of(painted_rgba(c) & 0xffffffU, &l, &chroma);
+    if (l >= BADGE_DARK_OKL)
+        return 0;
+    badge_kept++;
+    return 1;
 }
 
 /* The light palette's slot for a color the dark palette holds there, or -1. */
@@ -871,9 +923,7 @@ static int ink_qcolor(const qcolor *c, qcolor *out)
     double l, chroma;
     int g, r;
     *out = *c;
-    if (c->spec == QCOLOR_INVALID)
-        return 0;
-    argb = qt_color_rgba(c);
+    argb = painted_rgba(c);
     rgb = argb & 0xffffffU;
     oklab_of(rgb, &l, &chroma);
     if (l >= INK_MAX_OKL || (argb >> 24) == 0)
@@ -930,8 +980,8 @@ static void trace_rgba(int hook, const void *painter, uint32_t in, uint32_t out)
 
 static void trace_color(int hook, const void *painter, const qcolor *in, const qcolor *out)
 {
-    if (trace_on && in->spec != QCOLOR_INVALID)
-        trace_rgba(hook, painter, qt_color_rgba(in), qt_color_rgba(out));
+    if (trace_on) /* (an invalid color as the black Qt paints, its alpha byte 0xfe to tell it apart) */
+        trace_rgba(hook, painter, in->spec == QCOLOR_INVALID ? 0xfe000000U : qt_color_rgba(in), painted_rgba(out));
 }
 
 static void trace_brush(int hook, const void *painter, const void *in, const void *out)
@@ -971,9 +1021,11 @@ static void w_set_pen_color(void *p, const qcolor *c)
     qcolor m;
     const qcolor *use = c;
     hook_calls[H_SET_PEN_COLOR]++;
-    if (on_screen(p) && c->spec != QCOLOR_INVALID && (!white_pen(c) || palette_light_color(c)) && map_qcolor(c, &m)) {
-        hook_changed[H_SET_PEN_COLOR]++;
-        use = &m;
+    if (on_screen(p)) {
+        if ((!white_pen(c) || palette_light_color(c)) && !dark_on_badge(p, c) && map_qcolor(c, &m)) {
+            hook_changed[H_SET_PEN_COLOR]++;
+            use = &m;
+        }
     } else if (ink_target(p) && ink_qcolor(c, &m)) {
         hook_changed[H_SET_PEN_COLOR]++;
         use = &m;
@@ -1014,9 +1066,12 @@ static void w_set_pen(void *p, const void *pen)
     int copied = 0;
     const void *use = pen;
     hook_calls[H_SET_PEN]++;
-    if (on_screen(p))
-        use = mapped_pen(pen, &tmp, &copied);
-    else if (ink_target(p))
+    if (on_screen(p)) {
+        qcolor c;
+        qt_pen_color(pen, &c);
+        if (!dark_on_badge(p, &c))
+            use = mapped_pen(pen, &tmp, &copied);
+    } else if (ink_target(p))
         use = ink_pen(pen, &tmp, &copied);
     hook_changed[H_SET_PEN] += copied;
     trace_pen(H_SET_PEN, p, pen, use);
@@ -1047,7 +1102,85 @@ static void w_set_pen(void *p, const void *pen)
             qt_brush_dtor(&tmp);                                     \
     }
 
-static void w_set_brush(void *p, const void *brush) BRUSH_ON_SCREEN(H_SET_BRUSH, p, (note_brush(p, brush, use), ORIGINAL(H_SET_BRUSH, one_fn)(p, use)))
+static void w_set_brush(void *p, const void *brush)
+{
+    int style = qt_brush_style(brush);
+    note_badge(p, hooks_on && style == BRUSH_SOLID && badge_color(qt_color_rgba(qt_brush_color(brush))));
+    BRUSH_ON_SCREEN(H_SET_BRUSH, p, (note_brush(p, brush, use), ORIGINAL(H_SET_BRUSH, one_fn)(p, use)))
+}
+
+/* setPen(Qt::PenStyle) and setBrush(Qt::BrushStyle) make Qt's black pen or brush of that style
+ * (QPen(style), QBrush(Qt::black, style)): FontLab writes the Fonts panel's file names with
+ * setPen(Qt::SolidLine), which stayed black on the dark list. On screen they are set as the mapped
+ * black instead, through the hooked setPen(QPen) and setBrush(QBrush); no pen or no brush passes. */
+#define PEN_NONE 0
+typedef void (*style_fn)(void *, int);
+
+static void w_set_pen_style(void *p, int style)
+{
+    qcolor black, m;
+    qhandle tmp;
+    int ink = 0;
+    hook_calls[H_SET_PEN_STYLE]++;
+    if (style != PEN_NONE && (on_screen(p) || (ink = ink_target(p)) != 0)) {
+        set_qcolor(&black, 0xff000000U);
+        if (ink ? ink_qcolor(&black, &m) : (!dark_on_badge(p, &black) && map_qcolor(&black, &m))) {
+            hook_changed[H_SET_PEN_STYLE]++;
+            qt_pen_from_style(&tmp, style);
+            qt_pen_set_color(&tmp, &m);
+            trace_color(H_SET_PEN_STYLE, p, &black, &m);
+            note_pen(p, &black, &m);
+            ORIGINAL(H_SET_PEN, one_fn)(p, &tmp);
+            qt_pen_dtor(&tmp);
+            return;
+        }
+    }
+    trace_rgba(H_SET_PEN_STYLE, p, 0xff000000U, (uint32_t)style);
+    ORIGINAL(H_SET_PEN_STYLE, style_fn)(p, style);
+}
+
+static void w_set_brush_style(void *p, int style)
+{
+    qcolor black, m;
+    qhandle tmp;
+    hook_calls[H_SET_BRUSH_STYLE]++;
+    note_badge(p, 0);
+    if (style >= BRUSH_SOLID && style <= BRUSH_LAST_PATTERN && on_screen(p)) {
+        set_qcolor(&black, 0xff000000U);
+        if (map_qcolor(&black, &m)) {
+            hook_changed[H_SET_BRUSH_STYLE]++;
+            qt_brush_from_color(&tmp, &m, style);
+            trace_color(H_SET_BRUSH_STYLE, p, &black, &m);
+            {
+                qhandle source;
+                qt_brush_from_color(&source, &black, style);
+                note_brush(p, &source, &tmp);
+                qt_brush_dtor(&source);
+            }
+            ORIGINAL(H_SET_BRUSH, one_fn)(p, &tmp);
+            qt_brush_dtor(&tmp);
+            return;
+        }
+    }
+    ORIGINAL(H_SET_BRUSH_STYLE, style_fn)(p, style);
+}
+
+/* A painter's pen in the trace as it begins (out: the painter; mapped_surface: the pen's style). */
+typedef const void *(*pen_getter_fn)(const void *);
+static void trace_painter_pen(int index, const void *painter)
+{
+    qcolor c;
+    const void *pen;
+    int before;
+    if (!trace_on || !painter || !qt_painter_active(painter)) /* (an inactive painter has no state) */
+        return;
+    pen = ORIGINAL(H_PAINTER_PEN, pen_getter_fn)(painter);
+    qt_pen_color(pen, &c);
+    before = trace_count;
+    trace_rgba(index, painter, qt_color_rgba(&c), (uint32_t)(uintptr_t)painter);
+    if (trace_count > before)
+        trace_ring[trace_count - 1].mapped_surface = qt_pen_style(pen);
+}
 static void w_set_background(void *p, const void *brush) BRUSH_ON_SCREEN(H_SET_BACKGROUND, p, ORIGINAL(H_SET_BACKGROUND, one_fn)(p, use))
 static void w_fill_rect_brush(void *p, const void *r, const void *brush) BRUSH_ON_SCREEN(H_FILL_RECT_BRUSH, p, ORIGINAL(H_FILL_RECT_BRUSH, two_fn)(p, r, use))
 static void w_fill_rectf_brush(void *p, const void *r, const void *brush) BRUSH_ON_SCREEN(H_FILL_RECTF_BRUSH, p, ORIGINAL(H_FILL_RECTF_BRUSH, two_fn)(p, r, use))
@@ -1160,6 +1293,7 @@ static void *w_painter_on(void *painter, void *device)
     void *result = ORIGINAL(H_PAINTER_ON, painter_on_fn)(painter, device);
     hook_calls[H_PAINTER_ON]++;
     note_painter(painter);
+    trace_painter_pen(H_PAINTER_ON, painter);
     return result;
 }
 
@@ -1177,6 +1311,7 @@ static char w_painter_begin(void *painter, void *device)
     forget_painter(painter);
     if (result)
         note_painter(painter);
+    trace_painter_pen(H_PAINTER_BEGIN, painter);
     return result;
 }
 
@@ -1212,6 +1347,7 @@ static void w_ink_set_pen_color(void *p, const qcolor *c)
         ink_changed++;
         use = &m;
     }
+    trace_color(H_COUNT + H_SET_PEN_COLOR, p, c, use); /* (past H_COUNT: Qt5Widgets' own) */
     ORIGINAL(H_SET_PEN_COLOR, one_fn)(p, use);
 }
 
@@ -1224,6 +1360,7 @@ static void w_ink_set_pen(void *p, const void *pen)
     if (ink_target(p))
         use = ink_pen(pen, &tmp, &copied);
     ink_changed += copied;
+    trace_pen(H_COUNT + H_SET_PEN, p, pen, use);
     ORIGINAL(H_SET_PEN, one_fn)(p, use);
     if (copied)
         qt_pen_dtor(&tmp);
@@ -1284,7 +1421,7 @@ static void *wrappers[H_COUNT] = {
     (void *)w_draw_image_rectf, (void *)w_palette_color_group, (void *)w_palette_color, (void *)w_palette_brush_group,
     (void *)w_draw_pixmap_rect, (void *)w_draw_pixmap_pt, (void *)w_painter_on, (void *)w_painter_off,
     (void *)w_painter_begin, (void *)w_painter_end, (void *)w_widget_palette, (void *)w_painter_pen,
-    (void *)w_painter_brush,
+    (void *)w_painter_brush, (void *)w_set_pen_style, (void *)w_set_brush_style,
 };
 
 static void *wrapper_for(int module, int index)
@@ -1654,6 +1791,12 @@ EXPORT int freelab_hooks_counts(int64_t *calls, int64_t *changed, int max)
         changed[i] = hook_changed[i];
     }
     return H_COUNT;
+}
+
+/* Dark pens kept dark on a badge (see dark_on_badge). */
+EXPORT int64_t freelab_hooks_badge_count(void)
+{
+    return badge_kept;
 }
 
 /* Images mapped (new copies) and reused (copies drawn again); pixmaps the same. */
