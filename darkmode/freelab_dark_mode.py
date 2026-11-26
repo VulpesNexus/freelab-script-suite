@@ -4253,6 +4253,9 @@ def _undo_widget(widget, keep_props=False, keep_placeholder=False):
             widget.setAttribute(_core("Qt").WA_StyledBackground, record.pop("styled"))
         if "tracking" in record:
             widget.setMouseTracking(record.pop("tracking"))
+        if "font" in record:
+            font = record.pop("font")
+            widget.setFont(font if font is not None else _gui("QFont")())  # (empty: inherit again)
         record.pop("cross_hot", None)
         if "cursor" in record:
             _restore_cursor(widget, record)
@@ -5299,12 +5302,38 @@ def _hookable(widget):
     return not (parent is not None and parent.inherits("QAbstractItemView"))
 
 
+def _gray_text(widget):
+    """Text drawn light on dark by the hooks is drawn with grayscale smoothing (see NATIVE_GRAY_TEXT). The widget gets a
+    font that sets the strategy alone, so it still takes the rest from its parent; its own font comes back on off."""
+    record = _record(widget)
+    if "font" in record:
+        return
+    QFont = _gui("QFont")
+    try:
+        own = widget.testAttribute(_core("Qt").WA_SetFont)
+        record["font"] = QFont(_prop(widget, "font")) if own else None
+        font = QFont(_prop(widget, "font")) if own else QFont()
+        font.setStyleStrategy(QFont.NoSubpixelAntialias)
+        widget.setFont(font)
+    except Exception as exc:
+        record.pop("font", None)
+        _note_error("gray text", exc)
+
+
+# ClearType drawn light on dark by Qt itself, on the surfaces the hooks map: its colored subpixel edges came out deep
+# blue and brown, read as breaks inside the letters (the Fonts panel's names, the owner's image 148, 2026-11-26; seen
+# in a screen copy, "Essential" broken). Grayscale smoothing, as dark applications draw light text, is clean.
+NATIVE_GRAY_TEXT = True
+
+
 def _hook_island(widget):
     """Leave the island's painting to the hooks: no light look, no effect. Qt still draws its
     stylesheet and icons, which are darkened as any widget's."""
     first = widget.property(HOOKED_PROP) is None
     _clear_effect(widget, _record(widget))  # an effect dark mode set before it was found in a hooked island
     widget.setProperty(HOOKED_PROP, True)
+    if NATIVE_GRAY_TEXT:
+        _gray_text(widget)
     _protect(widget)  # dark as it is painted: an effect around it (the font window's ink) must not map it again
     _darken_sheet(widget)
     _darken_icons(widget)
@@ -5360,6 +5389,8 @@ def _native_ink(widget):
     _clear_effect(widget, _record(widget))
     widget.setProperty(NATIVE_INK_PROP, True)
     _protect(widget)
+    if NATIVE_GRAY_TEXT and widget.parentWidget() is not None:
+        _gray_text(widget.parentWidget())  # (the list: its delegates take the rows' font from it)
     state = _state()
     pointer = _sci_pointer(widget)
     if pointer and pointer not in state.setdefault("ink_addresses", []):

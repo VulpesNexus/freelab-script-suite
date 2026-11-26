@@ -79,6 +79,7 @@ for _role in ROLES:
 
 class Qt(object):
     WA_SetPalette = 13
+    WA_SetFont = 46
     WA_StyledBackground = 93
     LogicalCoordinates = 0
 
@@ -253,6 +254,7 @@ class FakeWidget(QObject):
         self.window = window
         self.palette = QPalette()
         self.set_palette = False
+        self.font = QFont()  # (a value, as PythonQt reads properties)
         self.effect = None
         self.icon = icon
         self.pixmap = None
@@ -341,9 +343,15 @@ class FakeWidget(QObject):
         self.palette = QPalette(palette)
         self.set_palette = palette.resolve() != 0
 
+    def setFont(self, font):
+        self.font = QFont(font)
+        self.set_font = font.strategy != 1  # (the fakes' default font: inherited)
+
     def testAttribute(self, attribute):
         if attribute == Qt.WA_SetPalette:
             return self.set_palette
+        if attribute == Qt.WA_SetFont:
+            return getattr(self, "set_font", False)
         return attribute in getattr(self, "attributes", ())
 
     def setAttribute(self, attribute, on=True):

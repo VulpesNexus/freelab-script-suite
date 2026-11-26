@@ -1625,6 +1625,21 @@ class EngineTests(DarkModeCase):
         self.assertEqual(hooks.calls.count("install"), 1)
         self.assertIsNone(self.kind(self.search), "no script effects over the hooks")
 
+    def test_hooked_islands_draw_their_text_with_grayscale_smoothing(self):
+        """The owner, November 26: under the native engine, the Fonts panel's names, light ClearType on dark, had
+        deep blue and brown edges that broke the letters. A hooked island's font asks for grayscale smoothing, and
+        only that (it still takes the rest from its parent); switched off, it inherits again."""
+        hooks = FakeHooks()
+        self.patch("_hooks", lambda: hooks)
+        self.patch("_palette_table", lambda palette: __import__("ctypes").c_uint32(0))
+        self.save(engine="native")
+        self.on()
+        self.assertTrue(self.search.property(dm.HOOKED_PROP), dm.status()["errors"])
+        self.assertEqual(self.search.font.styleStrategy(), qtfakes.QFont.NoSubpixelAntialias)
+        dm.restore()
+        self.assertEqual(self.search.font.styleStrategy(), 1, "its own font again")
+        self.assertFalse(self.search.testAttribute(qtfakes.Qt.WA_SetFont), "inherited again")
+
     def test_switching_engines_rebuilds(self):
         hooks = FakeHooks()
         self.patch("_hooks", lambda: hooks)
