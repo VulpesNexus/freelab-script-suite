@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 30
+#define FREELAB_HOOKS_VERSION 33
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -43,6 +43,11 @@ typedef struct {
 #define QIMAGE_RGB32 4
 #define QIMAGE_ARGB32 5
 #define QIMAGE_ARGB32_PREMULTIPLIED 6
+#define QIMAGE_INVALID 0
+/* A 32-bit format the mapping reads; any other (an icon loaded from an indexed, grayscale, or 1-bit PNG: 321 of
+ * FontLab's resources, its Fonts panel's tab icon among them) is converted to ARGB32 first. Drawn as it was, it kept
+ * its light-mode colors (the owner, 2026-11-26: the Fonts tab's icon, "and that's not the only one"). */
+#define MAPPED_FORMAT(f) ((f) == QIMAGE_RGB32 || (f) == QIMAGE_ARGB32 || (f) == QIMAGE_ARGB32_PREMULTIPLIED)
 
 /* QPen and QBrush hold one pointer; room for a copy. */
 typedef struct {
@@ -186,6 +191,7 @@ static void *(*qt_pixmap_to_image)(const void *, void *);
 static void *(*qt_pixmap_from_image)(void *, const void *, int);
 static void (*qt_pixmap_dtor)(void *);
 static int (*qt_palette_current_group)(const void *);
+static void *(*qt_image_convert)(const void *, void *, int, int);
 
 static struct {
     const char *name;
@@ -221,6 +227,7 @@ static struct {
     {"?fromImage@QPixmap@@SA?AV1@AEBVQImage@@V?$QFlags@W4ImageConversionFlag@Qt@@@@@Z", (void **)&qt_pixmap_from_image},
     {"??1QPixmap@@UEAA@XZ", (void **)&qt_pixmap_dtor},
     {"?currentColorGroup@QPalette@@QEBA?AW4ColorGroup@1@XZ", (void **)&qt_palette_current_group},
+    {"?convertToFormat@QImage@@QEBA?AV1@W4Format@1@V?$QFlags@W4ImageConversionFlag@Qt@@@@@Z", (void **)&qt_image_convert},
 };
 #define QT_NEEDED (int)(sizeof(qt_needed) / sizeof(qt_needed[0]))
 
@@ -631,14 +638,19 @@ static void note_badge(const void *painter, int badge)
         n->badge = badge;
 }
 
+/* On a dark box mapped light (see on_dark_box), dark and middle grays stay as they are too, so the text keeps its
+ * contrast with the box: the glyph's caption while its window is active and everything is selected is #1f1f1f at
+ * 70% under #646464 text, which came out #969696 under #919191, unreadable (the owner's image 173, 2026-11-26). */
+#define DARK_BOX_KEEP_OKL 0.6
+
 static int dark_on_badge(const void *painter, const qcolor *c)
 {
     painter_note *n;
     double l, chroma;
-    if (!(n = find_note(painter)) || !n->badge)
+    if (!(n = find_note(painter)) || !(n->badge || n->dark_box))
         return 0;
     oklab_of(painted_rgba(c) & 0xffffffU, &l, &chroma);
-    if (l >= BADGE_DARK_OKL)
+    if (l >= (n->badge ? BADGE_DARK_OKL : DARK_BOX_KEEP_OKL))
         return 0;
     badge_kept++;
     return 1;
@@ -918,7 +930,7 @@ static const void *mapped_image(const void *image, int mode)
     uint64_t oldest = ~0ULL;
     const void *result = image;
     format = qt_image_format(image);
-    if (format != QIMAGE_RGB32 && format != QIMAGE_ARGB32 && format != QIMAGE_ARGB32_PREMULTIPLIED)
+    if (format == QIMAGE_INVALID)
         return image;
     if (__sync_lock_test_and_set(&image_busy, 1))
         return image; /* another thread is mapping: drawn as it is this once */
@@ -944,7 +956,12 @@ static const void *mapped_image(const void *image, int mode)
         goto done;
     if (image_cache[slot].used)
         qt_image_dtor(image_cache[slot].image);
-    qt_image_copy(image_cache[slot].image, image);
+    if (MAPPED_FORMAT(format)) {
+        qt_image_copy(image_cache[slot].image, image);
+    } else {
+        qt_image_convert(image, image_cache[slot].image, QIMAGE_ARGB32, 0);
+        format = QIMAGE_ARGB32;
+    }
     map_image_pixels(image_cache[slot].image, format, mode, 1);
     image_cache[slot].key = key;
     image_cache[slot].stamp = ++image_clock;
@@ -1004,7 +1021,14 @@ static const void *mapped_pixmap(const void *pixmap, int mode)
         goto done;
     qt_pixmap_to_image(pixmap, image);
     format = qt_image_format(image);
-    if (format == QIMAGE_RGB32 || format == QIMAGE_ARGB32 || format == QIMAGE_ARGB32_PREMULTIPLIED) {
+    if (format != QIMAGE_INVALID && !MAPPED_FORMAT(format)) {
+        int64_t converted_storage[QIMAGE_SIZE / 8];
+        qt_image_convert(image, converted_storage, QIMAGE_ARGB32, 0);
+        qt_image_dtor(image);
+        memcpy(image_storage, converted_storage, sizeof(image_storage)); /* (a QImage is a d-pointer: moved) */
+        format = QIMAGE_ARGB32;
+    }
+    if (MAPPED_FORMAT(format)) {
         map_image_pixels(image, format, mode, 0);
         if (pixmap_cache[slot].used)
             qt_pixmap_dtor(pixmap_cache[slot].pixmap);
@@ -1341,6 +1365,16 @@ static void w_fill_rectf_brush(void *p, const void *r, const void *brush) BRUSH_
 static void w_fill_path(void *p, const void *path, const void *brush) BRUSH_ON_SCREEN(H_FILL_PATH, p, ORIGINAL(H_FILL_PATH, two_fn)(p, path, use))
 static void w_fill_xywh_brush(void *p, int x, int y, int w, int h, const void *brush) BRUSH_ON_SCREEN(H_FILL_XYWH_BRUSH, p, ORIGINAL(H_FILL_XYWH_BRUSH, xywh_fn)(p, x, y, w, h, use))
 
+/* An image or pixmap drawn, in the trace: in, its format (an image's; 0xff for a pixmap) in the top byte and its
+ * cache key's low 24 bits; out, 1 if a mapped copy was drawn. */
+static void trace_picture(int hook, const void *painter, const void *picture, int is_image, int mapped)
+{
+    if (trace_on)
+        trace_rgba(hook, painter, ((is_image ? (uint32_t)qt_image_format(picture) : 0xffU) << 24)
+                   | ((uint32_t)(is_image ? qt_image_cache_key(picture) : qt_pixmap_cache_key(picture)) & 0xffffffU),
+                   (uint32_t)mapped);
+}
+
 /* An image argument, drawn as a mapped copy on screen. */
 #define IMAGE_ON_SCREEN(index, painter, call_with)                    \
     {                                                                 \
@@ -1350,6 +1384,7 @@ static void w_fill_xywh_brush(void *p, int x, int y, int w, int h, const void *b
         if (mode && !picked_target(painter))                          \
             use = mapped_image(image, mode);                          \
         hook_changed[index] += use != image;                          \
+        trace_picture(index, painter, image, 1, use != image);        \
         call_with;                                                    \
     }
 
@@ -1423,6 +1458,7 @@ static void w_draw_pixmap_rect(void *p, const void *target, const void *pixmap)
     if (mode && !picked_target(p))
         use = mapped_pixmap(pixmap, mode);
     hook_changed[H_DRAW_PIXMAP_RECT] += use != pixmap;
+    trace_picture(H_DRAW_PIXMAP_RECT, p, pixmap, 0, use != pixmap);
     ORIGINAL(H_DRAW_PIXMAP_RECT, two_fn)(p, target, use);
 }
 
@@ -1434,6 +1470,7 @@ static void w_draw_pixmap_pt(void *p, const void *at, const void *pixmap)
     if (mode && !picked_target(p))
         use = mapped_pixmap(pixmap, mode);
     hook_changed[H_DRAW_PIXMAP_PT] += use != pixmap;
+    trace_picture(H_DRAW_PIXMAP_PT, p, pixmap, 0, use != pixmap);
     ORIGINAL(H_DRAW_PIXMAP_PT, two_fn)(p, at, use);
 }
 

@@ -5080,7 +5080,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 30
+HOOKS_VERSION = 33
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 

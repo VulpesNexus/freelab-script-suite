@@ -212,6 +212,12 @@ painting(light_target, lambda p: wrapper(13, c_void_p, c_void_p, c_void_p)(p, ad
 edge = image_pixel(addr(light_target), 1, 1)
 results.append(0x70 <= (edge >> 24) <= 0x90 and (edge & 0xff) > 150)
 print("%-46s %08x %s" % ("premultiplied edge: alpha kept, color light", edge, "ok" if results[-1] else "WRONG"))
+# an image of another format (the Fonts tab's icon is 8-bit gray): converted, then mapped
+GRAYSCALE8 = 24
+gray = image(GRAYSCALE8, 255)
+target = image(fill=0xff000000)
+painting(target, lambda p: wrapper(13, c_void_p, c_void_p, c_void_p)(p, addr(origin), addr(gray)))
+check("drawImage(point, white 8-bit gray image) mapped", image_pixel(addr(target), 3, 3), "dark")
 
 # white artwork on transparency (FontLab's logo) is drawn white; it is no paper
 set_pixel = fn("?setPixel@QImage@@QEAAXHHI@Z", c_void_p, c_int, c_int, c_uint32)
@@ -347,6 +353,9 @@ set_brush(addr(tracked), addr(label_brush))
 check("a dark gray label: mapped light", color_rgba(brush_color(painter_brush(addr(tracked)))), "light")
 set_pen_color(addr(tracked), addr(white))
 check("white text on it: mapped dark with it", pen_rgba(painter_pen(addr(tracked))), "dark")
+caption_gray = color(0x64, 0x64, 0x64)
+set_pen_color(addr(tracked), addr(caption_gray))
+check("gray text on it: kept, dark on the light box (173)", pen_rgba(painter_pen(addr(tracked))), 0x646464)
 set_brush(addr(tracked), addr(glyph_brush))
 set_pen_color(addr(tracked), addr(white))
 check("on black (a glyph's fill): white kept", pen_rgba(painter_pen(addr(tracked))), 0xffffff)
@@ -354,7 +363,7 @@ set_brush(addr(tracked), addr(white_brush))
 set_pen_color(addr(tracked), addr(white))
 check("no dark box: white kept", pen_rgba(painter_pen(addr(tracked))), 0xffffff)
 hooks.freelab_hooks_badge_count.restype = ctypes.c_int64
-check("dark pens kept on badges", hooks.freelab_hooks_badge_count(), 4)
+check("dark pens kept on badges and boxes", hooks.freelab_hooks_badge_count(), 5)
 wrapper(25, c_void_p, restype=ctypes.c_bool)(addr(tracked))
 check("ended: the dark palette's color again", read_text(), 0xdcdcdc)
 check("begun again: light", (wrapper(24, c_void_p, c_void_p, restype=ctypes.c_bool)(addr(tracked), addr(canvas)), read_text())[1], 0x000000)
