@@ -31,6 +31,19 @@ class TextTests(unittest.TestCase):
         self.assertEqual(missing, [u"/zz", u"U+00E9"])
 
 
+class FlagTests(unittest.TestCase):
+    def test_the_fonts_flags_listed_fontlabs_colors_first_with_their_counts(self):
+        marks = [0, 241, 1, 1, 0, 61, 241, 1]
+        self.assertEqual(qo.flag_choices(marks), [(1, u"Red (3 glyphs)", 3), (241, u"Blue (2 glyphs)", 2),
+                                                  (61, u"Hue 60 (1 glyph)", 1)])
+        self.assertEqual(qo.flag_choices([0, 0]), [], "no flag: nothing to choose")
+
+    def test_a_flags_glyphs_in_the_fonts_order(self):
+        marks = [(u"B", 1), (u"A", 0), (u"C", 1), (u"D", 241)]
+        self.assertEqual(qo.flagged(marks, 1), [u"B", u"C"])
+        self.assertEqual(qo.flagged(marks, 0), [], "none chosen")
+
+
 class ComponentTests(unittest.TestCase):
     def test_the_glyphs_components_draw_come_first(self):
         parts = {u"Aacute": [u"A", u"acutecomb"], u"acutecomb": [], u"A": [], u"Ccedilla": [u"C", u"cedilla"],

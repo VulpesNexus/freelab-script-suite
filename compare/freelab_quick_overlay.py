@@ -21,6 +21,11 @@ import sys
 TITLE = u"FreeLab Quick Overlay"
 STYLE = u"Quick Overlay"  # the new font's style: its family is the current font's, so Add Family Members lists them
 PROMPT = u"Glyphs to compare (characters, or /names):"
+FLAG_PROMPT = u"And the glyphs flagged:"
+NO_FLAG = u"None"
+NO_FLAG_IN_FONT = u"None (no glyph of the font is flagged)"
+# FontLab's flags (its Flag menu: a glyph's mark, a hue plus one; 0 for none), named as FreeLab's lists name them
+FLAG_COLORS = ((u"Red", 1), (u"Green", 121), (u"Cyan", 181), (u"Blue", 241), (u"Magenta", 301))
 DEFAULT_TEXT = u"AaGg123"  # (Overlay Fonts' own sample)
 SETTINGS_FILE = "quick_overlay.json"
 OVERLAY_ACTION = "actionOverlay_Fonts"
@@ -92,6 +97,36 @@ def resolve(tokens, names, by_code):
         elif name not in chosen:
             chosen.append(name)
     return chosen, missing
+
+
+def flag_name(mark):
+    """A flag's name: FontLab's own colors by name, any other mark by its hue."""
+    for name, value in FLAG_COLORS:
+        if value == mark:
+            return name
+    return u"Hue %d" % ((int(mark) - 1) % 360)
+
+
+def flag_choices(marks):
+    """[(mark, label, count)] of the flags among a font's glyphs' marks (0: none, left out): FontLab's own colors
+    in its menu's order, then other hues by hue; the label says how many glyphs ("Red (12 glyphs)")."""
+    counts = {}
+    for mark in marks:
+        if mark:
+            counts[mark] = counts.get(mark, 0) + 1
+    order = dict((value, i) for i, (_, value) in enumerate(FLAG_COLORS))
+    found = []
+    for mark in sorted(counts, key=lambda m: (order.get(m, len(FLAG_COLORS)), m)):
+        count = counts[mark]
+        found.append((mark, u"%s (%d glyph%s)" % (flag_name(mark), count, u"" if count == 1 else u"s"), count))
+    return found
+
+
+def flagged(glyph_marks, mark):
+    """The names of the glyphs flagged mark, in the font's order (none for 0)."""
+    if not mark:
+        return []
+    return [name for name, value in glyph_marks if value == mark]
 
 
 def with_components(chosen, components_of, limit=64):
@@ -170,6 +205,20 @@ class QuickOverlayCalls(object):
             for code in codes:
                 by_code.setdefault(code, name)
         return names, by_code
+
+    @staticmethod
+    def glyph_marks(package):
+        """[(glyph name, flag)] in the font's order. Live (2026-11-26): fgGlyph.mark reads the flag FontLab's Flag
+        menu sets (flGlyph.mark, set to 1 and 241 on two glyphs, read back through fgPackage.glyphs; 3 ms for
+        11,697 glyphs)."""
+        found = []
+        for fg in package.fgPackage.glyphs:
+            try:
+                mark = int(fg.mark)
+            except Exception:
+                mark = 0
+            found.append((u"%s" % fg.name, mark))
+        return found
 
     @staticmethod
     def layer(package, name, master):
@@ -465,17 +514,20 @@ def settings_path():
     return os.path.join(base, "FreeLab", SETTINGS_FILE)
 
 
-def load_text():
+def load_settings():
+    """{"text": the glyphs typed last, "flag": the flag chosen last (0: none)}."""
     try:
         with open(settings_path(), "rb") as handle:
             data = json.loads(handle.read().decode("utf-8"))
-        text = data.get("text")
-        return text if text else DEFAULT_TEXT
+        if isinstance(data, dict):
+            text = data.get("text")  # (left empty on purpose: a flag's glyphs alone)
+            return {"text": DEFAULT_TEXT if text is None else text, "flag": int(data.get("flag") or 0)}
     except Exception:
-        return DEFAULT_TEXT
+        pass
+    return {"text": DEFAULT_TEXT, "flag": 0}
 
 
-def save_text(text):
+def save_settings(data):
     path = settings_path()
     try:
         folder = os.path.dirname(path)
@@ -483,7 +535,7 @@ def save_text(text):
             os.makedirs(folder)
         temp = path + ".tmp"
         with open(temp, "wb") as handle:
-            handle.write(json.dumps({"text": text}).encode("utf-8"))
+            handle.write(json.dumps(data).encode("utf-8"))
         if os.path.exists(path):
             os.remove(path)
         os.rename(temp, path)
@@ -510,10 +562,22 @@ def held():
     return found
 
 
-def ask_text(family):
-    """The glyphs to compare, typed (None on Cancel)."""
-    from PythonQt.QtGui import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton
+def flag_icon(mark):
+    """A small square of a flag's color, as FontLab shows the flag (Auto Kerning's flag_color)."""
+    from PythonQt.QtGui import QColor, QPixmap, QIcon
+    color = QColor()
+    color.setHsv((int(mark) - 1) % 360, 190, 235)
+    pixmap = QPixmap(12, 12)
+    pixmap.fill(color)
+    return QIcon(pixmap)
+
+
+def ask_glyphs(family, choices):
+    """(the glyphs typed, the flag chosen or 0) of the dialog, or None on Cancel. choices: flag_choices of the
+    font's glyphs."""
+    from PythonQt.QtGui import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox
     from PythonQt.QtCore import Qt
+    settings = load_settings()
     main = main_window()
     dialog = QDialog(main) if main is not None else QDialog()
     held().append(dialog)
@@ -528,9 +592,20 @@ def ask_text(family):
     note.setWordWrap(True)
     layout.addWidget(note)
     layout.addWidget(QLabel(PROMPT))
-    field = QLineEdit(load_text())
+    field = QLineEdit(settings.get("text", DEFAULT_TEXT))
     field.selectAll()
     layout.addWidget(field)
+    layout.addWidget(QLabel(FLAG_PROMPT))
+    combo = QComboBox()
+    combo.addItem(NO_FLAG if choices else NO_FLAG_IN_FONT, 0)
+    for mark, label, _count in choices:
+        combo.addItem(flag_icon(mark), label, mark)
+    combo.setEnabled(bool(choices))
+    remembered = int(settings.get("flag") or 0)
+    for index, (mark, _label, _count) in enumerate(choices):
+        if mark == remembered:
+            combo.setCurrentIndex(index + 1)
+    layout.addWidget(combo)
     row = QHBoxLayout()
     row.addStretch(1)
     ok, cancel = QPushButton(u"Overlay"), QPushButton(u"Cancel")
@@ -543,11 +618,13 @@ def ask_text(family):
     dialog.setMinimumWidth(420)
     accepted = dialog.exec_()
     text = u"%s" % field.text
+    index = combo.currentIndex() if callable(combo.currentIndex) else combo.currentIndex
+    mark = choices[index - 1][0] if 0 < index <= len(choices) else 0
     try:
         dialog.hide()
     except Exception:
         pass
-    return text if accepted else None
+    return (text, mark) if accepted else None
 
 
 def open_overlay_with_family():
@@ -612,12 +689,17 @@ def run():
         say(u"FreeLab Quick Overlay: no font is open.")
         return None
     family = calls.family(source)
-    text = ask_text(family)
-    if text is None:
+    marks = calls.glyph_marks(source)
+    answer = ask_glyphs(family, flag_choices([mark for _, mark in marks]))
+    if answer is None:
         return None
-    save_text(text)
+    text, mark = answer
+    save_settings({"text": text, "flag": mark})
     names, by_code = calls.glyph_map(source)
     chosen, missing = resolve(parse_glyph_text(text), names, by_code)
+    for name in flagged(marks, mark):
+        if name not in chosen:
+            chosen.append(name)
     if not chosen:
         say(u"FreeLab Quick Overlay: %s has none of the glyphs asked for (%s)." % (family, u", ".join(missing)))
         return None
