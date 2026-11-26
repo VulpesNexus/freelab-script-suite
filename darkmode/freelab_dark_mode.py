@@ -292,6 +292,46 @@ PICKER_SWATCH_EDGE = "#1e1e1e"  # the border around a swatch that is not one fla
 PICKER_SWATCH_GAP = 3  # the swatch's side ends this far past a square as tall as the picker
 
 
+def swatch_flat(image, rect):
+    """Whether the swatch in `rect` of a QImage is one color (every other pixel looked at, edges included); a
+    translucent color shows over a checkerboard, and four corners alone may fall on squares of one color."""
+    first = image.pixel(rect.left(), rect.top())
+    for y in list(range(rect.top(), rect.bottom() + 1, 2)) + [rect.bottom()]:
+        for x in list(range(rect.left(), rect.right() + 1, 2)) + [rect.right()]:
+            if image.pixel(x, y) != first:
+                return False
+    return True
+
+
+def checker_rect(image, rect, max_x, max_y):
+    """`rect` grown, a row or a column at a time, while the new row or column holds only colors `rect` holds: the whole
+    checkerboard of a translucent color in a picker, of which `rect` is a part (a QRect, up to max_x and max_y)."""
+    colors = set(image.pixel(x, y) for x in range(rect.left(), rect.right() + 1)
+                 for y in range(rect.top(), rect.bottom() + 1))
+    left, top, right, bottom = rect.left(), rect.top(), rect.right(), rect.bottom()
+    if len(colors) > 4:
+        return rect
+
+    def column(x):
+        return all(image.pixel(x, y) in colors for y in range(top, bottom + 1))
+
+    def row(y):
+        return all(image.pixel(x, y) in colors for x in range(left, right + 1))
+
+    grown = True
+    while grown:
+        grown = False
+        if right + 1 < max_x and column(right + 1):
+            right, grown = right + 1, True
+        if left > 0 and column(left - 1):
+            left, grown = left - 1, True
+        if bottom + 1 < max_y and row(bottom + 1):
+            bottom, grown = bottom + 1, True
+        if top > 0 and row(top - 1):
+            top, grown = top - 1, True
+    return _core("QRect")(left, top, right - left + 1, bottom - top + 1)
+
+
 def swatch_rect(image, x, y, max_x):
     """The rectangle of the color at (x, y) in a QImage, found along its row (up to max_x) and its column: a picker's
     whole swatch. Kept as drawn: a picker painting its swatch wider than the square (Overlay Fonts', 21 by 18 pixels)
@@ -408,8 +448,9 @@ PICKED_PROP = "freelabPicked"  # a hooked island showing colors the user picked,
 # whole dock offscreen and mapped it at every repaint inside it: 132 ms for a panel's preview, 1 ms without
 # (measured live, 2026-11-26).
 FRAME_PROP = "freelabHookedFrame"
+SWATCH_PROP = "freelabSwatch"  # a palette's swatch: its checkerboard held back under an opaque color (freelab_hooks.c)
 PROPS = (ID_PROP, SEEN_PROP, QUEUED_PROP, WATCHED_PROP, CHECKED_PROP, ISLAND_PROP, SHEET_PROP, DARK_SHEET_PROP, HOOKED_PROP, NATIVE_INK_PROP,
-         PICKED_PROP, FRAME_PROP)
+         PICKED_PROP, FRAME_PROP, SWATCH_PROP)
 
 NAMED_COLORS = {
     "white": (255, 255, 255), "black": (0, 0, 0), "whitesmoke": (245, 245, 245),
@@ -2489,18 +2530,20 @@ def _effect_classes():
                                 # Some pickers paint "no color" transparent: give them the white slot others paint.
                                 painter.fillRect(inside.translated(offset), Qt.white)
                             else:
-                                inside = inside.united(swatch_rect(image, probe_x, probe_y, min(
-                                    pixmap.width(), pixmap.height() + PICKER_SWATCH_GAP)))
+                                reach = min(pixmap.width(), pixmap.height() + PICKER_SWATCH_GAP)
+                                inside = inside.united(swatch_rect(image, probe_x, probe_y, reach))
+                                # the swatch's own color when it is flat; a translucent color shows a checkerboard,
+                                # past the square looked at (a wider swatch: mapped, a gray band at its right and bottom)
+                                # and whose border took one square's color (the owner's images 185 and 186): the whole
+                                # checkerboard is kept, its edge pixels carried out, as in light mode
+                                flat = swatch_flat(image, inside)
+                                if not flat:
+                                    inside = checker_rect(image, inside, reach, pixmap.height())
                                 ring = dark_ring_image(image, inside)
                                 if ring is not None:
                                     painter.drawImage(offset, ring)
-                                # the swatch's own color when it is flat; a translucent color shows a checkerboard,
-                                # whose border took one square's color (the owner's images 185 and 186): the frame's dark
-                                corners = set(image.pixel(x, y) for x in (inside.left(), inside.right())
-                                              for y in (inside.top(), inside.bottom()))
-                                flat = len(corners) == 1 and image.pixel(probe_x, probe_y) in corners
                                 border = (inside, _gui("QColor").fromRgba(image.pixel(probe_x, probe_y)) if flat
-                                          else _gui("QColor")(PICKER_SWATCH_EDGE))
+                                          else image)
                             painter.drawPixmap(inside.translated(offset), pixmap, inside)
                         # Around that square, only the light frame is mapped: a picker that paints its
                         # swatch at full height (the mark color's) keeps its color to the edges.
@@ -2515,11 +2558,29 @@ def _effect_classes():
                             # a crisp edge on the dark frame.
                             rect, color = border
                             edge = rect.adjusted(-1, -1, 1, 1).translated(offset)
-                            for line in (QRect(edge.left(), edge.top(), edge.width(), 1),
-                                         QRect(edge.left(), edge.bottom(), edge.width(), 1),
-                                         QRect(edge.left(), edge.top(), 1, edge.height()),
-                                         QRect(edge.right(), edge.top(), 1, edge.height())):
-                                painter.fillRect(line, color)
+                            if isinstance(color, _gui("QImage")):  # (a checkerboard: its edge rows and columns)
+                                inner = rect.translated(offset)
+                                for target, strip in (
+                                        (QRect(inner.left(), edge.top(), rect.width(), 1),
+                                         QRect(rect.left(), rect.top(), rect.width(), 1)),
+                                        (QRect(inner.left(), edge.bottom(), rect.width(), 1),
+                                         QRect(rect.left(), rect.bottom(), rect.width(), 1)),
+                                        (QRect(edge.left(), inner.top(), 1, rect.height()),
+                                         QRect(rect.left(), rect.top(), 1, rect.height())),
+                                        (QRect(edge.right(), inner.top(), 1, rect.height()),
+                                         QRect(rect.right(), rect.top(), 1, rect.height()))):
+                                    painter.drawImage(target, color, strip)
+                                for x, y, sx, sy in ((edge.left(), edge.top(), rect.left(), rect.top()),
+                                                     (edge.right(), edge.top(), rect.right(), rect.top()),
+                                                     (edge.left(), edge.bottom(), rect.left(), rect.bottom()),
+                                                     (edge.right(), edge.bottom(), rect.right(), rect.bottom())):
+                                    painter.fillRect(QRect(x, y, 1, 1), _gui("QColor").fromRgba(color.pixel(sx, sy)))
+                            else:
+                                for line in (QRect(edge.left(), edge.top(), edge.width(), 1),
+                                             QRect(edge.left(), edge.bottom(), edge.width(), 1),
+                                             QRect(edge.left(), edge.top(), 1, edge.height()),
+                                             QRect(edge.right(), edge.top(), 1, edge.height())):
+                                    painter.fillRect(line, color)
                         return
                     if kind == "defringe":  # dark already (its stylesheet): only its text's fringes made gray
                         area = whole
@@ -4611,6 +4672,7 @@ def process(widget):
         _frame_picker(widget)
         _set_effect(widget, _record(widget), "picker")
         _protect(widget)
+        _mark_swatches(widget)
         return
     if name in PICKED_BARS and _native_hooked() and _picked_surface(widget):
         _hook_island(widget)  # (color controls are left alone otherwise: see PICKED_BARS)
@@ -5262,7 +5324,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 40
+HOOKS_VERSION = 41
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
@@ -5339,6 +5401,7 @@ def _hooks():
     lib.freelab_hooks_set_text_strategy.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
     lib.freelab_hooks_set_frames.argtypes = [ctypes.c_void_p, ctypes.c_int]
     lib.freelab_hooks_set_canvas.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_double, ctypes.c_double]
+    lib.freelab_hooks_set_swatches.argtypes = [ctypes.c_void_p, ctypes.c_int]
     lib.freelab_hooks_add_ink_module.argtypes = [ctypes.c_void_p]
     lib.freelab_hooks_set_subpixel.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_double]
     lib.freelab_hooks_add_svg_module.argtypes = [ctypes.c_void_p]
@@ -5428,10 +5491,12 @@ def _install_hooks(app):
         state["hooked"], state["hooked_lib"] = True, lib
         state["hooked_addresses"], state["ink_addresses"], state["picked_addresses"] = [], [], []
         state["text_addresses"], state["frame_addresses"], state["canvas_addresses"] = [], [], []
+        state["swatch_addresses"] = []
         _send_picked(state)  # (none: the library keeps the last list for the FontLab session)
         _send_text_strategy(state)
         _send_frames(state)
         _send_canvas(state)
+        _send_swatches(state)
         _update_hooked(app)
     except Exception as exc:
         _clear_native_pending()
@@ -5644,6 +5709,35 @@ def _send_frames(state):
     state["hooked_lib"].freelab_hooks_set_frames(ctypes.addressof(table), len(addresses))
 
 
+def _send_swatches(state):
+    import ctypes
+    addresses = state.get("swatch_addresses", [])
+    table = (ctypes.c_uint64 * max(1, len(addresses)))(*addresses)
+    state["hooked_lib"].freelab_hooks_set_swatches(ctypes.addressof(table), len(addresses))
+
+
+def _mark_swatches(picker):
+    """A color picker's palette swatches to the hooks (see SWATCH_PROP): their light checkerboard no longer shows at
+    the corners of an opaque color (the owner's image 187)."""
+    state = _state()
+    if not _native_hooked():
+        return
+    added = False
+    for child in picker.findChildren(_gui("QWidget")):
+        try:
+            if _class_name(child) != "ColorPickerItem" or child.property(SWATCH_PROP):
+                continue
+            pointer = _sci_pointer(child)
+            if pointer:
+                child.setProperty(SWATCH_PROP, True)
+                state.setdefault("swatch_addresses", []).append(pointer)
+                added = True
+        except Exception:
+            pass
+    if added:
+        _send_swatches(state)
+
+
 def _send_text_strategy(state):
     import ctypes
     addresses = state.get("text_addresses", [])
@@ -5669,14 +5763,17 @@ def _update_hooked(app):
     state = _state()
     if state.get("hooked_lib") is None or not state.get("hooked"):
         return
-    addresses, inks, picked, texts, frames, canvases = [], [], [], [], [], []
+    addresses, inks, picked, texts, frames, canvases, swatches = [], [], [], [], [], [], []
     for widget in app.allWidgets():
         try:
             hooked, ink, frame = widget.property(HOOKED_PROP), widget.property(NATIVE_INK_PROP), widget.property(FRAME_PROP)
-            if hooked or ink or frame:
+            swatch = widget.property(SWATCH_PROP)
+            if hooked or ink or frame or swatch:
                 pointer = _sci_pointer(widget)
                 if pointer:
-                    if frame:
+                    if swatch:
+                        swatches.append(pointer)
+                    elif frame:
                         frames.append(pointer)
                         if _class_name(widget) in TITLE_CLASSES:
                             texts.append(pointer)
@@ -5701,6 +5798,9 @@ def _update_hooked(app):
     if canvases != state.get("canvas_addresses"):
         state["canvas_addresses"] = canvases
         _send_canvas(state)
+    if swatches != state.get("swatch_addresses"):
+        state["swatch_addresses"] = swatches
+        _send_swatches(state)
     if texts != state.get("text_addresses"):
         state["text_addresses"] = texts
         _send_text_strategy(state)

@@ -1181,6 +1181,10 @@ class FakeHooks(object):
         self.canvas = (count, dark_l, paper_l)
         return count
 
+    def freelab_hooks_set_swatches(self, widgets, count):
+        self.swatches = count
+        return count
+
     def freelab_hooks_add_ink_module(self, module):
         return 2
 
@@ -1219,6 +1223,29 @@ class SwatchRectTests(DarkModeCase):
     def test_the_whole_swatch_up_to_its_frame(self):
         rect = dm.swatch_rect(self.Picker(), 5, 5, 23)
         self.assertEqual(rect.args, (1, 1, 21, 18), "the black swatch, not its frame or the arrow")
+
+    def test_a_checkerboard_is_not_flat_though_its_corners_agree(self):
+        """Images 185 and 186: a translucent color's checkerboard took one square's color as its border."""
+        class Checker(object):
+            def pixel(self, x, y):
+                return 0xffe1e1e1 if ((x - 1) // 4 + (y - 1) // 4) % 2 else 0xffffffff
+
+        class Rect(object):
+            def left(self):
+                return 1
+
+            def top(self):
+                return 1
+
+            def right(self):
+                return 17  # (16 + 1: the four corners fall on white squares)
+
+            def bottom(self):
+                return 17
+
+        self.assertTrue(len(set(Checker().pixel(x, y) for x in (1, 17) for y in (1, 17))) == 1)
+        self.assertFalse(dm.swatch_flat(Checker(), Rect()))
+        self.assertTrue(dm.swatch_flat(self.Picker(), Rect()), "the black swatch: one color")
 
     def test_the_dark_frame_around_it_is_drawn_as_it_is(self):
         """Image 153: dark mode's own dark frame, mapped again, made a faint light edge."""

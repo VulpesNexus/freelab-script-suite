@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 40
+#define FREELAB_HOOKS_VERSION 41
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -1295,11 +1295,128 @@ static void trace_pen(int hook, const void *painter, const void *in, const void 
     trace_color(hook, painter, &a, &b);
 }
 
-#define COLOR_ON_SCREEN(index, painter, call_with)                    \
+/* The swatches of the color palettes (FontLab's ColorPickerItem): each paints a light checkerboard (#e1e1e1 and white
+ * squares), then its color over it, both inside rounded, smoothed corners. Where a corner is partly covered, the
+ * checkerboard shows through the color: on light mode's light popup that is invisible, on the dark popup every swatch
+ * had a light rim at its corners, a faint frame around the dark ones (the owner's image 187, 2026-11-26). On a swatch,
+ * the checkerboard's squares are held back until the painter's next call: an opaque color filled next hides them
+ * anyway, and they are dropped; anything else (a translucent color, no color, a pen, the painter's end) draws them first,
+ * as FontLab drew them. */
+#define SWATCH_MAX 8192
+#define HELD_MAX 32
+#define CHECKER_LIGHT 0xffe1e1e1U
+#define CHECKER_WHITE 0xffffffffU
+static uintptr_t swatch_widgets[SWATCH_MAX];
+static int swatch_count;
+static struct {
+    int index;                 /* the fill it came from: H_FILL_RECT, H_FILL_RECTF or H_FILL_XYWH */
+    unsigned char rect[32];    /* its QRect or QRectF, copied */
+    int xywh[4];
+    qcolor color;
+} held[HELD_MAX];
+static const void *held_painter;
+static int held_count;
+
+static int swatch_target(const void *painter)
+{
+    void *device;
+    if (!hooks_on || !swatch_count)
+        return 0;
+    device = qt_painter_device(painter);
+    if (!device || ((int (*)(const void *))((void ***)device)[0][1])(device) != DEVICE_WIDGET)
+        return 0;
+    return in_sorted(swatch_widgets, swatch_count, (uintptr_t)device - QPAINTDEVICE_IN_QWIDGET);
+}
+
+static uint32_t qcolor_argb(const qcolor *c)
+{
+    return ((uint32_t)(c->alpha >> 8) << 24) | ((uint32_t)(c->red >> 8) << 16) | ((uint32_t)(c->green >> 8) << 8)
+           | (uint32_t)(c->blue >> 8);
+}
+
+/* The held squares drawn, on their painter (still active: every call that could end it draws them first). */
+static void flush_held(void)
+{
+    int i, n = held_count;
+    held_count = 0;
+    for (i = 0; i < n; i++) {
+        void *p = (void *)held_painter;
+        if (held[i].index == H_FILL_XYWH)
+            ORIGINAL(H_FILL_XYWH, xywh_fn)(p, held[i].xywh[0], held[i].xywh[1], held[i].xywh[2], held[i].xywh[3],
+                                           &held[i].color);
+        else
+            ORIGINAL(held[i].index, two_fn)(p, held[i].rect, &held[i].color);
+    }
+}
+
+/* Before any other call on the painter holding squares: they are drawn first. */
+static void settle_held(const void *painter)
+{
+    if (held_count && held_painter == painter)
+        flush_held();
+}
+
+/* A fill on a swatch: 1 when it is a checkerboard square, held back; an opaque fill after held squares drops them. */
+static int swatch_fill(int index, const void *painter, const void *rect, int x, int y, int w, int h, const qcolor *c)
+{
+    uint32_t argb;
+    if (held_count && held_painter != painter)
+        flush_held(); /* (another painter: the held ones are drawn where they belong) */
+    if (c->spec != QCOLOR_RGB || !swatch_target(painter))
+        return held_count ? (flush_held(), 0) : 0;
+    argb = qcolor_argb(c);
+    if (argb == CHECKER_LIGHT || argb == CHECKER_WHITE) {
+        if (held_count == HELD_MAX)
+            flush_held();
+        held_painter = painter;
+        held[held_count].index = index;
+        if (index == H_FILL_XYWH) {
+            held[held_count].xywh[0] = x;
+            held[held_count].xywh[1] = y;
+            held[held_count].xywh[2] = w;
+            held[held_count].xywh[3] = h;
+        } else {
+            memcpy(held[held_count].rect, rect, index == H_FILL_RECTF ? 32 : 16);
+        }
+        held[held_count].color = *c;
+        held_count++;
+        return 1;
+    }
+    if (held_count) {
+        if ((argb >> 24) == 255)
+            held_count = 0; /* the color covers them */
+        else
+            flush_held();
+    }
+    return 0;
+}
+
+/* The palettes' swatches (any order; at most SWATCH_MAX): see swatch_widgets. Shell sort: thousands of them (a
+ * palette per color slot), and no C library here. */
+EXPORT int freelab_hooks_set_swatches(const uint64_t *widgets, int count)
+{
+    int i, j, gap, n = 0;
+    held_count = 0;
+    for (i = 0; i < count && n < SWATCH_MAX; i++)
+        swatch_widgets[n++] = (uintptr_t)widgets[i];
+    for (gap = n / 2; gap > 0; gap /= 2)
+        for (i = gap; i < n; i++) {
+            uintptr_t v = swatch_widgets[i];
+            for (j = i; j >= gap && swatch_widgets[j - gap] > v; j -= gap)
+                swatch_widgets[j] = swatch_widgets[j - gap];
+            swatch_widgets[j] = v;
+        }
+    swatch_count = n;
+    return n;
+}
+
+#define COLOR_ON_SCREEN(index, painter, held_call, call_with)         \
     {                                                                 \
         qcolor m;                                                     \
         const qcolor *use = c;                                        \
         hook_calls[index]++;                                          \
+        if (held_call)                                                \
+            return;                                                   \
         if (on_screen(painter) && (picked_dark_ground(painter, c, &m) || map_qcolor(c, &m))) { \
             hook_changed[index]++;                                    \
             use = &m;                                                 \
@@ -1308,14 +1425,18 @@ static void trace_pen(int hook, const void *painter, const void *in, const void 
         call_with;                                                    \
     }
 
-static void w_fill_rect(void *p, const void *r, const qcolor *c) COLOR_ON_SCREEN(H_FILL_RECT, p, ORIGINAL(H_FILL_RECT, two_fn)(p, r, use))
-static void w_fill_rectf(void *p, const void *r, const qcolor *c) COLOR_ON_SCREEN(H_FILL_RECTF, p, ORIGINAL(H_FILL_RECTF, two_fn)(p, r, use))
-static void w_fill_xywh(void *p, int x, int y, int w, int h, const qcolor *c) COLOR_ON_SCREEN(H_FILL_XYWH, p, ORIGINAL(H_FILL_XYWH, xywh_fn)(p, x, y, w, h, use))
+static void w_fill_rect(void *p, const void *r, const qcolor *c)
+    COLOR_ON_SCREEN(H_FILL_RECT, p, swatch_fill(H_FILL_RECT, p, r, 0, 0, 0, 0, c), ORIGINAL(H_FILL_RECT, two_fn)(p, r, use))
+static void w_fill_rectf(void *p, const void *r, const qcolor *c)
+    COLOR_ON_SCREEN(H_FILL_RECTF, p, swatch_fill(H_FILL_RECTF, p, r, 0, 0, 0, 0, c), ORIGINAL(H_FILL_RECTF, two_fn)(p, r, use))
+static void w_fill_xywh(void *p, int x, int y, int w, int h, const qcolor *c)
+    COLOR_ON_SCREEN(H_FILL_XYWH, p, swatch_fill(H_FILL_XYWH, p, 0, x, y, w, h, c), ORIGINAL(H_FILL_XYWH, xywh_fn)(p, x, y, w, h, use))
 static void w_set_pen_color(void *p, const qcolor *c)
 {
     qcolor m;
     const qcolor *use = c;
     hook_calls[H_SET_PEN_COLOR]++;
+    settle_held(p);
     if (on_screen(p)) {
         if (picked_frame(p, c, &m) || dark_on_box(p, c, &m)) {
             hook_changed[H_SET_PEN_COLOR]++;
@@ -1344,6 +1465,7 @@ static void w_fill_xywh_global(void *p, int x, int y, int w, int h, int global)
 {
     qcolor c, m;
     hook_calls[H_FILL_XYWH_GLOBAL]++;
+    settle_held(p);
     if (on_screen(p)) {
         c.spec = QCOLOR_INVALID;
         qt_color_from_global(&c, global);
@@ -1371,6 +1493,7 @@ static void w_set_pen(void *p, const void *pen)
     int copied = 0;
     const void *use = pen;
     hook_calls[H_SET_PEN]++;
+    settle_held(p);
     if (on_screen(p)) {
         qcolor c, frame;
         qt_pen_color(pen, &c);
@@ -1414,6 +1537,7 @@ static void w_set_pen(void *p, const void *pen)
         int copied = 0;                                              \
         const void *use = brush;                                     \
         hook_calls[index]++;                                         \
+        settle_held(painter);                                        \
         if (on_screen(painter) && !(index == H_SET_BRUSH && picked_brush(painter, brush))) \
             use = mapped_brush(brush, &tmp, &copied);                \
         hook_changed[index] += copied;                               \
@@ -1446,6 +1570,7 @@ static void w_set_pen_style(void *p, int style)
     qhandle tmp;
     int ink = 0;
     hook_calls[H_SET_PEN_STYLE]++;
+    settle_held(p);
     if (style != PEN_NONE && (on_screen(p) || (ink = ink_target(p)) != 0)) {
         set_qcolor(&black, 0xff000000U);
         if (ink ? ink_qcolor(&black, &m) : (!dark_on_badge(p, &black) && map_qcolor(&black, &m))) {
@@ -1469,6 +1594,7 @@ static void w_set_font(void *p, const void *font)
 {
     void *device;
     hook_calls[H_SET_FONT]++;
+    settle_held(p);
     if (hooks_on && text_strategy_count && (device = qt_painter_device(p)) != 0
         && ((int (*)(const void *))((void ***)device)[0][1])(device) == DEVICE_WIDGET
         && in_sorted(text_strategy_widgets, text_strategy_count, (uintptr_t)device - QPAINTDEVICE_IN_QWIDGET)) {
@@ -1488,6 +1614,7 @@ static void w_set_brush_style(void *p, int style)
     qcolor black, m;
     qhandle tmp;
     hook_calls[H_SET_BRUSH_STYLE]++;
+    settle_held(p);
     note_badge(p, 0);
     note_dark_box(p, 0); /* (black: no box of either kind, see dark_box_color) */
     note_light_box(p, 0, 0);
@@ -1549,6 +1676,7 @@ static void trace_picture(int hook, const void *painter, const void *picture, in
         const void *use = image;                                      \
         int mode = screen_mode(painter);                              \
         hook_calls[index]++;                                          \
+        settle_held(painter);                                         \
         if (mode && !picked_target(painter))                          \
             use = mapped_image(image, mode);                          \
         hook_changed[index] += use != image;                          \
@@ -1623,6 +1751,7 @@ static void w_draw_pixmap_rect(void *p, const void *target, const void *pixmap)
     const void *use = pixmap;
     int mode = screen_mode(p);
     hook_calls[H_DRAW_PIXMAP_RECT]++;
+    settle_held(p);
     if (mode && !picked_target(p))
         use = mapped_pixmap(pixmap, mode);
     hook_changed[H_DRAW_PIXMAP_RECT] += use != pixmap;
@@ -1635,6 +1764,7 @@ static void w_draw_pixmap_pt(void *p, const void *at, const void *pixmap)
     const void *use = pixmap;
     int mode = screen_mode(p);
     hook_calls[H_DRAW_PIXMAP_PT]++;
+    settle_held(p);
     if (mode && !picked_target(p))
         use = mapped_pixmap(pixmap, mode);
     hook_changed[H_DRAW_PIXMAP_PT] += use != pixmap;
@@ -1659,6 +1789,7 @@ static void *w_painter_on(void *painter, void *device)
 static void w_painter_off(void *painter)
 {
     hook_calls[H_PAINTER_OFF]++;
+    settle_held(painter);
     forget_painter(painter);
     ORIGINAL(H_PAINTER_OFF, painter_off_fn)(painter);
 }
@@ -1667,6 +1798,7 @@ static char w_painter_begin(void *painter, void *device)
 {
     char result = ORIGINAL(H_PAINTER_BEGIN, painter_begin_fn)(painter, device);
     hook_calls[H_PAINTER_BEGIN]++;
+    settle_held(painter);
     forget_painter(painter);
     if (result)
         note_painter(painter);
@@ -1677,6 +1809,7 @@ static char w_painter_begin(void *painter, void *device)
 static char w_painter_end(void *painter)
 {
     hook_calls[H_PAINTER_END]++;
+    settle_held(painter);
     forget_painter(painter);
     return ORIGINAL(H_PAINTER_END, painter_end_fn)(painter);
 }
