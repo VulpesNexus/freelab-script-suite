@@ -354,7 +354,9 @@ SCRIPT_ISLAND_CLASSES = ("YContinueWidget",)
 # widget (a search field's line edit keeps its placeholder's ink), not hooked.
 QT_DRAWN_BASES = ("QLineEdit", "QAbstractButton", "QAbstractScrollArea", "QAbstractSpinBox", "QComboBox",
                   "QLabel", "QAbstractSlider", "QTabBar")
-PROPS = (ID_PROP, SEEN_PROP, QUEUED_PROP, WATCHED_PROP, CHECKED_PROP, ISLAND_PROP, SHEET_PROP, DARK_SHEET_PROP, HOOKED_PROP, NATIVE_INK_PROP)
+PICKED_PROP = "freelabPicked"  # a hooked island showing colors the user picked, drawn as they are (see PICKED_WIDGETS)
+PROPS = (ID_PROP, SEEN_PROP, QUEUED_PROP, WATCHED_PROP, CHECKED_PROP, ISLAND_PROP, SHEET_PROP, DARK_SHEET_PROP, HOOKED_PROP, NATIVE_INK_PROP,
+         PICKED_PROP)
 
 NAMED_COLORS = {
     "white": (255, 255, 255), "black": (0, 0, 0), "whitesmoke": (245, 245, 245),
@@ -949,6 +951,28 @@ REGROUND_WINDOWS = ("ActionOverlay",)
 # out hollow in the list and dark olive in the preview). Not the window's other widgets, whose light grays are
 # borders and fields.
 REGROUND_LIGHT_WIDGETS = ("FontPreviewWidget", "ActionOverlayList")  # (the class, or its parent's)
+# Under the native engine, the same widgets show the colors as picked: the hooks map their grounds and FontLab's own
+# grays, and leave the samples' fills and pictures as they are (the owner, November 26, image 152: a black pick shown
+# white "feels like overreach"; images 150 and 151: white picks, white on the rows' white paper, came out hollow or not
+# at all). The list's rows are FontLab's own painting, so its viewport is hooked too, not inked.
+PICKED_WIDGETS = ("FontPreviewWidget",)
+PICKED_LISTS = ("ActionOverlayList",)  # (by their viewports)
+
+
+def _picked_surface(widget):
+    """A widget of the Overlay window showing picked colors (PICKED_WIDGETS, or a PICKED_LISTS list's viewport)."""
+    try:
+        parent = widget.parentWidget()
+        if _class_name(widget) not in PICKED_WIDGETS and not (
+                parent is not None and _class_name(parent) in PICKED_LISTS
+                and _prop(widget, "objectName") == "qt_scrollarea_viewport"):
+            return False
+        window = widget
+        while window is not None and not window.isWindow():
+            window = window.parentWidget()
+        return window is not None and _class_name(window) in REGROUND_WINDOWS
+    except Exception:
+        return False
 
 
 def _regrounds(effect):
@@ -4531,7 +4555,9 @@ def process(widget):
         widget.setProperty(ISLAND_PROP, "island")
         _make_island(widget)
         return
-    if kind == "ink" and _native_ink_target(widget):
+    if kind == "ink" and _native_hooked() and _picked_surface(widget):
+        _hook_island(widget)  # (a list's viewport whose rows FontLab paints: see PICKED_WIDGETS)
+    elif kind == "ink" and _native_ink_target(widget):
         _native_ink(widget)
     elif kind in ("ink", "edges", "title", "subpixel", "defringe"):
         _set_effect(widget, _record(widget), kind)
@@ -5063,7 +5089,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 25
+HOOKS_VERSION = 26
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
@@ -5136,6 +5162,7 @@ def _hooks():
     lib.freelab_hooks_install.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_double]
     lib.freelab_hooks_set_hooked.argtypes = [ctypes.c_void_p, ctypes.c_int]
     lib.freelab_hooks_set_ink.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    lib.freelab_hooks_set_picked.argtypes = [ctypes.c_void_p, ctypes.c_int]
     lib.freelab_hooks_add_ink_module.argtypes = [ctypes.c_void_p]
     lib.freelab_hooks_set_subpixel.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_double]
     lib.freelab_hooks_add_svg_module.argtypes = [ctypes.c_void_p]
@@ -5223,7 +5250,8 @@ def _install_hooks(app):
             # a slot it could not write: the library put back the ones it had written
             raise RuntimeError("the native engine could not hook FontLab's calls")
         state["hooked"], state["hooked_lib"] = True, lib
-        state["hooked_addresses"], state["ink_addresses"] = [], []
+        state["hooked_addresses"], state["ink_addresses"], state["picked_addresses"] = [], [], []
+        _send_picked(state)  # (none: the library keeps the last list for the FontLab session)
         _update_hooked(app)
     except Exception as exc:
         _clear_native_pending()
@@ -5344,6 +5372,23 @@ def _hook_island(widget):
     if pointer and pointer not in state.setdefault("hooked_addresses", []):
         state["hooked_addresses"].append(pointer)
         _send_hooked(state)
+    if pointer and _picked_surface(widget) and pointer not in state.setdefault("picked_addresses", []):
+        widget.setProperty(PICKED_PROP, True)
+        state["picked_addresses"].append(pointer)
+        _send_picked(state)
+        widget.update()
+
+
+def _native_hooked():
+    state = _state()
+    return state.get("engine") == "native" and bool(state.get("hooked"))
+
+
+def _send_picked(state):
+    import ctypes
+    addresses = state.get("picked_addresses", [])
+    table = (ctypes.c_uint64 * max(1, len(addresses)))(*addresses)
+    state["hooked_lib"].freelab_hooks_set_picked(ctypes.addressof(table), len(addresses))
 
 
 def _update_hooked(app):
@@ -5352,7 +5397,7 @@ def _update_hooked(app):
     state = _state()
     if state.get("hooked_lib") is None or not state.get("hooked"):
         return
-    addresses, inks = [], []
+    addresses, inks, picked = [], [], []
     for widget in app.allWidgets():
         try:
             hooked, ink = widget.property(HOOKED_PROP), widget.property(NATIVE_INK_PROP)
@@ -5360,11 +5405,16 @@ def _update_hooked(app):
                 pointer = _sci_pointer(widget)
                 if pointer:
                     (addresses if hooked else inks).append(pointer)
+                    if hooked and widget.property(PICKED_PROP):
+                        picked.append(pointer)
         except Exception:
             pass
     if addresses != state.get("hooked_addresses"):
         state["hooked_addresses"] = addresses
         _send_hooked(state)
+    if picked != state.get("picked_addresses"):
+        state["picked_addresses"] = picked
+        _send_picked(state)
     if inks != state.get("ink_addresses"):
         state["ink_addresses"] = inks
         _send_ink(state)

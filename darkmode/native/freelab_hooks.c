@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 25
+#define FREELAB_HOOKS_VERSION 26
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -96,6 +96,19 @@ static int subpixel_widget(const void *device)
  * scrolling. */
 static uintptr_t ink_widgets[KEEP_MAX];
 static int ink_count;
+
+/* Surfaces that show colors the user picked (Overlay Fonts' sample rows and preview): of the hooked
+ * surfaces, those whose brushes and images are drawn as they are. FontLab fills each sample glyph with
+ * a brush of the layer's color, or draws it from an image in that color; mapped, a black pick came out
+ * white and a white one dark (the owner: "black or near-black hues being displayed at pure white when
+ * the user specifically selects this kind of color feels like overreach", image 152). Their grounds
+ * (fillRect) and pens are mapped as anywhere, and so is FontLab's own gray of the rows' pills. */
+#define PICKED_MAX 64
+static uintptr_t picked_widgets[PICKED_MAX];
+static int picked_count;
+#define PICKED_INTERFACE_GRAY 0xa0a2a4U /* the pill behind a row's font name */
+
+static int picked_target(const void *painter);
 
 static int in_sorted(const uintptr_t *set, int count, uintptr_t value)
 {
@@ -356,6 +369,23 @@ static int ink_target(const void *painter)
     if (!device || ((int (*)(const void *))((void ***)device)[0][1])(device) != DEVICE_WIDGET)
         return 0;
     return in_sorted(ink_widgets, ink_count, (uintptr_t)device - QPAINTDEVICE_IN_QWIDGET);
+}
+
+static int picked_target(const void *painter)
+{
+    void *device;
+    if (!hooks_on || !picked_count)
+        return 0;
+    device = qt_painter_device(painter);
+    if (!device || ((int (*)(const void *))((void ***)device)[0][1])(device) != DEVICE_WIDGET)
+        return 0;
+    return in_sorted(picked_widgets, picked_count, (uintptr_t)device - QPAINTDEVICE_IN_QWIDGET);
+}
+
+/* A brush set on a picked surface: drawn as it is, unless it is FontLab's interface gray. */
+static int picked_brush(const void *painter, const void *brush)
+{
+    return picked_target(painter) && (qt_color_rgba(qt_brush_color(brush)) & 0xffffffU) != PICKED_INTERFACE_GRAY;
 }
 
 /* White pens stay white: FontLab draws white lines and text only where they stand out, on a color
@@ -1093,7 +1123,7 @@ static void w_set_pen(void *p, const void *pen)
         int copied = 0;                                              \
         const void *use = brush;                                     \
         hook_calls[index]++;                                         \
-        if (on_screen(painter))                                      \
+        if (on_screen(painter) && !(index == H_SET_BRUSH && picked_brush(painter, brush))) \
             use = mapped_brush(brush, &tmp, &copied);                \
         hook_changed[index] += copied;                               \
         trace_brush(index, painter, brush, use);                     \
@@ -1110,9 +1140,9 @@ static void w_set_brush(void *p, const void *brush)
 }
 
 /* setPen(Qt::PenStyle) and setBrush(Qt::BrushStyle) make Qt's black pen or brush of that style
- * (QPen(style), QBrush(Qt::black, style)): FontLab writes the Fonts panel's file names with
- * setPen(Qt::SolidLine), which stayed black on the dark list. On screen they are set as the mapped
- * black instead, through the hooked setPen(QPen) and setBrush(QBrush); no pen or no brush passes. */
+ * (QPen(style), QBrush(Qt::black, style)), as an invalid color does (painted_rgba). On screen they
+ * are set as the mapped black instead, through the hooked setPen(QPen) and setBrush(QBrush); no pen
+ * or no brush passes (FontLab sets Qt::NoPen before each glyph it fills). */
 #define PEN_NONE 0
 typedef void (*style_fn)(void *, int);
 
@@ -1193,7 +1223,7 @@ static void w_fill_xywh_brush(void *p, int x, int y, int w, int h, const void *b
         const void *use = image;                                      \
         int mode = screen_mode(painter);                              \
         hook_calls[index]++;                                          \
-        if (mode)                                                     \
+        if (mode && !picked_target(painter))                          \
             use = mapped_image(image, mode);                          \
         hook_changed[index] += use != image;                          \
         call_with;                                                    \
@@ -1266,7 +1296,7 @@ static void w_draw_pixmap_rect(void *p, const void *target, const void *pixmap)
     const void *use = pixmap;
     int mode = screen_mode(p);
     hook_calls[H_DRAW_PIXMAP_RECT]++;
-    if (mode)
+    if (mode && !picked_target(p))
         use = mapped_pixmap(pixmap, mode);
     hook_changed[H_DRAW_PIXMAP_RECT] += use != pixmap;
     ORIGINAL(H_DRAW_PIXMAP_RECT, two_fn)(p, target, use);
@@ -1277,7 +1307,7 @@ static void w_draw_pixmap_pt(void *p, const void *at, const void *pixmap)
     const void *use = pixmap;
     int mode = screen_mode(p);
     hook_calls[H_DRAW_PIXMAP_PT]++;
-    if (mode)
+    if (mode && !picked_target(p))
         use = mapped_pixmap(pixmap, mode);
     hook_changed[H_DRAW_PIXMAP_PT] += use != pixmap;
     ORIGINAL(H_DRAW_PIXMAP_PT, two_fn)(p, at, use);
@@ -1606,6 +1636,22 @@ EXPORT int freelab_hooks_set_ink(const uint64_t *widgets, int count)
 {
     ink_count = set_sorted(ink_widgets, widgets, count);
     return ink_count;
+}
+
+/* The surfaces showing picked colors (any order; at most PICKED_MAX; each also hooked); returns how many. */
+EXPORT int freelab_hooks_set_picked(const uint64_t *widgets, int count)
+{
+    int i, j, n = 0;
+    for (i = 0; i < count && n < PICKED_MAX; i++)
+        picked_widgets[n++] = (uintptr_t)widgets[i];
+    for (i = 1; i < n; i++) {
+        uintptr_t v = picked_widgets[i];
+        for (j = i - 1; j >= 0 && picked_widgets[j] > v; j--)
+            picked_widgets[j + 1] = picked_widgets[j];
+        picked_widgets[j + 1] = v;
+    }
+    picked_count = n;
+    return n;
 }
 
 EXPORT void freelab_hooks_ink_counts(int64_t *calls, int64_t *changed)

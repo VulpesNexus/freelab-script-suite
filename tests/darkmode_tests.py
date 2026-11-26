@@ -1204,6 +1204,10 @@ class FakeHooks(object):
         self.calls.append("set_ink")
         return count
 
+    def freelab_hooks_set_picked(self, widgets, count):
+        self.picked = count
+        return count
+
     def freelab_hooks_add_ink_module(self, module):
         return 2
 
@@ -1639,6 +1643,33 @@ class EngineTests(DarkModeCase):
         dm.restore()
         self.assertEqual(self.search.font.styleStrategy(), 1, "its own font again")
         self.assertFalse(self.search.testAttribute(qtfakes.Qt.WA_SetFont), "inherited again")
+
+    def test_overlay_samples_are_hooked_and_shown_as_picked(self):
+        """The owner, November 26 (images 150 to 152): Overlay Fonts' samples showed a black pick white, and white
+        picks hollow or not at all. Under the native engine, its preview and its list's rows (FontLab paints them) are
+        hooked, and the hooks draw their samples' colors as picked."""
+        hooks = FakeHooks()
+        self.patch("_hooks", lambda: hooks)
+        self.patch("_palette_table", lambda palette: __import__("ctypes").c_uint32(0))
+        self.patch("_sci_pointer", lambda widget: 0x10000 + id(widget) % 0xffff * 16)
+        self.save(engine="native")
+        window = FakeWidget("ActionOverlay", "ActionOverlay", window=True)
+        rows = FakeWidget("ActionOverlayList", "listFonts", parent=window, inherits=("QAbstractItemView",))
+        viewport = FakeWidget("QWidget", "qt_scrollarea_viewport", parent=rows)
+        preview = FakeWidget("FontPreviewWidget", "preview", parent=window)
+        elsewhere = FakeWidget("FontPreviewWidget", "preview", parent=self.dock)
+        self.app.roots.append(window)
+        self.on()
+        self.assertTrue(dm._picked_surface(viewport))
+        self.assertTrue(dm._picked_surface(preview))
+        self.assertFalse(dm._picked_surface(rows), "the list itself paints no rows")
+        self.assertFalse(dm._picked_surface(elsewhere), "only in the Overlay window")
+        dm._hook_island(viewport)
+        dm._hook_island(preview)
+        self.assertTrue(viewport.property(dm.PICKED_PROP) and preview.property(dm.PICKED_PROP))
+        self.assertEqual(hooks.picked, 2)
+        dm._hook_island(viewport)
+        self.assertEqual(hooks.picked, 2, "once each")
 
     def test_switching_engines_rebuilds(self):
         hooks = FakeHooks()
