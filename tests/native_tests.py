@@ -620,6 +620,15 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(out[0], pixels(rows[0]), "colored text's edges add up to its color: kept")
         self.assertEqual(out[1], pixels(rows[1]), "a run longer than text edges that adds up to a color: a bar, kept")
 
+    def test_defringe_keeps_a_fill_under_the_text(self):
+        """The Fonts panel's style dot, 2026-11-27: a light R on a blue disc cut the disc into short runs, which came out
+        a gray band across the disc. Three identical pixels side by side or more are a fill, kept."""
+        g, blue, light, warm = (40, 40, 40), (126, 188, 255), (220, 220, 220), (126, 125, 85)
+        row = [g, g, blue, blue, blue, blue, warm, light, blue, blue, blue, g, g]
+        out = self.defringe([row])
+        self.assertEqual(out[0][2 * 4:6 * 4], pixels([blue] * 4), "the disc kept")
+        self.assertEqual(out[0][8 * 4:11 * 4], pixels([blue] * 3), "on both sides")
+
     def test_defringe_grays_small_text_edges_across_letters(self):
         g = (30, 30, 30)
         warm, cool = (170, 120, 60), (60, 120, 170)  # small light text: edges running across letters, no core

@@ -153,7 +153,18 @@ ISLAND_CLASSES = frozenset((
     # what it showed then (the fonts still opening); as ink, its text came out doubled and the style dot's letter
     # light (the owner's image 157, after a relaunch, 2026-11-26)
     "CIconView",
+    # Adjust Kerning's counters: a pill FontLab paints on the dialog's own dark ground; as ink, that ground was mapped
+    # light, the pill in a light square (the owner's image 197, 2026-11-27)
+    "YRoundedLabel",
 ))
+# Classes always mapped as ink. Find Outline's two previews, left to the look at start, came out one an island (empty
+# when found: its outlines then black on the dark ground) and one ink (white outlines), side by side (the owner's
+# image 201, 2026-11-27).
+INK_CLASSES = frozenset(("YPathPreview",))
+# Web pages FontLab shows as they come (Software Update's news, FontLab's own HTML with its colors set for white paper:
+# blue and red banners, dark text on them). Mapped as ink, they came out garbled (the owner's image 203, 2026-11-27):
+# their HTML is recolored instead, as a stylesheet is (see _show_page).
+PAGE_NAMES = frozenset((("FvUpdateWindow", "QTextBrowser", "textBrowser"),))
 ISLAND_NAMES = frozenset((
     ("QListWidget", "historyList"),  # its selected row is painted light
     # Open Installed Fonts: each font's name on a pill its delegate paints; as ink, the names came out garbled
@@ -412,7 +423,7 @@ SWEEP_MS = 500  # how often to look for widgets FontLab created or showed (750 w
 FULL_SWEEP_EVERY = 60  # every Nth sweep revisits every widget (replaced stylesheets, new icons): every 30 s
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 157
+NATIVE_VERSION = 158
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -434,7 +445,9 @@ NATIVE_INK_PROP = "freelabNativeInk"  # a list whose dark pens the native engine
 # viewports' dark pens are mapped as they are set (in FontLab's program and in Qt5Widgets), with no
 # effect. Only lists whose delegates leave the drawing to Qt (Metrics' sets colors only); a delegate
 # of FontLab's that paints its rows (FontAudit's badges, the Elements tree) keeps the ink effect.
-NATIVE_INK_DELEGATES = ("QStyledItemDelegate", "QItemDelegate", "MetricsDataDelegate")
+# LanguagesDelegate: the preferences' FontAudit list (and Font Info's languages): its checked boxes are blue with a white tick,
+# which the ink effect turned dark (the owner's image 202, 2026-11-27); its rows are text Qt draws.
+NATIVE_INK_DELEGATES = ("QStyledItemDelegate", "QItemDelegate", "MetricsDataDelegate", "LanguagesDelegate")
 # Islands Qt draws (from their stylesheet), out of the hooks' reach: the script engine's island
 # under either engine (the continue edge's white line stayed white).
 SCRIPT_ISLAND_CLASSES = ("YContinueWidget",)
@@ -3492,6 +3505,10 @@ def widget_kind(widget, canvas=True):
         return "island"
     if cls in KEYED_CLASSES:
         return "keyed"
+    if cls in INK_CLASSES:
+        return "ink"
+    if _page(widget):
+        return "page"
 
     parent = widget.parentWidget()
     if parent is not None:
@@ -3520,6 +3537,76 @@ def widget_kind(widget, canvas=True):
     if not found:
         return None
     return LEGACY_KINDS.get(str(found), str(found))
+
+
+def _dark_field(widget):
+    """A field whose ground is dark: its palette's base (the dark palette's, or a stylesheet's dark mode darkened).
+    Never raises."""
+    try:
+        return _color_lightness(widget.palette.color(_gui("QPalette").Base)) < 0.5
+    except Exception:
+        return False
+
+
+def _page(widget):
+    """One of PAGE_NAMES (the browser), or its viewport. Never raises."""
+    try:
+        browser = widget
+        if _prop(widget, "objectName") == "qt_scrollarea_viewport" and widget.parentWidget() is not None:
+            browser = widget.parentWidget()
+        if _class_name(browser) not in set(name[1] for name in PAGE_NAMES):
+            return False
+        return (_class_name(browser.window()), _class_name(browser), _prop(browser, "objectName")) in PAGE_NAMES
+    except Exception:
+        return False
+
+
+PAGE_LINK = "#6aa6ff"  # a link's color on a dark page, where the page gives it none
+
+
+def recolor_html(html):
+    """An HTML page's own colors turned dark as a stylesheet's are (recolor_sheet: inline styles), and its bgcolor
+    attributes as backgrounds."""
+    import re
+    html = recolor_sheet(html)
+
+    def background(match):
+        dark = recolor_sheet(u"background-color:%s;" % match.group(2))
+        value = re.search(u"background-color:([^;]*);", dark)
+        return match.group(1) + (value.group(1).strip() if value else match.group(2)) + match.group(3)
+
+    return re.sub(u'(bgcolor=")([^"]*)(")', background, html)
+
+
+def _show_page(widget):
+    """A page turned dark (PAGE_NAMES): its HTML recolored as a stylesheet is, its effect taken out. The owner, of a
+    light page in the dark window (image 204): "no way to remove the white base without affecting the text badly?"
+    Mapping its pixels garbled the text on its banners (image 203); its own colors, recolored, keep it clean."""
+    browser = widget.parentWidget() if _prop(widget, "objectName") == "qt_scrollarea_viewport" else widget
+    record = _record(widget)
+    _clear_effect(widget, record)
+    _protect(widget)
+    if browser is not widget:
+        return  # (the browser does the page)
+    page = _record(browser)
+    try:
+        html = browser.toHtml()
+        if page.get("dark_html") == html:
+            return
+        if "palette" not in page:
+            attribute = _core("Qt").WA_SetPalette
+            page["palette"] = _gui("QPalette")(_prop(browser, "palette")) if browser.testAttribute(attribute) else None
+        palette = _gui("QPalette")(_prop(browser, "palette"))
+        palette.setColor(_gui("QPalette").Link, _gui("QColor")(PAGE_LINK))
+        browser.setPalette(palette)
+        dark = recolor_html(html)
+        page["html"] = html
+        page["dark_html"] = browser.toHtml() if dark == html else None
+        if dark != html:
+            browser.setHtml(dark)
+            page["dark_html"] = browser.toHtml()
+    except Exception as exc:
+        _note_error("page", exc)
 
 
 def _is_one_of(widget, cls, names):
@@ -4497,6 +4584,10 @@ def _undo_widget(widget, keep_props=False, keep_placeholder=False):
         if "palette" in record:
             palette = record.pop("palette")
             widget.setPalette(palette if palette is not None else _gui("QPalette")())  # empty: inherit again
+        if "html" in record:  # a page turned dark (_show_page): its own HTML back, unless it changed since
+            html, dark = record.pop("html"), record.pop("dark_html", None)
+            if dark is None or widget.toHtml() == dark:
+                widget.setHtml(html)
         if "autofill" in record:
             widget.setAutoFillBackground(record.pop("autofill"))
         if "styled" in record:
@@ -4728,6 +4819,11 @@ def process(widget):
         _note_sheet_as_seen(widget)
         return
     kind = widget_kind(widget, canvas)
+    if kind not in (None, "island"):
+        _unhook(widget)  # (hooked as an island before, an effect's kind now: mapped by the hooks and the effect, twice)
+    if kind == "page":
+        _show_page(widget)
+        return
     if kind == "island":
         _island(widget)
         if is_content(widget):
@@ -4751,6 +4847,16 @@ def process(widget):
         _recolor_editor(widget)  # after its stylesheet: a repolish could reset QScintilla's defaults
     if kind is None and visible_unchecked and _shows_white_artwork(widget):
         visible_unchecked = False  # FontLab's logo: white on purpose, no effect (the ink effect blackened its edges)
+    if kind == "ink" and widget.inherits("QLineEdit") and _native_hooked() and _dark_field(widget):
+        # Under the native engine, a field on a dark ground is drawn by Qt right as it is, its text grayed by its font
+        # (_gray_text) rather than by an effect. The ink effect mapped Qt's light caret, repainted alone as it blinks,
+        # to the field's ground: no caret to be seen in some fields (the owner's image 198, 2026-11-27).
+        record = _record(widget)
+        _clear_effect(widget, record)
+        _gray_text(widget)
+        _set_placeholder(widget)
+        _protect(widget)
+        return
     if _plain_input(widget):
         kind, visible_unchecked = None, False  # Fusion draws it from the dark palette: right as it is
         if not _has_defringe(widget):
@@ -5337,7 +5443,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 44
+HOOKS_VERSION = 46
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
@@ -5554,9 +5660,10 @@ def _island(widget):
 
 
 def _qt_drawn_styled(widget):
-    """A widget of Qt's own drawing (QT_DRAWN_BASES) with a stylesheet, but a tab bar (its names: see _hook_island)."""
-    return bool(_prop(widget, "styleSheet")) and not widget.inherits("QTabBar") \
-        and any(widget.inherits(base) for base in QT_DRAWN_BASES)
+    """A widget of Qt's own class and drawing (QT_DRAWN_BASES) with a stylesheet, but a tab bar (its names: see
+    _hook_island). FontLab's subclasses paint themselves (YRoundedLabel's pill): the hooks map them."""
+    return bool(_prop(widget, "styleSheet")) and _class_name(widget).startswith("Q") \
+        and not widget.inherits("QTabBar") and any(widget.inherits(base) for base in QT_DRAWN_BASES)
 
 
 def _unhook(widget):
@@ -5644,9 +5751,12 @@ def _hook_island(widget):
     """Leave the island's painting to the hooks: no light look, no effect. Qt still draws its
     stylesheet and icons, which are darkened as any widget's."""
     first = widget.property(HOOKED_PROP) is None
-    _clear_effect(widget, _record(widget))  # an effect dark mode set before it was found in a hooked island
+    if not (_class_name(widget) in DEFRINGED_ISLANDS and _record(widget).get("kind") == "defringe"):
+        _clear_effect(widget, _record(widget))  # an effect dark mode set before it was found in a hooked island
     widget.setProperty(HOOKED_PROP, True)
-    if NATIVE_GRAY_TEXT and not widget.inherits("QTabBar"):  # (tab titles keep ClearType: see TITLE_TEXT_STRATEGY)
+    if _class_name(widget) in DEFRINGED_ISLANDS:
+        _set_effect(widget, _record(widget), "defringe")
+    elif NATIVE_GRAY_TEXT and not widget.inherits("QTabBar"):  # (tab titles keep ClearType: see TITLE_TEXT_STRATEGY)
         _gray_text(widget)
     _protect(widget)  # dark as it is painted: an effect around it (the font window's ink) must not map it again
     _darken_sheet(widget)
@@ -5672,6 +5782,12 @@ def _hook_island(widget):
         _send_picked(state)
         widget.update()
 
+
+# Hooked islands whose text keeps ClearType, its colored edges grayed by a defringe effect over the hooks' mapping: the
+# Fonts panel's style letters (I, B, BI) in grayscale smoothing came out thin and dim, a thin italic I barely seen, and
+# the R on its disc faint (the owner's image 199, 2026-11-27: "passable, but leaves much to be desired"). ClearType alone
+# had its blue and brown edges read as breaks in the letters (image 148).
+DEFRINGED_ISLANDS = ("CIconView",)
 
 FRAME_KINDS = ("title", "keyed")  # the panels (TITLE_CLASSES) and the dock (KEYED_CLASSES)
 

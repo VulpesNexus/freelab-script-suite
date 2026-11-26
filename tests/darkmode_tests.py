@@ -235,6 +235,18 @@ class ShadeAndPickerTests(DarkModeCase):
         dm.run_queue()
         self.assertEqual(self.content.styleSheet, PANEL_SHEET)
 
+    def test_a_page_is_recolored_as_its_html(self):
+        """The owner's images 203 and 204, 2026-11-27: Software Update's page, mapped, garbled the text on its banners;
+        shown as designed, it was a white block in the dark window. Its own colors are recolored."""
+        page = (u'<body style=" background-color:#ffffff;"><p style=" color:#000000;">FontLab 8</p>'
+                u'<span style=" color:#ffffff; background-color:#e8112d;">Upgrade</span><td bgcolor="#f0f0f0">x</td>')
+        dark = dm.recolor_html(page)
+        self.assertNotIn(u"#ffffff;\"><p", dark, "the page's paper dark")
+        self.assertIn(u"background-color:#1f1f1f", dark)
+        self.assertNotIn(u"color:#000000", dark, "its text light")
+        self.assertNotIn(u'bgcolor="#f0f0f0"', dark, "a cell's bgcolor dark too")
+        self.assertIn(u"Upgrade", dark)
+
     def test_a_sheet_noted_as_seen_is_fontlabs_not_ours(self):
         """The owner's image 193, 2026-11-27: the Font Info panel's Change... button white. FontLab's sheet, noted as
         seen, passed for one dark mode had darkened; and switching off put back an original kept from an earlier sheet

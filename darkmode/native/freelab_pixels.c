@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 157
+#define FREELAB_PIXELS_VERSION 158
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -346,9 +346,15 @@ EXPORT void freelab_map_lightness(uint8_t *pixels, int64_t count, int64_t width,
 #define DEFRINGE_REACH 2
 #define DEFRINGE_MAX_WIDTH 16384
 #define DEFRINGE_MAX_FRINGE 6   /* longer runs of mixed colors are text edges only when they add up to gray */
+#define DEFRINGE_FILL_REPEAT 3  /* a color this many times in one run: a fill under the text, not a fringe */
 #define DEFRINGE_PAIR_SPREAD 48 /* most spread of a coreless run's mean color: edges that add up to gray */
 
 static uint8_t defringe_core[DEFRINGE_MAX_WIDTH];
+static uint8_t defringe_fill[DEFRINGE_MAX_WIDTH]; /* a run's pixels in a stretch of one color (a fill) */
+static int same_rgb(const uint8_t *a, const uint8_t *b)
+{
+    return a[0] == b[0] && a[1] == b[1] && a[2] == b[2];
+}
 
 static int strongest_channel(const uint8_t *px)
 {
@@ -448,11 +454,27 @@ EXPORT void freelab_defringe(uint8_t *pixels, int64_t count, int64_t width, int 
                 if (hi - lo > DEFRINGE_PAIR_SPREAD * (x - start))
                     continue;
             }
-            for (k = start; k < x; k++) {
-                uint8_t *px = pixels + 4 * (row + k);
-                if (spread_of(px) > max_spread || min_channel(px) + DEFRINGE_FLOOR_TOLERANCE < ground)
-                    continue;
-                px[0] = px[1] = px[2] = (uint8_t)((px[0] + px[1] + px[2] + 1) / 3);
+            {
+                /* Identical pixels side by side, DEFRINGE_FILL_REPEAT or more, are a fill the text is drawn on, not a
+                 * fringe (ClearType's are one or two pixels wide): the Fonts panel's blue disc, cut into short runs by
+                 * the R on it, came out a gray band across the disc (2026-11-27). They stay; the others are grayed. */
+                int64_t from = start;
+                while (from < x) {  /* first the stretches, on the pixels as they are */
+                    int64_t end = from + 1;
+                    while (end < x && same_rgb(pixels + 4 * (row + end), pixels + 4 * (row + from)))
+                        end++;
+                    for (k = from; k < end; k++)
+                        defringe_fill[k] = (uint8_t)(end - from >= DEFRINGE_FILL_REPEAT);
+                    from = end;
+                }
+                for (k = start; k < x; k++) {
+                    uint8_t *px = pixels + 4 * (row + k);
+                    if (defringe_fill[k])
+                        continue;
+                    if (spread_of(px) > max_spread || min_channel(px) + DEFRINGE_FLOOR_TOLERANCE < ground)
+                        continue;
+                    px[0] = px[1] = px[2] = (uint8_t)((px[0] + px[1] + px[2] + 1) / 3);
+                }
             }
         }
     }

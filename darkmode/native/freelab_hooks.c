@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 44
+#define FREELAB_HOOKS_VERSION 46
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -371,6 +371,7 @@ static int map_qcolor(const qcolor *c, qcolor *out)
  * second entry of QPaintDevice's table of virtual functions (after the destructor). */
 #define SCREEN_PLAIN 1
 #define SCREEN_SUBPIXEL 2
+#define SCREEN_INK_ICON 3 /* a small neutral image on an ink list: the icon rule (see map_image_pixels) */
 /* Containers whose own painting is mapped (the dock, the panels, the Font window), apart from the islands: their
  * painting is mapped as an island's, but their palettes are not answered light outside painting. FontLab reads the
  * Font window's palette to color its document tab's name: answered light (black), the names came out black on the
@@ -1036,6 +1037,15 @@ static void map_image_pixels(void *image, int format, int mode, int pictures)
     if (!bits || w <= 0 || h <= 0)
         return;
     clear = has_transparency(bits, w, h, stride);
+    if (mode == SCREEN_INK_ICON) {
+        /* On an ink list (its rows Qt draws, only its pens mapped): FontLab's delegates draw their check boxes as small
+         * images. The checked one, blue with a white tick, is drawn as designed (mapped with the ink effect, its tick
+         * came out dark: the owner's image 202, 2026-11-27); the empty one, a white box, by the icon rule. */
+        if (clear && w <= ICON_MAX_SIDE && h <= ICON_MAX_SIDE && stride == w * 4
+            && !is_picture(bits, w, h, stride, format, 0))
+            map_icon_pixels(bits, w, h, format);
+        return;
+    }
     if (mode != SCREEN_SUBPIXEL && clear && white_artwork(bits, w, h, stride, format))
         return;
     if (pictures && mode != SCREEN_SUBPIXEL && color_content && is_picture(bits, w, h, stride, format, clear))
@@ -1099,7 +1109,8 @@ static const void *mapped_image(const void *image, int mode)
         return image;
     if (__sync_lock_test_and_set(&image_busy, 1))
         return image; /* another thread is mapping: drawn as it is this once */
-    key = qt_image_cache_key(image) * 8 + (mode == SCREEN_SUBPIXEL) + 2 * color_content + 4 * (canvas_paint != 0); /* a copy per mapping */
+    key = qt_image_cache_key(image) * 16 + (mode == SCREEN_SUBPIXEL) + 2 * color_content + 4 * (canvas_paint != 0)
+          + 8 * (mode == SCREEN_INK_ICON); /* a copy per mapping */
     for (i = 0; i < IMAGE_SLOTS; i++) {
         if (image_cache[i].used && image_cache[i].key == key) {
             image_cache[i].stamp = ++image_clock;
@@ -1749,6 +1760,8 @@ static void trace_picture(int hook, const void *painter, const void *picture, in
         int mode = screen_mode(painter);                              \
         hook_calls[index]++;                                          \
         settle_held(painter);                                         \
+        if (!mode && ink_target(painter))                             \
+            mode = SCREEN_INK_ICON;                                   \
         if (mode && !picked_target(painter))                          \
             use = mapped_image(image, mode);                          \
         hook_changed[index] += use != image;                          \
