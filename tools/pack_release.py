@@ -122,7 +122,7 @@ def pack(out, bin_folder):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--bin", help="a folder that holds the two native libraries already built")
+    parser.add_argument("--bin", help="a folder that holds the three native libraries already built")
     parser.add_argument("--out", help="the archive to write")
     args = parser.parse_args()
     bin_folder = args.bin
