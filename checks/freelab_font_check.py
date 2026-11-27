@@ -26,8 +26,9 @@ Three views of the current font; nothing in the font changes until a button that
 - Vertical metrics: a diagram of the font's tallest and deepest glyphs on its line metrics (typo,
   hhea, win), the ink Windows clips in red; the values now and as Google Fonts' vertical metrics
   guidance suggests; its checks, passed or not; the glyphs Windows clips (beyond winAscent and
-  winDescent, in any master, and by how much). Write suggested values sets the font info's typo,
-  hhea, and win values and Use Typo Metrics (never the masters' own metrics).
+  winDescent, in any master, and by how much). Write suggested values sets them where FontLab's
+  export takes them: the typo (and hhea) values as every master's Ascender, Descender, and Line gap,
+  the win values as its Safe top and bottom, and Use Typo Metrics in the font info.
 - Masters: what keeps masters from interpolating, glyph by glyph: contours, nodes and their types,
   start points, directions, components and their order, anchors, and glyphs some masters lack; the
   glyph drawn in two masters, the contour at fault highlighted. Fix sets right what needs no
@@ -2261,6 +2262,29 @@ def metric_writes(suggestions):
     return [s for s in suggestions if s.value is not None and s.changes() and (s.key in fields or s.key == "use_typo")]
 
 
+def held_value(info, field):
+    """A field's value as Put back old values keeps it: each master's ({master: value}) where the font info
+    is line_info's (INFO_FIELDS are all the masters' own), else the one value."""
+    if getattr(type(info), "master_values", None) is not None:
+        return info.master_values(field)
+    return getattr(info, field)
+
+
+def restore_value(info, field, value):
+    """A value held_value kept, written back (each master's own where it kept them)."""
+    if isinstance(value, dict):
+        info.set_master_values(field, value)
+    else:
+        setattr(info, field, None if value is None else float(value))
+
+
+def was_unset(value):
+    """A held value that was not set (None, or None in every master)."""
+    if isinstance(value, dict):
+        return all(one is None for one in value.values())
+    return value is None
+
+
 def selection_with(bits, on, bit=USE_TYPO_BIT):
     """OS/2 fsSelection's bits (a list of bit numbers, as FontLab keeps them) with bit set or cleared."""
     found = set(int(b) for b in bits or [])
@@ -3313,8 +3337,10 @@ def anchor_names(layer):
     return names
 
 
-def read_metrics(package):
-    """The current master's dimensions (flPackage) and the font's OpenType line metrics (fgFontInfo)."""
+def read_metrics(package, info=None):
+    """The current master's dimensions (flPackage) and the font's OpenType line metrics as FontLab exports them
+    (info: Auto Kerning's exported_info, where the typo values are the master's Ascender, Descender, and Line
+    gap and the Win values its Safe top and bottom; fgPackage.info when none is given)."""
     def value(obj, name):
         try:
             found = getattr(obj, name)
@@ -3323,11 +3349,11 @@ def read_metrics(package):
         except Exception:
             return None
 
-    info = None
-    try:
-        info = package.fgPackage.info
-    except Exception:
-        pass
+    if info is None:
+        try:
+            info = package.fgPackage.info
+        except Exception:
+            pass
     use_typo = None
     try:
         bits = [int(bit) for bit in (info.openTypeOS2Selection or [])]
@@ -9344,7 +9370,7 @@ class FontCheckDialog(object):
         self.busy, stopped = True, False
         ak.busy_start(self, u"Measuring the glyphs")  # (the window's top row: stoppable, owner's image 180)
         try:
-            m = read_metrics(self.package)
+            m = read_metrics(self.package, self.line_info(self.package))
             if not m.upm:
                 m.upm = float(self.package.upm)
             extents = self.extents(tab)
@@ -9630,6 +9656,17 @@ class FontCheckDialog(object):
         self.check(self.current_key())
         return False
 
+    def line_info(self, package):
+        """The font info as FontLab's export reads it (Auto Kerning's exported_info: the typo, hhea, and Win
+        values are each master's own, live 2026-11-27), or fgPackage.info."""
+        found = getattr(self.ak, "exported_info", None)
+        if found is not None:
+            try:
+                return found(package)
+            except Exception:
+                pass
+        return package.fgPackage.info
+
     def begin_info_write(self, package, title):
         """before_changes for a write to the font info (begin_write: False, said in the log, when nothing may
         be written). The font info is the font's own state, but the step notify_changed makes records the
@@ -9639,9 +9676,10 @@ class FontCheckDialog(object):
         return self.ak.begin_write(self.fontlab, package, title, self.log)
 
     def write_suggestions(self):
-        """The suggested values that differ written into the font info (fgPackage.info: font-wide), the old
-        ones kept for Put back old values (FontLab's History does not cover the font info: found live); the
-        view checked again."""
+        """The suggested values that differ written where FontLab's export takes them (line_info: the typo
+        values into every master's Ascender, Descender, and Line gap, the Win values into its Safe top and
+        bottom, Use Typo Metrics into the font info), the old ones kept for Put back old values, each master's
+        own (FontLab's History does not cover them: found live); the view checked again."""
         b = self.ak.b
         if self.busy or self.package is None or self.metric_values is None or not self.same_font():
             return
@@ -9655,11 +9693,11 @@ class FontCheckDialog(object):
         done, failed = [], []
         self.busy = True
         try:
-            info = self.package.fgPackage.info
+            info = self.line_info(self.package)
             old = {}  # the values before, to put back (FontLab's History does not cover the font info)
             for key, field in INFO_FIELDS:
                 try:
-                    old[key] = getattr(info, field)
+                    old[key] = held_value(info, field)
                 except Exception:
                     pass
             try:
@@ -9676,7 +9714,7 @@ class FontCheckDialog(object):
                     failed.append(u"%s (%s)" % (s.label, exc))
                     continue
                 done.append(s)
-            info = self.package.fgPackage.info  # read again: what FontLab kept
+            info = self.line_info(self.package)  # read again: what FontLab kept
             for s in list(done):
                 try:
                     if s.key == "use_typo":
@@ -9700,12 +9738,17 @@ class FontCheckDialog(object):
                                    added=False).report(self.log)
         if done:
             # (font, old values, keys written, keys that were unset before: no way to unset one is known, labels)
-            unset = [s.key for s in done if s.key != "use_typo" and s.key in old and old[s.key] is None]
+            unset = [s.key for s in done if s.key != "use_typo" and s.key in old and was_unset(old[s.key])]
             self.put_back = (self.package_id(self.package), old, [s.key for s in done], unset,
                              dict((s.key, s.label) for s in done))
-            self.log.add(u"Wrote %s into the font info: %s. FontLab's <i>Edit &gt; Undo</i> does not take the font "
-                         u"info back: <i>Put back old values</i> does%s." % (
-                             b(counted(len(done), u"value")), self.ak.html(u"; ".join(write_text(s) for s in done)),
+            where = u""
+            if any(s.key != "use_typo" for s in done) and getattr(type(info), "master_values", None) is not None:
+                where = (u" FontLab exports the typo values from each master's Ascender, Descender, and Line gap (the "
+                         u"lines it draws, moved with them) and the Win values from its Safe top and Safe bottom: they "
+                         u"were written there, in every master.")
+            self.log.add(u"Wrote %s: %s.%s FontLab's <i>Edit &gt; Undo</i> does not take them back: <i>Put back old "
+                         u"values</i> does%s." % (
+                             b(counted(len(done), u"value")), self.ak.html(u"; ".join(write_text(s) for s in done)), where,
                              u" (except a value that was not set before: it stays as written)" if unset else u""), "done")
         self.update_put_back()
         if failed:
@@ -9735,7 +9778,7 @@ class FontCheckDialog(object):
         if not self.begin_info_write(current, u"FreeLab Font Check: vertical metrics put back"):
             return
         fields = dict(INFO_FIELDS)
-        info = current.fgPackage.info
+        info = self.line_info(current)
         restored, failed, left, kept = [], [], [], []
         for key in keys:
             label = labels.get(key, key)
@@ -9754,7 +9797,7 @@ class FontCheckDialog(object):
                 if key == "use_typo":
                     info.openTypeOS2Selection = old[key]
                 else:
-                    setattr(info, fields[key], float(old[key]))
+                    restore_value(info, fields[key], old[key])
                 restored.append(key)
             except Exception as exc:
                 failed.append(u"%s (%s)" % (label, exc))

@@ -9,7 +9,8 @@ tool updates them, along the rule the owner chose: a field changes only where th
 what it follows. A bit is set when the write brought its range or code page into the font, cleared when
 the write took the last of it out, and every other bit is left as declared, hand-set ones included.
 The Win ascent and descent are where Windows clips the glyphs: a glyph the write drew above or below
-them raises them to its ink (never lowered).
+them raises them to its ink (never lowered). FontLab exports them from each master's Safe top and Safe
+bottom, not from the font info's copy (ExportedInfo), so they are written to every master.
 
 FontLab's History takes the Unicode ranges and code pages back with the write that changed them, and
 redoes them (live 2026-11-18: they are the font's coding, fgPackage.coding, which a step of the whole
@@ -487,6 +488,130 @@ def apply_bits(info, font, before, after):
         if added or removed:
             changes.append(Change(field, added, removed))
     return changes
+
+
+# Where FontLab 7 keeps the vertical metrics its export writes (live 2026-11-27, Karantina and Rubik, OpenType TT):
+# the typo ascender, descender, and line gap are each master's own Ascender, Descender, and Line gap (Font Info's
+# Font Dimensions, the lines it draws); the Win ascent and descent are its Safe top and Safe bottom; the hhea values
+# are the typo ones unless Font Info's Other Values > Custom hhea linespacing is on, then each master's own.
+# flPackage.info, the font's model, reads and writes them for the current master; fgPackage.info holds a copy
+# that the export overwrites: typo, hhea, and Win values written there alone were exported as the master's.
+# fsSelection (Use Typo Metrics), the Unicode ranges, and the code pages are exported from fgPackage.info.
+TYPO_FIELDS = ("openTypeOS2TypoAscender", "openTypeOS2TypoDescender", "openTypeOS2TypoLineGap")
+HHEA_FIELDS = ("openTypeHheaAscender", "openTypeHheaDescender", "openTypeHheaLineGap")
+MASTER_FIELDS = TYPO_FIELDS + HHEA_FIELDS + (INFO_WIN_ASCENT, INFO_WIN_DESCENT)
+CUSTOM_HHEA = "hhea_use_custom"
+
+
+def custom_hhea(package):
+    """Whether Font Info's Custom hhea linespacing is on: fgPackage.info's flags (a font that never had it set
+    holds none, live: Rubik; it reads off, as the export takes it)."""
+    try:
+        flags = package.fgPackage.info.dict.flags.asDict()
+    except Exception:
+        return False
+    return isinstance(flags, dict) and flags.get(CUSTOM_HHEA) is True
+
+
+class ExportedInfo(object):
+    """A font's info as FontLab's export reads it, in place of fgPackage.info: its typo, hhea, and Win values
+    read from the current master (flPackage.info; the hhea values as the typo ones while Custom hhea
+    linespacing is off; the Win values the masters' largest, the whole font's) and written to every master,
+    each made current quietly (setMaster(name, False)) and the current one made current again, and into
+    fgPackage.info too (its copy, which FreeLab's other reads see); any other field read and written in
+    fgPackage.info. A package without flPackage.info (a test's fake) has fgPackage.info stand for it."""
+
+    def __init__(self, package):
+        object.__setattr__(self, "_package", package)
+
+    def _fg(self):
+        return self._package.fgPackage.info
+
+    def _model(self):
+        try:
+            return self._package.info
+        except Exception:
+            return None
+
+    def masters(self):
+        try:
+            return [u"%s" % name for name in self._package.masters]
+        except Exception:
+            return []
+
+    def _each(self, act):
+        """[(master, act(master))] with each master current in turn (the current one alone where they cannot
+        be switched), the current one made current again."""
+        package = self._package
+        try:
+            current = u"%s" % package.master
+        except Exception:
+            current = None
+        names = self.masters()
+        if current is None or len(names) < 2 or self._model() is None:
+            return [(current, act(current))]
+        found = []
+        try:
+            for name in names:
+                package.setMaster(name, False)
+                found.append((name, act(name)))
+        finally:
+            try:
+                package.setMaster(current, False)
+            except Exception:
+                pass
+        return found
+
+    def _read(self, field):
+        model = self._model()
+        if model is None or field not in MASTER_FIELDS:
+            return getattr(self._fg(), field)
+        if field in HHEA_FIELDS and not custom_hhea(self._package):
+            field = TYPO_FIELDS[HHEA_FIELDS.index(field)]
+        return getattr(model, field)
+
+    def master_values(self, field):
+        """{master: value} of a master field (the current master's alone where they cannot be switched)."""
+        def read(_master):
+            try:
+                return self._read(field)
+            except Exception:
+                return None
+        return dict(self._each(read))
+
+    def set_master_values(self, field, values):
+        """A master field set per master ({master: value}; masters not named are left)."""
+        model = self._model()
+
+        def write(master):
+            if master in values:
+                setattr(model if model is not None else self._fg(), field, _model_number(values[master], model))
+        self._each(write)
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        if name in (INFO_WIN_ASCENT, INFO_WIN_DESCENT) and self._model() is not None:
+            found = [value for value in self.master_values(name).values() if value is not None]
+            return max(found) if found else None
+        return self._read(name)
+
+    def __setattr__(self, name, value):
+        model = self._model()
+        if model is not None and name in MASTER_FIELDS:
+            self._each(lambda _master: setattr(model, name, _model_number(value, model)))
+        try:
+            setattr(self._fg(), name, value)
+        except Exception:
+            if model is None or name not in MASTER_FIELDS:
+                raise
+
+
+def _model_number(value, model):
+    """flPackage.info keeps the typo and Win values as whole numbers; a fake's stand-in takes them as given."""
+    if model is None or value is None:
+        return value
+    return int(round(float(value)))
 
 
 def win_needed(extents):

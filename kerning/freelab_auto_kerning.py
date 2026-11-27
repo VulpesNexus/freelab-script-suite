@@ -1753,6 +1753,15 @@ def font_info():
         return sys.modules.get(FONT_INFO_MODULE)
 
 
+def exported_info(package):
+    """The font info as FontLab's export reads it (freelab_font_info's ExportedInfo: the typo, hhea, and Win
+    values are the masters' own), or fgPackage.info where the helper cannot be loaded."""
+    module = font_info()
+    if module is not None and hasattr(module, "ExportedInfo"):
+        return module.ExportedInfo(package)
+    return package.fgPackage.info
+
+
 def master_extents(package, glyphs):
     """[(bottom, top)] of the ink of each glyph's master layers (as Font Check measures it: components
     and color glyphs' fallback outlines included)."""
@@ -1804,7 +1813,7 @@ def follow_font_info(package, log=None, when_needed=False):
         return []
     changes = []
     try:
-        changes = module.follow(package.fgPackage.info, font, _named_extents(package))
+        changes = module.follow(exported_info(package), font, _named_extents(package))
     except Exception:
         changes = []
     module.note_mark(font, count, state)
@@ -1842,7 +1851,7 @@ def _update_font_info(status, package, before, glyphs):
     if module is None or before is None or font is None:
         return
     try:
-        info = package.fgPackage.info
+        info = exported_info(package)
         after = module.font_codes(package)
         changes = module.apply_bits(info, font, module.coverage(before), module.coverage(after))
         names = []

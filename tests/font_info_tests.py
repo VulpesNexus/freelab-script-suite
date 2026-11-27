@@ -240,6 +240,109 @@ class FollowTests(unittest.TestCase):
 
 # -- Auto Kerning's writes asking for it --------------------------------------------------------------
 
+class Flags(object):
+    def __init__(self, values):
+        self.values = values
+
+    def asDict(self):
+        return dict(self.values)
+
+
+class MasterModel(object):
+    """flPackage.info as FontLab 7 hands it to a script (live 2026-11-27): the typo, hhea, and Win values of
+    the current master (whole numbers), switched by flPackage.setMaster(name, False)."""
+
+    def __init__(self, owner):
+        object.__setattr__(self, "owner", owner)
+
+    def __getattr__(self, name):
+        return self.owner.values[self.owner.master][name]
+
+    def __setattr__(self, name, value):
+        self.owner.values[self.owner.master][name] = value
+
+
+class ModelPackage(object):
+    """A font of two masters whose vertical metrics FontLab keeps per master (flPackage.info), with the font
+    info's copy (fgPackage.info) that the export overwrites."""
+
+    def __init__(self, custom=False):
+        def master(ascender, safe_top):
+            return {"openTypeOS2TypoAscender": ascender, "openTypeOS2TypoDescender": -250, "openTypeOS2TypoLineGap": 0,
+                    "openTypeHheaAscender": 1000, "openTypeHheaDescender": -300, "openTypeHheaLineGap": 0,
+                    "openTypeOS2WinAscent": safe_top, "openTypeOS2WinDescent": 300}
+        self.values = {u"Light": master(935, 1066), u"Bold": master(940, 1100)}
+        self.masters, self.master, self.switches = [u"Light", u"Bold"], u"Light", []
+        self.info = MasterModel(self)
+
+        class Copy(object):
+            pass
+        self.fgPackage = Copy()
+        self.fgPackage.info = Copy()
+        self.fgPackage.info.openTypeOS2TypoAscender = 1  # (a stale copy: never what an export writes)
+        self.fgPackage.info.openTypeOS2Selection = [7]
+        self.fgPackage.info.dict = Copy()
+        self.fgPackage.info.dict.flags = Flags({fi.CUSTOM_HHEA: custom} if custom else {})
+
+    def setMaster(self, name, notify=True):
+        self.switches.append((name, notify))
+        self.master = name
+
+
+class ExportedInfoTests(unittest.TestCase):
+    """The typo, hhea, and Win values read and written where FontLab's export takes them: each master's own
+    (live 2026-11-27: values written into fgPackage.info alone were exported as the master's)."""
+
+    def test_read_the_current_masters(self):
+        package = ModelPackage()
+        info = fi.ExportedInfo(package)
+        self.assertEqual(info.openTypeOS2TypoAscender, 935, "the master's Ascender, not the stale copy")
+        self.assertEqual(info.openTypeHheaAscender, 935, "Custom hhea linespacing off: the typo value is exported")
+        self.assertEqual(info.openTypeOS2WinAscent, 1100, "the masters' largest Safe top")
+        self.assertEqual(info.openTypeOS2Selection, [7], "anything else from the font info")
+        self.assertEqual(package.master, u"Light", "the current master current again")
+        self.assertTrue(all(notify is False for _name, notify in package.switches), "switched quietly")
+
+    def test_custom_hhea_reads_the_masters_own(self):
+        info = fi.ExportedInfo(ModelPackage(custom=True))
+        self.assertEqual(info.openTypeHheaAscender, 1000)
+
+    def test_written_to_every_master_and_the_copy(self):
+        package = ModelPackage()
+        info = fi.ExportedInfo(package)
+        info.openTypeOS2WinAscent = 1200.4
+        info.openTypeOS2TypoAscender = 960.0
+        self.assertEqual([package.values[m]["openTypeOS2WinAscent"] for m in package.masters], [1200, 1200])
+        self.assertEqual([package.values[m]["openTypeOS2TypoAscender"] for m in package.masters], [960, 960])
+        self.assertEqual(package.fgPackage.info.openTypeOS2TypoAscender, 960.0, "the copy kept in step")
+        self.assertEqual(package.master, u"Light")
+
+    def test_per_master_values_put_back(self):
+        package = ModelPackage()
+        info = fi.ExportedInfo(package)
+        held = info.master_values("openTypeOS2TypoAscender")
+        self.assertEqual(held, {u"Light": 935, u"Bold": 940})
+        info.openTypeOS2TypoAscender = 1000
+        info.set_master_values("openTypeOS2TypoAscender", held)
+        self.assertEqual([package.values[m]["openTypeOS2TypoAscender"] for m in package.masters], [935, 940])
+
+    def test_apply_win_raises_every_master(self):
+        package = ModelPackage()
+        changes = fi.apply_win(fi.ExportedInfo(package), 201, [(-100.0, 1150.0)], [u"Aringacute"])
+        self.assertEqual([(c.before, c.after) for c in changes], [(1100, 1150)])
+        self.assertEqual([package.values[m]["openTypeOS2WinAscent"] for m in package.masters], [1150, 1150])
+        fi.forget(201)
+
+    def test_a_fake_without_a_model_uses_the_font_infos(self):
+        package = ModelPackage()
+        del package.info
+        info = fi.ExportedInfo(package)
+        self.assertEqual(info.openTypeOS2TypoAscender, 1)
+        info.openTypeOS2TypoAscender = 900.0
+        self.assertEqual(package.fgPackage.info.openTypeOS2TypoAscender, 900.0)
+        self.assertEqual(package.values[u"Light"]["openTypeOS2TypoAscender"], 935)
+
+
 class Glyph(object):
     def __init__(self, name, codes):
         self.name, self.unicodes = name, list(codes)

@@ -1252,13 +1252,22 @@ class FontLabCalls(object):
                                    ("line_gap", "lineGap_value")):
                 found[key] = value(package, attribute)
         try:
-            info = package.fgPackage.info
+            info = self.line_info(package)
         except Exception:
             info = None
         several = len(self.masters(package)) > 1
+        per_master = getattr(type(info), "master_values", None) is not None
         for key, attribute in INFO_ATTRIBUTES:
             if several and key in MASTER_INFO:
                 found[key] = None  # (the font's, not each master's: its master's name tells instead, style_weight)
+                continue
+            if several and per_master and attribute in LINE_ATTRIBUTES:
+                # (each master's own, as FontLab exports them: this master's, read with it made current quietly)
+                try:
+                    read = info.master_values(attribute).get(master)
+                    found[key] = float(read) if read is not None else None
+                except Exception:
+                    found[key] = None
                 continue
             found[key] = value(info, attribute) if info is not None else None
         for key, attribute in COVERAGE_ATTRIBUTES:  # (bit lists, live 2026-11-18: [0L, 1L, 4L])
@@ -1267,6 +1276,14 @@ class FontLabCalls(object):
             except Exception:
                 found[key] = None
         return found
+
+    def line_info(self, package):
+        """The font info as FontLab's export reads it (Auto Kerning's exported_info: the typo, hhea, and Win
+        values are each master's own, live 2026-11-27), or fgPackage.info."""
+        try:
+            return self.ak.exported_info(package)
+        except Exception:
+            return package.fgPackage.info
 
     def font_info_module(self):
         """The shared module that keeps the font info's coverage in step (freelab_font_info, through Auto
@@ -1475,11 +1492,13 @@ class FontLabCalls(object):
         the glyphs not scaled; the new font has none yet); upm read back."""
         package.setUpm(int(upm), False)
 
-    @staticmethod
-    def set_info(package, attribute, value):
+    def set_info(self, package, attribute, value):
         """Live (2026-11-24, Sarabun Regular and Bold assembled): fgPackage.info's UFO-named attributes are settable (the family
-        name, the copyright, the designer, the typo, win, and hhea values read back)."""
-        setattr(package.fgPackage.info, attribute, value)
+        name, the copyright, the designer, the typo, win, and hhea values read back). The typo, hhea, and Win
+        values go where the export takes them (line_info: every master's own; live 2026-11-27, values written
+        into fgPackage.info alone were exported as the master's)."""
+        info = self.line_info(package) if attribute in LINE_ATTRIBUTES else package.fgPackage.info
+        setattr(info, attribute, value)
 
     @staticmethod
     def set_version(package, major, minor):
@@ -1561,6 +1580,10 @@ MASTER_INFO = ("italic_angle", "weight_class", "width_class")  # each master's o
 # The coverage the font info declares, read from each source: (Source.info key, fgPackage.info name)
 COVERAGE_ATTRIBUTES = (("unicode_ranges", "openTypeOS2UnicodeRanges"), ("code_pages", "openTypeOS2CodePageRanges"))
 WIN_KEYS = (("win_ascent", "openTypeOS2WinAscent"), ("win_descent", "openTypeOS2WinDescent"))
+# The vertical metrics FontLab exports from each master (typo: its Ascender, Descender, and Line gap; Win: its
+# Safe top and bottom; hhea: the typo values unless Custom hhea linespacing is on), read and written through
+# line_info
+LINE_ATTRIBUTES = frozenset(attribute for key, attribute in INFO_ATTRIBUTES[:8])
 
 
 def assembled_coverage(module, reference, plan):

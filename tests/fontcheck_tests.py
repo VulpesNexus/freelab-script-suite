@@ -5106,6 +5106,49 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(info.openTypeOS2TypoAscender, 800)
         self.assertIsNone(dialog.put_back)
 
+    def test_written_where_the_export_takes_them(self):
+        """FontLab 7 exports the typo values from each master's Ascender, Descender, and Line gap and the Win
+        values from its Safe top and bottom (flPackage.info, the current master's; live 2026-11-27): the
+        suggestion goes into every master, and Put back old values puts each master's own back."""
+        import freelab_font_info  # noqa: F401  (Auto Kerning's font_info finds it loaded)
+        dialog = self.dialog()
+        package = dialog.package
+        package.values = {}
+        for master, ascender, top in ((u"Regular", 800, 1000), (u"Bold", 810, 1040)):
+            package.values[master] = {
+                "openTypeOS2TypoAscender": ascender, "openTypeOS2TypoDescender": -200, "openTypeOS2TypoLineGap": 0,
+                "openTypeHheaAscender": 900, "openTypeHheaDescender": -200, "openTypeHheaLineGap": 0,
+                "openTypeOS2WinAscent": top, "openTypeOS2WinDescent": 250}
+
+        class Model(object):
+            def __getattr__(self, name):
+                return package.values[package.master][name]
+
+            def __setattr__(self, name, value):
+                package.values[package.master][name] = value
+
+        package.info = Model()
+        package.setMaster = lambda name, notify=True: setattr(package, "master", name)
+        dialog.mode_share.checked, dialog.share.value = True, 120
+        dialog.check_vertical()
+        m = fc.read_metrics(package, dialog.line_info(package))
+        self.assertEqual((m.typo_ascender, m.hhea_ascender, m.win_ascent), (800, 800, 1040),
+                         "the current master's typo value, hhea as exported, the masters' largest Win")
+        logged = []
+        dialog.log.add = lambda text, level="info": logged.append((level, text))
+        dialog.write_suggestions()
+        values = dict((s.key, s.value) for s in dialog.suggestions)
+        self.assertEqual([package.values[m]["openTypeOS2TypoAscender"] for m in (u"Regular", u"Bold")],
+                         [int(round(values["typo_ascender"]))] * 2, logged)
+        self.assertEqual([package.values[m]["openTypeOS2WinAscent"] for m in (u"Regular", u"Bold")], [1100, 1100])
+        self.assertEqual(package.master, u"Regular", "the current master current again")
+        self.assertTrue(any(level == "done" and u"Safe top" in text for level, text in logged), logged)
+        self.assertEqual(fc.metric_writes(dialog.suggestions), [], "checked again: as suggested")
+        dialog.put_back_values()
+        self.assertEqual([package.values[m]["openTypeOS2TypoAscender"] for m in (u"Regular", u"Bold")], [800, 810],
+                         "each master's own")
+        self.assertEqual([package.values[m]["openTypeOS2WinAscent"] for m in (u"Regular", u"Bold")], [1000, 1040])
+
 
 class ScriptTests(unittest.TestCase):
     """Every script of Unicode is checkable as a script, where no language's orthography is known: its
