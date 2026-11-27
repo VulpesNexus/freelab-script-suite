@@ -406,3 +406,4 @@ How each tool came to work as it does: what it did before, what it does now, and
 - A dropdown's longer choice ended in an ellipsis (image 357). Dropdowns and their open lists are now as wide as their widest choice.
 - On a light window, Windows' style filled a grayed field or spin box with the window's own color, so an empty one did not show (image 366). It is now filled a shade darker than the window.
 - A tooltip was sized by an estimate whose margin showed as room after the text (image 9). It is now as wide as its text as Qt lays it out.
+- 2026-11-27: Number fields did not say what they take (the owner's image 241). Every number field's tooltip and help, its caption's too, now ends with its range, read from the field's own bounds when shown, so it cannot drift from them: *From 0 units to 500 units.*, *From 10% to 200% of the em.*, *From 0 (Auto) to 12.*

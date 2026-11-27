@@ -6192,8 +6192,81 @@ def rich_width(text):
     return float(ideal() if callable(ideal) else ideal)
 
 
+def _number_field(widget):
+    """The number field (spin box) a widget stands for: itself, the field holding it (its text area), or the
+    field a caption names (its buddy); None for any other widget."""
+    try:
+        if widget.inherits("QAbstractSpinBox"):
+            return widget
+        parent = widget.parentWidget()
+        if parent is not None and parent.inherits("QAbstractSpinBox"):
+            return parent
+        if widget.inherits("QLabel"):
+            buddy = widget.buddy()
+            if buddy is not None and buddy.inherits("QAbstractSpinBox"):
+                return buddy
+    except Exception:
+        pass
+    return None
+
+
+def _range_number(value, decimals):
+    """A field's bound as text: thousands grouped, decimals as the field shows them, trailing zeros dropped."""
+    if decimals:
+        text = (u"%%.%df" % decimals) % value
+        whole, _, part = text.partition(u".")
+        part = part.rstrip(u"0")
+        return u"{:,}".format(int(whole)) + (u"." + part if part else u"") if whole.lstrip(u"-").isdigit() else text
+    return u"{:,}".format(int(round(value)))
+
+
+def _range_unit(suffix, value):
+    """A field's unit for a bound: its suffix as shown, a word's number following the bound's (1 unit, 2 units;
+    a suffix like "units" that counted_suffix keeps in step with the field's own value)."""
+    word = suffix.strip()
+    if len(word) > 2 and word.isalpha():
+        one = word[:-1] if word.endswith(u"s") else word
+        return u" " + (one if abs(value) == 1 else one + u"s")
+    return suffix
+
+
+def number_range(widget):
+    """What a number field takes, for its tooltip and its help: "From 0 to 500 units." (u"" for a widget that is
+    no number field). The owner, 2026-11-27 (image 241): "we should probably indicate min and max values number
+    fields can accept across the suite"; read from the field's own bounds, so it never differs from them."""
+    field = _number_field(widget)
+    if field is None:
+        return u""
+    try:
+        low, high = float(field.minimum), float(field.maximum)
+        decimals = int(_property(field, "decimals") or 0) if field.inherits("QDoubleSpinBox") else 0
+        suffix = u"%s" % (_property(field, "suffix") or u"")
+        special = u"%s" % (_property(field, "specialValueText") or u"")
+    except Exception:
+        return u""
+    # A suffix that goes on in words ("% of the em") has its unit on each bound and the words once, at the end:
+    # "From 10% to 200% of the em."
+    tail = u""
+    if u" of " in suffix:
+        head, _, rest = suffix.partition(u" of ")
+        suffix, tail = head, u" of " + rest
+    first = _range_number(low, decimals) + _range_unit(suffix, low)
+    if special:
+        first = u"%s (%s)" % (first, special)
+    return u"From %s to %s%s." % (first, _range_number(high, decimals) + _range_unit(suffix, high), tail)
+
+
+def with_range(text, widget):
+    """A tooltip's or help's text with its number field's range on a line of its own after it."""
+    found = number_range(widget)
+    if not found:
+        return text
+    return u"%s<br>%s" % (text, found) if text else found
+
+
 def show_tip(obj, event, view=None):
-    """A tooltip laid out for its window (tip_html): True once shown, False to leave it to Qt."""
+    """A tooltip laid out for its window (tip_html): True once shown, False to leave it to Qt. A number field's
+    tooltip (or its caption's) ends with what it takes (number_range)."""
     QtCore, QtGui = _qt()
     if obj.property(OWN_TIPS_PROP) or (view is not None and view.property(OWN_TIPS_PROP)):
         return False
@@ -6208,6 +6281,10 @@ def show_tip(obj, event, view=None):
         rect = view.visualRect(index)
     else:
         text = _property(obj, "toolTip")
+        field = _number_field(obj)
+        if field is not None:
+            # (the field's own tip where its text area or caption has none of its own)
+            text = with_range(u"%s" % (text or _property(field, "toolTip") or u""), field)
     if not text:
         return False
     metrics = QtGui.QFontMetrics(QtGui.QToolTip.font())
@@ -6234,6 +6311,8 @@ def filter_event(window, obj, event, pending):
         commit_typing(window, obj)  # (the value typed in a field taken before the button acts on it)
     if kind == 110:  # ToolTip
         return show_tip(obj, event, _view_of(obj))
+    if kind == WHATS_THIS and show_field_help(obj, event):
+        return True
     if kind in (CONTEXT_MENU, WHATS_THIS) and obj.inherits("QTabBar") and _property(obj, "enabled"):
         # a tab's own help, where it was clicked (owner's image 329: the window's, in the middle of it)
         return show_tab_help(obj, event, kind == CONTEXT_MENU)
@@ -6397,9 +6476,22 @@ def show_context_help(window, event):
         widget = widget.parentWidget()
     if not text:
         return False
+    text = with_range(text, widget)  # (a number field's help ends with what it takes)
     where = event.globalPos()
     if _whats_this_menu(window, where) and widget_alive(widget):
         QtGui.QWhatsThis.showText(where, text, widget)
+    return True
+
+
+def show_field_help(obj, event):
+    """What's This (the window's ? button, then a click) on a number field, or its caption: its help, then
+    what it takes (number_range). True once shown; False for any other widget, left to Qt."""
+    field = _number_field(obj)
+    if field is None:
+        return False
+    text = u"%s" % (_property(obj, "whatsThis") or _property(field, "whatsThis") or u"")
+    QtGui = _qt()[1]
+    QtGui.QWhatsThis.showText(event.globalPos(), with_range(text, field), obj)
     return True
 
 

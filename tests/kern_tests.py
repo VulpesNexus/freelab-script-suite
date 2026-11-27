@@ -8090,5 +8090,64 @@ class DocsClaimTests(unittest.TestCase):
         self.assertIn(u"within 1.2% of the em", self.page("GLYPH-COMPOSE.md"))
 
 
+class NumberRangeTests(unittest.TestCase):
+    """The owner, 2026-11-27 (image 241): number fields say what they take, from their own bounds, in their
+    tooltip and their help, their caption's too."""
+
+    class Field(object):
+        def __init__(self, low, high, suffix=u"", decimals=None, special=u"", tip=u"", kind="QSpinBox"):
+            self.minimum, self.maximum, self.suffix, self.specialValueText = low, high, suffix, special
+            self.toolTip, self.whatsThis, self.kind = tip, tip, kind
+            if decimals is not None:
+                self.decimals = decimals
+
+        def inherits(self, name):
+            return name in (self.kind, "QAbstractSpinBox", "QWidget")
+
+        def parentWidget(self):
+            return None
+
+    class Label(object):
+        def __init__(self, buddy):
+            self._buddy, self.toolTip, self.whatsThis = buddy, u"", u""
+
+        def inherits(self, name):
+            return name in ("QLabel", "QWidget")
+
+        def parentWidget(self):
+            return None
+
+        def buddy(self):
+            return self._buddy
+
+    def test_the_range_is_said_from_the_fields_bounds(self):
+        F = self.Field
+        self.assertEqual(ak.number_range(F(0, 500, u" units")), u"From 0 units to 500 units.")
+        self.assertEqual(ak.number_range(F(1, 500, u" unit")), u"From 1 unit to 500 units.", "the word follows each number")
+        self.assertEqual(ak.number_range(F(150, 1200, u" px")), u"From 150 px to 1,200 px.", "an abbreviation as it is")
+        self.assertEqual(ak.number_range(F(10, 200, u"% of the em")), u"From 10% to 200% of the em.")
+        self.assertEqual(ak.number_range(F(0.5, 25.0, u"% of the em", decimals=1, kind="QDoubleSpinBox")),
+                         u"From 0.5% to 25% of the em.")
+        self.assertEqual(ak.number_range(F(1, 9999)), u"From 1 to 9,999.")
+        self.assertEqual(ak.number_range(F(0, 12, special=u"Auto")), u"From 0 (Auto) to 12.")
+
+    def test_the_tip_and_the_help_end_with_it_the_captions_too(self):
+        field = self.Field(0, 500, u" units", tip=u"How far each variant may move.")
+        self.assertEqual(ak.with_range(field.toolTip, field), u"How far each variant may move.<br>From 0 units to 500 units.")
+        self.assertIs(ak._number_field(self.Label(field)), field, "a caption stands for its field")
+        self.assertEqual(ak.number_range(self.Label(None)), u"", "a caption of no number field: nothing")
+        self.assertEqual(ak.with_range(u"A check box.", self.Label(None)), u"A check box.")
+
+    def test_every_number_field_of_the_suite_is_a_spin_box(self):
+        """The range is said for spin boxes (QAbstractSpinBox): every number field the tools make is one."""
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir)
+        for folder in ("builder", "checks", "cjk", "compare", "compose", "features", "kerning", "proof", "spacing",
+                       "windows"):
+            for name in os.listdir(os.path.join(root, folder)):
+                if name.endswith(".py"):
+                    text = io.open(os.path.join(root, folder, name), encoding="utf-8").read()
+                    self.assertNotIn(u"QSlider(", text, "%s: a slider would need its range said too" % name)
+
+
 if __name__ == "__main__":
     unittest.main()

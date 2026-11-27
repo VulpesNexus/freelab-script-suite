@@ -33,6 +33,7 @@ A window opens at 1000 by 1000 pixels (Font Check's 1,400 wide, for its two list
 - Buttons gray out when they would do nothing; a right-click on a grayed-out one still shows its help.
 - Dropdowns open below their box, as a list of 24 rows at most, scrolled.
 - Tooltips as wide as their text, at most half the window: one line when they fit, a blank line between paragraphs.
+- A number field's tooltip and help (its caption's too) end with what it takes, read from the field's own bounds: *From 0 units to 500 units.*, *From 10% to 200% of the em.*
 - A click under a list's last row, or beside the lists, unselects a row.
 - Lists that draw each row's glyph from the font, their columns always filling the list ([Lists](#lists)).
 - A double-click on a glyph or a pair opens it in a Glyph window; in Auto Spacing, a double-click on a preview's neighboring glyph opens that pair in Auto Kerning.
