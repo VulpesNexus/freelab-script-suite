@@ -269,6 +269,37 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertEqual(field.palette.color(qtfakes.QPalette.Active, qtfakes.QPalette.Text).name(), u"#000000")
         self.assertIsNone(field.property(dm.FIELD_TEXT_PROP))
 
+    def test_a_page_filled_later_turns_dark_once(self):
+        """The owner's images 208 and 210, 2026-11-27: Software Update's page, filled after its window shows, stayed white
+        until a sweep came by; it turns dark as its text changes. Qt sends textChanged from inside setHtml: handled there,
+        the page was set again without end, and FontLab closed (2026-11-27)."""
+        sets = []
+
+        class Browser(FakeWidget):
+            html = u"<p>Checking…</p>"
+
+            def toHtml(self):
+                return self.html
+
+            def setHtml(self, html):
+                sets.append(html)
+                if len(sets) > 20:
+                    raise RuntimeError("set without end")
+                self.html = html + u"<!-- as Qt writes it back -->"  # (toHtml never gives back what setHtml got)
+                self.emit("textChanged()")
+
+            def testAttribute(self, _attribute):
+                return False
+
+        browser = Browser("QTextBrowser", u"textBrowser")
+        dm._state()["on"] = True
+        dm._show_page(browser)
+        self.assertEqual(sets, [])  # (nothing to darken yet)
+        browser.html = u'<body style=" background-color:#ffffff;"><p>FontLab 8</p></body>'
+        browser.emit("textChanged()")  # (FontLab fills the page)
+        self.assertEqual(len(sets), 1, "turned dark once")
+        self.assertIn(u"#1f1f1f", browser.html)
+
     def test_a_field_whose_reads_stay_dark_is_set_once(self):
         """2026-11-27: Qt sends the palette change from inside setPalette; a field whose palette still read dark was set
         again from that event, without end, and Python's stack ran out (FontLab closed under the owner's work)."""
@@ -290,6 +321,20 @@ class ShadeAndPickerTests(DarkModeCase):
         dm._on_field_palette(field)  # (FontLab's next palette: set once more, not without end)
         self.assertEqual(len(sets), 2)
 
+    def test_a_freelab_dropdowns_list_is_in_its_window(self):
+        """The owner's image 215, 2026-11-27: Quick Overlay's flag dropdown, its list a window of its own, was taken for
+        one of FontLab's and given the ink effect, which drew each flag color twice."""
+        dialog = FakeWidget("QDialog", window=True)
+        dialog.setProperty(dm.FREELAB_WINDOW_PROP, True)
+        combo = FakeWidget("QComboBox", parent=dialog, inherits=("QComboBox",))
+        container = FakeWidget("QComboBoxPrivateContainer", parent=combo, window=True)
+        view = FakeWidget("QComboBoxListView", parent=container, inherits=("QAbstractItemView",))
+        viewport = FakeWidget("QWidget", u"qt_scrollarea_viewport", parent=view)
+        self.assertTrue(dm._in_freelab_window(viewport))
+        other = FakeWidget("QComboBoxPrivateContainer", parent=FakeWidget("QComboBox", parent=FakeWidget("QDialog", window=True)),
+                           window=True)
+        self.assertFalse(dm._in_freelab_window(other), "a dropdown of FontLab's own")
+
     def test_lists_are_not_let_go_of_for_their_sheet(self):
         """The owner's image 213, 2026-11-27: the History list, a Qt list with a stylesheet, was let go of by the hooks,
         and its rows' own light backgrounds stood white. Lists stay hooked; Qt's buttons and fields with a sheet do not."""
@@ -303,9 +348,14 @@ class ShadeAndPickerTests(DarkModeCase):
         """The owner's image 216, 2026-11-27: the flag bar's clear-flag cross and arrows, black on the dark bar, were left
         alone with the flag swatches."""
         bar = FakeWidget("QWidget", u"widgetFlags")
-        for name, alone in ((u"flagRed", True), (u"flagNone", False), (u"flagUp", False), (u"flagDown", False)):
+        for name in (u"flagRed", u"flagNone", u"flagUp", u"flagDown"):
             button = FakeWidget("QToolButton", name, parent=bar, inherits=("QAbstractButton",))
-            self.assertEqual(bool(dm._left_alone(button, "QToolButton")), alone, name)
+            # (left alone, their faces as the dark palette draws them: processed, the cross's face came out white)
+            self.assertTrue(dm._left_alone(button, "QToolButton"), name)
+            self.assertEqual(name in dm.FLAG_TOOL_NAMES, name != u"flagRed", "its icon mapped: " + name)
+        import io
+        source = io.open(dm.__file__.replace(".pyc", ".py"), encoding="utf-8").read()
+        self.assertIn(u"in FLAG_TOOL_NAMES:\n            _swap_icon(widget)", source)
 
     def test_a_sheet_noted_as_seen_is_fontlabs_not_ours(self):
         """The owner's image 193, 2026-11-27: the Font Info panel's Change... button white. FontLab's sheet, noted as

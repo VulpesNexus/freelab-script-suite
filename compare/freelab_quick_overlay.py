@@ -34,6 +34,7 @@ ADD_FAMILY_BUTTON = "buttonAddFamily"
 OPEN_WAIT_MS = 300  # after the new font's window opens, before Overlay Fonts is opened on it
 FIND_EVERY_MS = 100  # how often the dialog is looked for once asked for
 FIND_FOR_MS = 8000
+FREELAB_WINDOW_PROP = "freelab_window"  # (the shared module's WINDOW_PROP; -1: no number in its list of windows)
 SCRIPT_WINDOW_PROP = "mcpScriptWindow"  # FreeLab MCP's convention: the dialog is a script's, not FontLab's question
 METRICS = ("ascender_value", "descender_value", "xHeight_value", "capsHeight_value", "lineGap_value")
 
@@ -599,6 +600,10 @@ def ask_glyphs(family, choices):
     held().append(dialog)
     dialog.setWindowTitle(TITLE)
     dialog.setProperty(SCRIPT_WINDOW_PROP, True)
+    # (FreeLab's own window, as the shared module marks its tools': dark mode then leaves its lists and dropdowns as
+    # the dark palette draws them; taken for one of FontLab's, its flag list got an effect that drew each color twice,
+    # the owner's image 215)
+    dialog.setProperty(FREELAB_WINDOW_PROP, -1)
     flags = int(dialog.windowFlags()) if callable(dialog.windowFlags) else int(dialog.windowFlags)
     dialog.setWindowFlags(Qt.WindowFlags(flags & ~int(Qt.WindowContextHelpButtonHint)))
     layout = QVBoxLayout(dialog)

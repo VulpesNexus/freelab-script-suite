@@ -291,8 +291,9 @@ SKIP_CLASSES = ("ColorPickerItem", "ColorPickerButton", "QtColorPicker", "QDeskt
 SKIP_CLASS_WORDS = ("ColorSource", "OpacityBar", "Eyedropper")
 SWATCH_NAME_PREFIXES = ("flag",)
 # The flag bar's buttons that hold no color: the clear-flag cross and the two arrows beside the swatches, black icons
-# left black on the dark bar with the swatches (the owner's image 216, 2026-11-27: "only the cross, not its frame",
-# the frame being the button's own box)
+# left black on the dark bar with the swatches (the owner's image 216, 2026-11-27: "only the cross, not its frame").
+# Left alone as the swatches are, with their icons mapped: processed as any button, the cross's face was found light,
+# made an island, and Qt drew it white, which the hooks do not map.
 FLAG_TOOL_NAMES = ("flagNone", "flagUp", "flagDown")
 # The Color panel's channel sliders draw color gradients (their stylesheets): color controls too.
 # Under the ink effect, partial repaints left blocky patches in the red and blue tracks.
@@ -3683,6 +3684,9 @@ def _show_page(widget):
             browser.connect("textChanged()", changed)
         except Exception as exc:
             _note_error("page", exc)
+    if page.get("page_busy"):
+        return  # (the textChanged our own setHtml sends, from inside it: handled, it set the page again without end
+        # and ran the stack out, FontLab closing, 2026-11-27)
     try:
         html = browser.toHtml()
         if page.get("dark_html") == html:
@@ -3697,9 +3701,14 @@ def _show_page(widget):
         page["html"] = html
         page["dark_html"] = browser.toHtml() if dark == html else None
         if dark != html:
-            browser.setHtml(dark)
+            page["page_busy"] = True
+            try:
+                browser.setHtml(dark)
+            finally:
+                page.pop("page_busy", None)
             page["dark_html"] = browser.toHtml()
     except Exception as exc:
+        page.pop("page_busy", None)
         _note_error("page", exc)
 
 
@@ -3883,6 +3892,11 @@ def _in_freelab_window(widget):
         window = widget  # (its window, as Qt's window(): the first widget up that is one)
         while window is not None and not window.isWindow():
             window = window.parentWidget()
+        if window is not None and _class_name(window) == "QComboBoxPrivateContainer" and window.parentWidget() is not None:
+            # A dropdown's list, a window of its own: the dialog of its dropdown's. Taken for one of FontLab's, its
+            # list got the ink effect, which drew Quick Overlay's flag colors twice, a bar beside each square (the
+            # owner's image 215, 2026-11-27)
+            return _in_freelab_window(window.parentWidget())
         return window is not None and window.property(FREELAB_WINDOW_PROP) is not None
     except Exception:
         return False
@@ -4323,8 +4337,7 @@ def _asked_to_be_left_alone(obj):
 
 def _left_alone(widget, name):
     return (name in SKIP_CLASSES or any(word in name for word in SKIP_CLASS_WORDS) or _asked_to_be_left_alone(widget)
-            or (widget.inherits("QAbstractButton") and (_prop(widget, "objectName") or u"").startswith(SWATCH_NAME_PREFIXES)
-                and (_prop(widget, "objectName") or u"") not in FLAG_TOOL_NAMES)
+            or (widget.inherits("QAbstractButton") and (_prop(widget, "objectName") or u"").startswith(SWATCH_NAME_PREFIXES))
             or (widget.inherits("QAbstractSlider") and _within(widget, COLOR_SLIDER_PANELS)))
 
 
@@ -4901,6 +4914,8 @@ def process(widget):
         _forget_effect(widget)  # one it got before it asked (a dropdown down to one choice)
         _note_sheet_as_seen(widget)
         _protect(widget)
+        if (_prop(widget, "objectName") or u"") in FLAG_TOOL_NAMES:
+            _swap_icon(widget)  # (its face as the dark palette draws it; only its black mark mapped)
         return
     canvas = state["canvas"]
     if not canvas and is_content(widget):
