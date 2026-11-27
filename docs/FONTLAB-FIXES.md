@@ -5,7 +5,7 @@ FreeLab mends or works around these defects of FontLab 7.2 itself, each found wi
 ## Crashes
 
 - **A quick drag on *Overlay Fonts*' color bar crashed FontLab**, on any font: the bar handles each mouse move while letting the event loop run, so moves nested until the stack ran out. FreeLab hands that window one move at a time, the latest, whether dark mode is on or off ([DARKMODE.md](DARKMODE.md)).
-- **Opening some fonts crashes FontLab** (a `GPOS` single adjustment of format 2 with no values: Noto Sans JP's and KR's variable fonts, among others), losing the unsaved work in every open font. Family Audit's *Add files…* and Font Compare's *Open a font…* and installed fonts check each file first and offer a fixed copy. FontLab's own *File > Open Fonts* is not covered ([FAMILY-AUDIT.md](FAMILY-AUDIT.md#fonts-fontlab-72-crashes-on)).
+- **Opening some fonts crashes FontLab** (a `GPOS` single adjustment with no values: Noto Sans JP's and KR's variable fonts, among others), losing the unsaved work in every open font. Family Audit's *Add files…* and Font Compare's *Open a font…* and installed fonts check each file first and offer a fixed copy. FontLab's own *File > Open Fonts* is not covered ([FAMILY-AUDIT.md](FAMILY-AUDIT.md#fonts-fontlab-72-crashes-on)).
 
 ## Speed
 

@@ -74,7 +74,7 @@ It runs every suite under Python 3, then the suites of the scripts FontLab runs 
 
 ## Limits
 
-- FontLab 7.2 can crash as it opens a font whose `GPOS` holds a single adjustment of format 2 with no values (Noto Sans JP's and KR's variable fonts, among others), losing the unsaved work in every open font. Family Audit's *Add files…* and Font Compare's *Open a font…* and installed fonts check each file first and offer a fixed copy; FontLab's own *File > Open Fonts* does not, and a WOFF2 is opened unchecked ([docs/FAMILY-AUDIT.md](docs/FAMILY-AUDIT.md#fonts-fontlab-72-crashes-on)).
+- FontLab 7.2 can crash as it opens a font whose `GPOS` holds a single adjustment with no values (Noto Sans JP's and KR's variable fonts, among others), losing the unsaved work in every open font. Family Audit's *Add files…* and Font Compare's *Open a font…* and installed fonts check each file first and offer a fixed copy; FontLab's own *File > Open Fonts* does not, and a WOFF2 is opened unchecked ([docs/FAMILY-AUDIT.md](docs/FAMILY-AUDIT.md#fonts-fontlab-72-crashes-on)).
 
 ## More
 

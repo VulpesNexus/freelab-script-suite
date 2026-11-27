@@ -262,6 +262,8 @@ How each tool came to work as it does: what it did before, what it does now, and
 
 - Family Audit began as the owner's question whether a tool that makes masters out of a set of fonts would be of use or only fancy. The survey of 4,986 fonts its page gives answered it: the audit comes first, and assembling the masters is a second step.
 - A font of another family than the window's was ticked with the family when *Add files…* opened it (image 344). It is now left unticked, and the log says so.
+- 2026-11-27: An assembled font's second master kept *Unnamed Regular* as its full name and *Unnamed-Regular* as its PostScript name, since FontLab keeps those names per master and only the first was named. A master named after its source's label also put parentheses and commas into a PostScript name. Each master is now named by its own source's style, and the reference's master is current once the new window opens (it had opened on the last master). The same day's timings: four Noto Sans instances of 4,515 glyphs were assembled in 14 s, two Noto Sans JP instances of 17,936 in 57 s.
+- 2026-11-27: A fixed copy of a font FontLab crashes on still crashed it: a static instance of Noto Sans JP at weight 700 keeps its two empty single adjustments with no glyph left in them, and the copy's format 1 subtables over no glyph crash FontLab in the same place. Such subtables are now found in either format and taken out of their lookup in the copy, which then opened after the heap was filled to make the crash certain. FreeLab MCP's `open_font` has the same fix.
 
 ## Proof
 

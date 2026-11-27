@@ -81,9 +81,9 @@ class DetectionTests(Case):
         self.assertEqual((scan["format"], scan["checked"], scan["count"]), ("sfnt", True, 2))
         self.assertEqual(self.found(scan), [(0, 1, 1, False, 0, 3), (0, 2, 0, True, 4, 7)])
         self.assertEqual(ak.crasher_summary(scan),
-                         u"2 single adjustment subtables of format 2 with no values (lookups 1 and 2)")
+                         u"2 single adjustment subtables with no values (lookups 1 and 2)")
         one = ak.scan_font_file(self.write("One.otf", fb.sfnt(font(fb.gpos([fb.lookup(1, [EMPTY])])), b"OTTO")))
-        self.assertEqual(ak.crasher_summary(one), u"1 single adjustment subtable of format 2 with no values (lookup 0)")
+        self.assertEqual(ak.crasher_summary(one), u"1 single adjustment subtable with no values (lookup 0)")
         clean = ak.scan_font_file(self.write("Clean.ttf", fb.sfnt(font(clean_gpos()))))
         self.assertEqual((clean["checked"], clean["count"]), (True, 0))
 
@@ -91,7 +91,7 @@ class DetectionTests(Case):
         data = fb.collection([font(clean_gpos()), font(crasher_gpos()), font(fb.gpos([fb.lookup(1, [EMPTY])]))])
         scan = ak.scan_font_file(self.write("Family.ttc", data))
         self.assertEqual((scan["format"], scan["count"], [e["font"] for e in scan["fonts"]]), ("collection", 3, [1, 2]))
-        self.assertEqual(ak.crasher_summary(scan), u"3 single adjustment subtables of format 2 with no values "
+        self.assertEqual(ak.crasher_summary(scan), u"3 single adjustment subtables with no values "
                                                    u"(font 1: lookups 1 and 2; font 2: lookup 0)")
 
     def test_woff_and_woff2(self):
@@ -186,6 +186,64 @@ class DetectionTests(Case):
         self.assertEqual(os.listdir(os.path.join(self.tmp, "other")), [], "no .tmp left")
 
 
+def filtered_lookup(kind, subtables, mark_set):
+    """A lookup with flag 0x10 (UseMarkFilteringSet): its mark filtering set follows the subtable offsets."""
+    out = struct.pack(">HHH", kind, 0x10, len(subtables))
+    at = 6 + 2 * len(subtables) + 2
+    offsets, body = b"", b""
+    for sub in subtables:
+        offsets += struct.pack(">H", at + len(body))
+        body += sub
+    return out + offsets + struct.pack(">H", mark_set) + body
+
+
+NO_GLYPH_2 = fb.single(2, 0, 0, glyphs=())  # format 2 with no values over no glyph
+NO_GLYPH_1 = fb.single(1, 4, glyphs=())  # format 1 over no glyph (a fixed copy of a static instance, 2026-11-27)
+
+
+class NoGlyphTests(Case):
+    """A single adjustment over no glyph crashed FontLab 7.2 as format 1 too (2026-11-27: NotoSansJP[wght] at wght
+    700, its copy fixed to format 1, crashed in the same function): it is found in either format, and the copy
+    takes it out of its lookup (as FreeLab MCP's listener does)."""
+
+    def gpos(self):
+        return fb.gpos([fb.lookup(1, [fb.single(1, 4), NO_GLYPH_2, fb.single(2, 4, 3), NO_GLYPH_1]),
+                        filtered_lookup(1, [NO_GLYPH_1, fb.single(1, 0), EMPTY], 7),
+                        fb.lookup(9, [fb.extension(NO_GLYPH_2)])])
+
+    def test_found_in_either_format(self):
+        found = ak.empty_single_adjustments(self.gpos())
+        self.assertEqual([(f["lookup"], f["subtable"], f["format"], f["glyphs"]) for f in found],
+                         [(0, 1, 2, 0), (0, 3, 1, 0), (1, 0, 1, 0), (1, 2, 2, 3), (2, 0, 2, 0)])
+        self.assertEqual(ak.empty_single_adjustments(fb.gpos([fb.lookup(1, [fb.single(1, 0)])])), [],
+                         "format 1 over glyphs holds its value")
+
+    def test_the_copy_takes_them_out(self):
+        path = self.write("Static.ttf", fb.sfnt(font(self.gpos())))
+        scan = ak.scan_font_file(path)
+        self.assertEqual(scan["count"], 5)
+        target = os.path.join(self.tmp, "copy.ttf")
+        self.assertEqual(ak.write_safe_copy(path, scan, target), 5)
+        with open(target, "rb") as handle:
+            copy = handle.read()
+        self.assertEqual(ak.scan_font_file(target)["count"], 0)
+        gpos_at, gpos_length = fb.tables_of(copy)[b"GPOS"][:2]
+        gpos = copy[gpos_at:gpos_at + gpos_length]
+        listing = struct.unpack_from(">H", gpos, 8)[0]
+
+        def subtables(li):
+            lookup = listing + struct.unpack_from(">H", gpos, listing + 2 + 2 * li)[0]
+            kind, flag, count = struct.unpack_from(">HHH", gpos, lookup)
+            offsets = struct.unpack_from(">%dH" % count, gpos, lookup + 6)
+            forms = [struct.unpack_from(">H", gpos, lookup + o)[0] for o in offsets]
+            mark_set = struct.unpack_from(">H", gpos, lookup + 6 + 2 * count)[0] if flag & 0x10 else None
+            return forms, mark_set
+        self.assertEqual(subtables(0), ([1, 2], None), "the two over glyphs kept as they were")
+        self.assertEqual(subtables(1), ([1, 1], 7), "the mark filtering set moved up with the offsets")
+        self.assertEqual(subtables(2), ([], None), "a lookup of one such subtable is left with none")
+        self.assertEqual(len(copy), os.path.getsize(path), "nothing moved")
+
+
 class CopyTests(Case):
     def test_the_copy_holds_format_1_with_no_values_and_nothing_else_changed(self):
         original = fb.sfnt(font(crasher_gpos()))
@@ -266,7 +324,7 @@ class QuestionTests(Case):
         self.assertIn(u"<i>NotoSansJP[wght].ttf</i>: FontLab 7.2 crashes on it, so a fixed copy is opened instead",
                       self.log[0][1])
         self.assertIn(u"the file itself is not changed", self.log[0][1])
-        self.assertIn(u"1 single adjustment subtable of format 2 with no values (lookup 0) was made", self.log[1][1])
+        self.assertIn(u"1 single adjustment subtable with no values (lookup 0) was made", self.log[1][1])
 
     def test_skipped_files_are_said_and_not_opened(self):
         ak.ask_open_fixed = lambda parent, crashers: False
@@ -364,7 +422,7 @@ class QuestionTests(Case):
         self.assertEqual(sorted(box.buttons), [u"Open a fixed copy", u"Skip it"])
         self.assertIn(u"FontLab 7.2 crashes on opening NotoSansJP[wght].ttf", box.text)
         self.assertIn(u"a crash loses the unsaved work in every open font", box.text)
-        self.assertIn(u"2 single adjustment subtables of format 2 with no values (lookups 1 and 2)", box.text)
+        self.assertIn(u"2 single adjustment subtables with no values (lookups 1 and 2)", box.text)
         self.assertIn(u"Your file is not changed.", box.text)
         # (the subtables counted, not the files: live, one file of two read "such a subtable positions nothing")
         self.assertIn(u"such subtables position nothing, and each is made an empty one", box.text)

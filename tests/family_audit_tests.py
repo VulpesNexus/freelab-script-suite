@@ -511,7 +511,7 @@ class FakeCalls(object):
 
     def set_names(self, package, family, style):
         self.check("names")
-        self.record.events.append(("named", family, style))
+        self.record.events.append(("named", family, style, package.current))
 
     def show_package(self, package):
         self.record.events.append(("shown",))
@@ -760,10 +760,19 @@ class BuildTests(unittest.TestCase):
         self.assertLess(events.index(("shown",)), events.index(("contours", u"A", u"Regular")))
         # (the owner, 2026-11-24: the new font's tab read "Unnamed". Named before its window opens)
         named = [event for event in events if event[0] == "named"]
-        self.assertEqual(len(named), 1, named)
-        self.assertEqual(named[0][2], u"Regular", "its first master's name as the style")
-        self.assertLess(events.index(named[0]), events.index(("shown",)))
+        # (live 2026-11-27: each master has its own style, full, and PostScript names; the second master kept
+        # "Unnamed Regular": each is named with it current, by its source's style)
+        self.assertEqual(named, [("named", u"Sans", u"Regular", u"Regular"), ("named", u"Sans", u"Bold", u"Bold")])
+        self.assertLess(events.index(named[-1]), events.index(("shown",)))
         self.assertEqual(events[-2:], [("listed",), ("modified",)])
+        self.assertEqual(package.current, u"Regular", "the reference's master current at the end, the axes placed")
+
+    def test_postscript_names(self):
+        self.assertEqual(fa.postscript_name(u"Noto Sans JP", u"Regular (Noto Sans JP, NotoSansJP-Regular.ttf)"),
+                         u"NotoSansJP-RegularNotoSansJP,NotoSansJP-Regular.ttf")
+        self.assertEqual(fa.postscript_name(u"Sans", u"Bold"), u"Sans-Bold")
+        self.assertEqual(len(fa.postscript_name(u"A" * 80, u"Bold")), 63)
+        self.assertEqual(fa.postscript_name(u"Café Sans", u"Light"), u"CafSans-Light", "ASCII only")
 
     def test_the_references_code_info_kerning_and_axes(self):
         calls, plan, package, report = self.build()

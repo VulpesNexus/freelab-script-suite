@@ -4022,6 +4022,15 @@ class _GposSteps(object):
                                 "over and over)" % MAX_GPOS_STEPS)
 
 
+def _coverage_empty(data, at):
+    """Whether the Coverage table at at covers no glyph (its count of glyphs or ranges 0; False for a format that
+    is not 1 or 2, or one that cannot be read)."""
+    try:
+        return _font_u16(data, at) in (1, 2) and _font_u16(data, at + 2) == 0
+    except FontFileError:
+        return False
+
+
 def _coverage_size(data, at, steps=None):
     """How many glyphs the Coverage table at at covers (None for a format that is not 1 or 2)."""
     form = _font_u16(data, at)
@@ -4049,9 +4058,12 @@ def _lookup_empty_singles(gpos, lookups, li, found, steps, coverages):
             if _font_u16(gpos, at) != 1 or _font_u16(gpos, at + 2) != 1:
                 continue  # (an extension of another lookup type)
             at += _font_u32(gpos, at + 4)
-        if _font_u16(gpos, at) != 2 or _font_u16(gpos, at + 6) != 0:
+        form = _font_u16(gpos, at)
+        if form == 2 and _font_u16(gpos, at + 6) != 0 or form not in (1, 2):
             continue
         where = at + _font_u16(gpos, at + 2)
+        if form == 1 and not _coverage_empty(gpos, where):
+            continue  # (a format 1 subtable over glyphs holds its one value)
         if where not in coverages:
             try:
                 coverages[where] = _coverage_size(gpos, where, steps)
@@ -4059,14 +4071,16 @@ def _lookup_empty_singles(gpos, lookups, li, found, steps, coverages):
                 raise
             except FontFileError:
                 coverages[where] = None
-        found.append({"lookup": li, "subtable": si, "extension": kind == 9,
-                      "value_format": _font_u16(gpos, at + 4), "glyphs": coverages[where], "at": at})
+        found.append({"lookup": li, "subtable": si, "extension": kind == 9, "format": form,
+                      "value_format": _font_u16(gpos, at + 4), "glyphs": coverages[where], "at": at,
+                      "lookup_at": lookup})
 
 
 def empty_single_adjustments(gpos, errors=None):
-    """The single adjustment subtables of format 2 with no values in a GPOS table's bytes, in lookup order:
-    [{"lookup", "subtable", "extension", "value_format", "glyphs", "at"}], lookup and subtable counted from 0 as
-    fontTools counts them, at the subtable's offset in the table. Raises FontFileError when the table cannot be
+    """The single adjustment subtables with no values in a GPOS table's bytes (format 2 with a ValueCount of 0, or
+    format 1 over no glyph), in lookup order: [{"lookup", "subtable", "extension", "format", "value_format",
+    "glyphs", "at", "lookup_at"}], lookup and subtable counted from 0 as fontTools counts them, at the subtable's
+    offset in the table, lookup_at its lookup's. Raises FontFileError when the table cannot be
     read that far, or lists more than MAX_GPOS_STEPS subtables (FontFileLimit). errors: a list, to read on
     instead: a lookup that cannot be read adds its error there and the next is read; past the limit, the error is
     added and what was found is returned (a crasher found is never lost to a later part that cannot be read)."""
@@ -4135,6 +4149,7 @@ def _sfnt_findings(read, base, errors=None):
     found = empty_single_adjustments(read(offset, length), errors)
     for finding in found:
         finding["at"] += offset
+        finding["lookup_at"] += offset
     return found
 
 
@@ -4335,7 +4350,7 @@ def _and_listed(items):
 
 
 def crasher_summary(scan):
-    """'2 single adjustment subtables of format 2 with no values (lookups 10 and 11)': what a scan found."""
+    """'2 single adjustment subtables with no values (lookups 10 and 11)': what a scan found."""
     parts = []
     several = scan["format"] == "collection" or any(entry["font"] for entry in scan["fonts"])  # (a WOFF2 collection too)
     for entry in scan["fonts"]:
@@ -4343,7 +4358,7 @@ def crasher_summary(scan):
         where = (u"lookup %d" % lookups[0]) if len(lookups) == 1 else u"lookups %s" % _and_listed(lookups)
         parts.append(u"font %d: %s" % (entry["font"], where) if several else where)
     count = scan["count"]
-    return u"%d single adjustment %s of format 2 with no values (%s)" % (
+    return u"%d single adjustment %s with no values (%s)" % (
         count, u"subtable" if count == 1 else u"subtables", u"; ".join(parts))
 
 
@@ -4376,15 +4391,18 @@ def _sfnt_from_woff(read):
 
 
 def fixed_font_bytes(data, fmt):
-    """A copy of a font file's bytes (bytearray; an sfnt or a collection) with each single adjustment of format 2
-    with no values made format 1 with no ValueFormat, over the same coverage: it positions nothing either, and
+    """A copy of a font file's bytes (bytearray; an sfnt or a collection) with each single adjustment with no
+    values over glyphs made format 1 with no ValueFormat, over the same coverage: it positions nothing either, and
     FontLab 7.2 opens it (FreeLab MCP's bisect). Nothing moves: the subtable's ValueFormat is set to 0 and its
-    ValueCount, already 0, is left as two unused bytes. Then the GPOS checksums and each font's head
-    checkSumAdjustment are made again. Returns (data, how many subtables were changed)."""
+    ValueCount, already 0, is left as two unused bytes. One over no glyph is taken out of its lookup instead
+    (format 1 over no glyph crashed FontLab too, 2026-11-27), its lookup's later subtable offsets moved up in
+    place. Then the GPOS checksums and each font's head checkSumAdjustment are made again. Returns (data, how many
+    subtables were changed or taken out)."""
     import struct
     read = _font_reader(data)
     bases = [0] if fmt == "sfnt" else _collection_bases(read)
     patched = set()
+    removals = {}  # {lookup's offset: indexes of its subtables to take out}
     directories = {}  # (as scan_font_file reads: past a part it cannot read; a font whose tables cannot be listed
     # is left as it is)
     for base in bases:
@@ -4394,10 +4412,15 @@ def fixed_font_bytes(data, fmt):
         except FontFileError:
             continue
         for finding in findings:
-            if finding["at"] not in patched:
+            if finding["glyphs"] == 0:
+                removals.setdefault(finding["lookup_at"], set()).add(finding["subtable"])
+            elif finding["at"] not in patched and finding["format"] == 2:
                 struct.pack_into(">H", data, finding["at"], 1)
                 struct.pack_into(">H", data, finding["at"] + 4, 0)
                 patched.add(finding["at"])
+    removed = 0
+    for lookup_at, indexes in removals.items():
+        removed += _take_out_subtables(data, lookup_at, indexes)
     for base in bases:
         tables = directories.get(base, {})
         if b"GPOS" in tables:
@@ -4417,7 +4440,22 @@ def fixed_font_bytes(data, fmt):
             for offset, length, _entry in tables.values():
                 total += _sfnt_checksum(data, offset, length)
         struct.pack_into(">I", data, head + 8, (0xB1B0AFBA - total) & 0xFFFFFFFF)
-    return data, len(patched)
+    return data, len(patched) + removed
+
+
+def _take_out_subtables(data, lookup_at, indexes):
+    """The subtables of the lookup at lookup_at whose indexes are given taken out of its list, in place: the
+    later offsets (and the mark filtering set after them, with flag 0x10) move up, the words left over at the end
+    are zeroed, and its count is lowered. Returns how many were taken out."""
+    import struct
+    flag, count = _font_u16(data, lookup_at + 2), _font_u16(data, lookup_at + 4)
+    offsets = [_font_u16(data, lookup_at + 6 + 2 * k) for k in range(count)]
+    tail = [_font_u16(data, lookup_at + 6 + 2 * count)] if flag & 0x10 else []
+    kept = [offset for k, offset in enumerate(offsets) if k not in indexes]
+    words = [len(kept)] + kept + tail
+    for k in range(1 + count + len(tail)):
+        struct.pack_into(">H", data, lookup_at + 4 + 2 * k, words[k] if k < len(words) else 0)
+    return count - len(kept)
 
 
 def safe_copies_folder():
@@ -4559,7 +4597,8 @@ def crash_checked_paths(paths, parent, log, is_open=None):
                     u"holds %s." % (name, html(exc), summary), "error")
             continue
         log.add(u"%s: FontLab 7.2 crashes on it, so a fixed copy is opened instead, from %s. Its %s %s made an empty "
-                u"single adjustment of format 1, which positions nothing either; the file itself is not changed." % (
+                u"single adjustment of format 1 (or taken out of its lookup where it covers no glyph), which positions "
+                u"nothing either; the file itself is not changed." % (
                     name, html(os.path.dirname(target)), summary, u"was" if scan["count"] == 1 else u"were each"))
         if scan.get("why_not"):
             log.add(u"Part of %s was not checked (%s): FontLab may still crash on what is there." % (

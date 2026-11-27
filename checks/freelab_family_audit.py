@@ -1537,10 +1537,11 @@ class FontLabCalls(object):
         psn "Unnamed-Regular", whatever fgPackage.info.familyName is set to, and its Font window's tab is
         titled by them (title_name(): the ffn, or "tfn: master" once it has several masters): the assembled
         Sarabun came up as "Unnamed: Bold" (the owner, 2026-11-24). All four are settable; set before the
-        window opens, since a tab already open kept its title when ffn was set after."""
+        window opens, since a tab already open kept its title when ffn was set after. tsn, ffn, and psn are the
+        current master's (live 2026-11-27): the caller names each master in turn."""
         package.tfn, package.tsn = family, style
         package.ffn = u"%s %s" % (family, style)
-        package.psn = u"%s-%s" % (family.replace(u" ", u""), style.replace(u" ", u""))
+        package.psn = postscript_name(family, style)
 
     def show_package(self, package):
         """Live (2026-11-24, Sarabun Regular and Bold assembled): fontlab.flItems.notifyPackageAdded(package) opens the new
@@ -1561,6 +1562,17 @@ class FontLabCalls(object):
     def mark_modified(package):
         """Proven: flPackage.setFlag(2, True) marks the font modified (FontLab asks before closing it)."""
         package.setFlag(2, True)
+
+
+POSTSCRIPT_FORBIDDEN = u"[](){}<>/%"
+REFERENCE_SETTLE_MS = 300  # the new font's reference master made current again once its window is made
+
+
+def postscript_name(family, style):
+    """"Family-Style" as a PostScript name: printable ASCII without spaces or [](){}<>/%, at most 63 characters."""
+    def clean(text):
+        return u"".join(c for c in u"%s" % text if 32 < ord(c) < 127 and c not in POSTSCRIPT_FORBIDDEN)
+    return (u"%s-%s" % (clean(family), clean(style)))[:63]
 
 
 # The font info read and, for the reference, written to the new font: (INFO_FIELDS key, fgPackage.info name)
@@ -1738,7 +1750,15 @@ def build_font(calls, plan, sources, progress=None):
         raise AssembleError(u"FontLab did not make the masters %s" % listed(lost), package)
     family = u"%s" % ((reference.info or {}).get("family") or u"")
     if family:  # (before its window opens: the window's tab is titled by these names)
-        failed.attempt(u"Font not named", family, calls.set_names, package, family, names[0])
+        # Each master has its own style, full, and PostScript names (live 2026-11-27: the second master of an
+        # assembled font kept "Unnamed Regular" and "Unnamed-Regular"), each its source's style
+        for name, key in plan.masters:
+            if len(names) > 1:
+                failed.attempt(u"Masters not made current, not named", name, calls.set_current_master, package, name)
+            style = u"%s" % ((sources[key].info or {}).get("style") or name)
+            failed.attempt(u"Font not named", name, calls.set_names, package, family, style)
+        if len(names) > 1:
+            failed.attempt(u"Masters not made current", names[0], calls.set_current_master, package, names[0])
     failed.attempt(u"Font window not opened", u"the new font", calls.show_package, package)
     source_of = dict((name, sources[key]) for name, key in plan.masters)
 
@@ -1906,8 +1926,6 @@ def build_font(calls, plan, sources, progress=None):
     if unmeasured:
         notes.append(u"The line metrics of %s were not read (FontLab gives a script its font's current master's only): "
                      u"set them in Font Info." % listed(unmeasured))
-    failed.attempt(u"Masters not made current", names[0], calls.set_current_master, package, names[0])
-
     # The axes, where the sources' weight or width classes differ, and each master's location on them
     placed = []
     for axis in plan.axes:
@@ -1919,6 +1937,7 @@ def build_font(calls, plan, sources, progress=None):
         for master in names:
             location = dict((axis.name, axis.locations[master]) for axis in placed)
             failed.attempt(u"Masters not placed on the axes", master, calls.set_location, package, master, location)
+    failed.attempt(u"Masters not made current", names[0], calls.set_current_master, package, names[0])
     failed.attempt(u"Code points not mapped", u"the new font", calls.rebuild_maps, package)
     failed.attempt(u"Font window not told of the glyphs", u"the new font", calls.glyphs_shown, package)
     failed.attempt(u"Font not marked modified", u"the new font", calls.mark_modified, package)
@@ -3138,9 +3157,36 @@ class FamilyAuditDialog(object):
             self.busy = False
         if package is not None:
             self.made_fonts.append(package)  # (held for the session)
+            self.reference_current_later(package, plan.masters[0][0])
         for text, level in assembly_lines(plan, report, error, package is not None):
             self.log.add(text, level)
         self.update_buttons()
+
+    def reference_current_later(self, package, master):
+        """The new font's reference master made current once FontLab has opened its window: the window, made
+        after the assembly returns, showed its last master (live 2026-11-27: Sarabun's Bold, the reference
+        Regular made current at the assembly's end), and setMaster then held."""
+        self.reference_pending = (package, master)
+        try:
+            QtCore, _QtGui = _qt()
+            timer = getattr(self, "reference_timer", None)
+            if timer is None:
+                timer = self.reference_timer = QtCore.QTimer(self.dialog)  # (its parent the window: deleted with it)
+                timer.setSingleShot(True)
+                timer.setInterval(REFERENCE_SETTLE_MS)
+                timer.connect("timeout()", self.reference_settled)
+            timer.start()
+        except Exception:
+            pass
+
+    def reference_settled(self):
+        pending, self.reference_pending = getattr(self, "reference_pending", None), None
+        if pending is None:
+            return
+        try:
+            self.calls.set_current_master(*pending)
+        except Exception:
+            pass  # (a timer's handler must not raise)
 
     @staticmethod
     def info_texts(package):
