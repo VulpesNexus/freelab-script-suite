@@ -33,11 +33,11 @@ Each character is decided on its own, by its Vertical_Orientation, its block, an
 
 | Character | How (share of the fonts) | Move (median) |
 | --- | --- | --- |
-| Small kana (ぁっゃァッャ) | Moved (97 to 100 percent) | 0.11 to 0.13 em right, 0.09 to 0.13 em up |
-| 、 and 。 | Moved (98 percent) | about 0.6 em right and 0.6 em up |
-| ， and ． | Moved (94 percent) | about 0.66 em right and 0.65 em up |
-| Brackets 「」（）〈〉【】 | Turned clockwise (93 to 97 percent) | none |
-| ー, ―, …, ‥, ＝ | Turned clockwise (82 to 97 percent) | none |
+| Small kana (ぁっゃァッャ) | Moved (98 to 100 percent) | 0.11 to 0.12 em right, 0.09 to 0.12 em up |
+| 、 and 。 | Moved (98 and 99 percent) | about 0.6 em right and 0.6 em up |
+| ， and ． | Moved (94 and 95 percent) | about 0.66 em right and 0.65 to 0.67 em up |
+| Brackets 「」（）〈〉【】 | Turned clockwise (93 to 95 percent) | none (」 0.02 em right) |
+| ー, ―, …, ‥, ＝ | Turned clockwise (90 to 97 percent) | none |
 | 〜 and ～ | Turned clockwise, then mirrored (92 to 96 percent) | none |
 
 Built from IBM Plex Sans JP's own glyphs (under other names, then undone), the forms came out where that font's designers put theirs: 「 and 〜 to the unit (turned, and turned then mirrored), ー within 4 units, っ within 29 units, and 、 within 23 units.

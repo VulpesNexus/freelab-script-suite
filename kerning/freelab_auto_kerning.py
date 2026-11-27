@@ -48,7 +48,7 @@ def hold_module(module):
 
 hold_module(sys.modules.get(__name__))  # (this copy: the windows it serves keep working after a reinstall)
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 KERN_VERSION = 2  # FREELAB_KERN_VERSION in kerning/native/freelab_kern.c
 EM_PIXELS = 200  # rendering size, pixels per em (halfkern renders at 100; finer steps here)
 HALO_SHARE = 0.1  # the envelope's halo, as a share of the em (halfkern's starting kernel)
