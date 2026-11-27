@@ -50,10 +50,10 @@ class DialogTests(unittest.TestCase):
 
     def test_the_note_names_the_font_in_bold_and_the_command_in_italics(self):
         note = qo.note_text(u"Sarabun")
-        self.assertTrue(note.startswith(u"<i>Overlay Fonts</i> opened"))
-        self.assertIn(u"glyphs of <b>Sarabun</b>, with", note)
+        self.assertTrue(note.startswith(u"Copies the glyphs chosen below from <b>Sarabun</b> into a new font"))
+        self.assertIn(u"opens <i>Overlay Fonts</i> on it", note)
         self.assertIn(u"<b>A &amp; B</b>", qo.note_text(u"A & B"), "the name made safe in rich text")
-        self.assertIn(u"of the current font,", qo.note_text(None))
+        self.assertIn(u"from the current font into", qo.note_text(None))
 
     def test_the_flags_line_stands_alone(self):
         self.assertEqual(qo.FLAG_PROMPT, u"Choose flagged glyphs:")

@@ -36,6 +36,18 @@ class QColor(object):
         r, g, b, a = self.rgba
         return u"#%02x%02x%02x%02x" % (a, r, g, b) if fmt == QColor.HexArgb else u"#%02x%02x%02x" % (r, g, b)
 
+    def red(self):
+        return self.rgba[0]
+
+    def green(self):
+        return self.rgba[1]
+
+    def blue(self):
+        return self.rgba[2]
+
+    def alpha(self):
+        return self.rgba[3]
+
     def __eq__(self, other):
         return isinstance(other, QColor) and other.rgba == self.rgba
 

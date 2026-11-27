@@ -576,9 +576,11 @@ def note_text(family):
     """The dialog's note, in rich text as the other tools say what they work on (the owner's image 171): the font's
     family in bold, FontLab's command in italics."""
     name = (family or u"").replace(u"&", u"&amp;").replace(u"<", u"&lt;").replace(u">", u"&gt;")
-    return (u"<i>Overlay Fonts</i> opened on a new font holding only these glyphs of %s, with its family's fonts "
-            u"added: each change then shows at once (on the whole font, FontLab works again on every glyph)."
-            % (u"<b>%s</b>" % name if name else u"the current font"))
+    # (said as what the tool does, then why: the earlier note, "Overlay Fonts opened on a new font holding only these
+    # glyphs", had no verb and spoke of glyphs not chosen yet: the owner found it confusing, image 215)
+    return (u"Copies the glyphs chosen below from %s into a new font, and opens <i>Overlay Fonts</i> on it with the "
+            u"family's fonts overlaid. Each change then shows at once; on the whole font, FontLab takes seconds for each "
+            u"change on a large font." % (u"<b>%s</b>" % name if name else u"the current font"))
 
 
 def can_overlay(text, flag_index):

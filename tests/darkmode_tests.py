@@ -247,6 +247,66 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertNotIn(u'bgcolor="#f0f0f0"', dark, "a cell's bgcolor dark too")
         self.assertIn(u"Upgrade", dark)
 
+    def test_a_dark_fields_text_is_mapped_light_and_put_back(self):
+        """The owner's images 205 to 207 and 214, 2026-11-27: a field on a dark ground, drawn as it is (no effect, for
+        its caret), kept the black text FontLab gives its palette. Its dark text is mapped light, again when FontLab
+        sets its palette, and FontLab's colors come back as dark mode goes off."""
+        field = FakeWidget("YLineEditSuffix", inherits=("QLineEdit",))
+        field.palette.setColor(qtfakes.QPalette.Base, qtfakes.QColor("#1f1f1f"))
+        field.palette.setColor(qtfakes.QPalette.Text, qtfakes.QColor("#000000"))
+        field.palette.setColor(qtfakes.QPalette.Disabled, qtfakes.QPalette.Text, qtfakes.QColor("#a0a0a0"))
+        dm._light_field_text(field)
+        text = field.palette.color(qtfakes.QPalette.Active, qtfakes.QPalette.Text)
+        self.assertGreater(min(text.red(), text.green(), text.blue()), 180, "black text mapped light")
+        self.assertEqual(field.palette.color(qtfakes.QPalette.Disabled, qtfakes.QPalette.Text).name(), u"#a0a0a0",
+                         "a light gray (disabled) left as it is")
+        self.assertTrue(field.property(dm.FIELD_TEXT_PROP), "watched for FontLab's next palette")
+        field.palette.setColor(qtfakes.QPalette.Active, qtfakes.QPalette.Text, qtfakes.QColor("#000000"))
+        dm._state()["on"] = True
+        dm._on_field_palette(field)
+        self.assertGreater(field.palette.color(qtfakes.QPalette.Active, qtfakes.QPalette.Text).red(), 180, "set again")
+        dm._restore_field_text(field, dm._record(field))
+        self.assertEqual(field.palette.color(qtfakes.QPalette.Active, qtfakes.QPalette.Text).name(), u"#000000")
+        self.assertIsNone(field.property(dm.FIELD_TEXT_PROP))
+
+    def test_a_field_whose_reads_stay_dark_is_set_once(self):
+        """2026-11-27: Qt sends the palette change from inside setPalette; a field whose palette still read dark was set
+        again from that event, without end, and Python's stack ran out (FontLab closed under the owner's work)."""
+        sets = []
+
+        class Stubborn(FakeWidget):
+            def setPalette(self, palette):
+                sets.append(palette)
+                if len(sets) > 50:
+                    raise RuntimeError("set without end")
+                dm._on_field_palette(self)  # (as Qt sends it, from inside setPalette)
+
+        field = Stubborn("YLineEditSuffix", inherits=("QLineEdit",))
+        field.palette.setColor(qtfakes.QPalette.Text, qtfakes.QColor("#000000"))  # (its reads never change)
+        dm._state()["on"] = True
+        dm._light_field_text(field)
+        self.assertEqual(len(sets), 1)
+        self.assertEqual(dm._state().get("errors", [])[-1:] and [e for e in dm._state()["errors"] if "field" in e], [])
+        dm._on_field_palette(field)  # (FontLab's next palette: set once more, not without end)
+        self.assertEqual(len(sets), 2)
+
+    def test_lists_are_not_let_go_of_for_their_sheet(self):
+        """The owner's image 213, 2026-11-27: the History list, a Qt list with a stylesheet, was let go of by the hooks,
+        and its rows' own light backgrounds stood white. Lists stay hooked; Qt's buttons and fields with a sheet do not."""
+        history = FakeWidget("QListWidget", sheet=u"QListWidget{background: white;}",
+                             inherits=("QAbstractScrollArea", "QAbstractItemView"))
+        self.assertFalse(dm._qt_drawn_styled(history))
+        button = FakeWidget("QToolButton", sheet=u"QToolButton{background: white;}", inherits=("QAbstractButton",))
+        self.assertTrue(dm._qt_drawn_styled(button))
+
+    def test_the_flag_bars_tools_are_not_swatches(self):
+        """The owner's image 216, 2026-11-27: the flag bar's clear-flag cross and arrows, black on the dark bar, were left
+        alone with the flag swatches."""
+        bar = FakeWidget("QWidget", u"widgetFlags")
+        for name, alone in ((u"flagRed", True), (u"flagNone", False), (u"flagUp", False), (u"flagDown", False)):
+            button = FakeWidget("QToolButton", name, parent=bar, inherits=("QAbstractButton",))
+            self.assertEqual(bool(dm._left_alone(button, "QToolButton")), alone, name)
+
     def test_a_sheet_noted_as_seen_is_fontlabs_not_ours(self):
         """The owner's image 193, 2026-11-27: the Font Info panel's Change... button white. FontLab's sheet, noted as
         seen, passed for one dark mode had darkened; and switching off put back an original kept from an earlier sheet

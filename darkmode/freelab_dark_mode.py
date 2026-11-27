@@ -290,6 +290,10 @@ SKIP_CLASSES = ("ColorPickerItem", "ColorPickerButton", "QtColorPicker", "QDeskt
                 "YSimpleSlider")  # drawn from the palette: its white knob is right on dark already
 SKIP_CLASS_WORDS = ("ColorSource", "OpacityBar", "Eyedropper")
 SWATCH_NAME_PREFIXES = ("flag",)
+# The flag bar's buttons that hold no color: the clear-flag cross and the two arrows beside the swatches, black icons
+# left black on the dark bar with the swatches (the owner's image 216, 2026-11-27: "only the cross, not its frame",
+# the frame being the button's own box)
+FLAG_TOOL_NAMES = ("flagNone", "flagUp", "flagDown")
 # The Color panel's channel sliders draw color gradients (their stylesheets): color controls too.
 # Under the ink effect, partial repaints left blocky patches in the red and blue tracks.
 COLOR_SLIDER_PANELS = ("ColorPanel",)
@@ -455,8 +459,10 @@ NATIVE_INK_DELEGATES = ("QStyledItemDelegate", "QItemDelegate", "MetricsDataDele
 SCRIPT_ISLAND_CLASSES = ("YContinueWidget",)
 # FontLab's classes built on widgets Qt draws: inside a hooked island they are processed as any
 # widget (a search field's line edit keeps its placeholder's ink), not hooked.
-QT_DRAWN_BASES = ("QLineEdit", "QAbstractButton", "QAbstractScrollArea", "QAbstractSpinBox", "QComboBox",
-                  "QLabel", "QAbstractSlider", "QTabBar")
+# (Not QAbstractScrollArea: a list draws its rows on its viewport, and FontLab's rows carry light backgrounds of their own
+# that no stylesheet reaches; let go of by the hooks, the History panel's rows stood white, "-Origin-" and its steps
+# on light cyan: the owner's image 213, 2026-11-27.)
+QT_DRAWN_BASES = ("QLineEdit", "QAbstractButton", "QAbstractSpinBox", "QComboBox", "QLabel", "QAbstractSlider", "QTabBar")
 PICKED_PROP = "freelabPicked"  # a hooked island showing colors the user picked, drawn as they are (see PICKED_WIDGETS)
 # A container whose own painting the native engine maps, its children left as they are (not an island: see
 # _hook_frame). The dock's frame lines and the panels' backgrounds and title strips were effects, which drew the
@@ -1435,7 +1441,7 @@ def _darken_sheet(widget):
         widget.setStyleSheet(dark)
 
 
-WATCHER_REVISION = 4  # raised when the filter below learns another event: a session that loaded an older one
+WATCHER_REVISION = 5  # raised when the filter below learns another event: a session that loaded an older one
 TAB_MOUSE_EVENTS = (2, 3, 5, 10, 11, 127, 128, 129)  # press, release, move, enter, leave, and the hover ones
 
 
@@ -1497,6 +1503,10 @@ def _watcher():
                         module = _module()
                         if module is not None:
                             module._on_tab_mouse(obj, kind)
+                    elif kind == PALETTE_CHANGE_EVENT and obj.property(FIELD_TEXT_PROP):
+                        module = _module()
+                        if module is not None and hasattr(module, "_on_field_palette"):
+                            module._on_field_palette(obj)
                 except Exception as exc:  # an event filter must never raise
                     _note_error("watcher", exc)
                 return False
@@ -3554,6 +3564,68 @@ def _dark_field(widget):
         return False
 
 
+FIELD_TEXT_PROP = "freelab_field_text"  # a dark-ground field whose text colors dark mode maps (_light_field_text)
+FIELD_TEXT_GROUPS = ("Active", "Inactive", "Disabled")
+PALETTE_CHANGE_EVENT = 39  # QEvent::PaletteChange
+
+
+def _light_field_text(widget):
+    """A field on a dark ground (_dark_field) drawn by Qt as it is: its palette's dark text colors (FontLab's black, a
+    dark red) mapped light as the hooks map ink (map_rgb), the colors FontLab gave kept to put back. Watched, so that
+    a palette FontLab sets later is mapped too (_on_field_palette). Never raises."""
+    record = _record(widget)
+    if record.get("field_busy"):
+        return  # (the palette change its own setPalette brings: see below)
+    try:
+        QPalette = _gui("QPalette")
+        QColor = _gui("QColor")
+        palette = QPalette(widget.palette)
+        originals = record.setdefault("field_text", {})
+        changed = False
+        for name in FIELD_TEXT_GROUPS:
+            group = getattr(QPalette, name)
+            color = palette.color(group, QPalette.Text)
+            if _color_lightness(color) >= 0.5:
+                continue
+            originals.setdefault(name, QColor(color))
+            r, g, b = map_rgb(color.red(), color.green(), color.blue())
+            palette.setColor(group, QPalette.Text, QColor(r, g, b, color.alpha()))
+            changed = True
+        if widget.property(FIELD_TEXT_PROP) is None:
+            widget.setProperty(FIELD_TEXT_PROP, True)
+            _watch(widget)
+        if changed:
+            # Qt sends the palette change from inside setPalette: handled here again, a palette whose reads still gave
+            # a dark color set it again without end, and Python's stack ran out (FontLab closed, 2026-11-27)
+            record["field_busy"] = True
+            try:
+                widget.setPalette(palette)
+            finally:
+                record.pop("field_busy", None)
+    except Exception as exc:
+        _note_error("field text", exc)
+
+
+def _on_field_palette(widget):
+    """A watched field's palette changed: FontLab's dark text mapped again (setting it brings this event once more,
+    which then finds nothing dark). Nothing while dark mode is off."""
+    if widget.property(FIELD_TEXT_PROP) and _state().get("on"):
+        _light_field_text(widget)
+
+
+def _restore_field_text(widget, record):
+    """The text colors FontLab gave the field, back as dark mode goes off."""
+    originals = record.pop("field_text", None)
+    widget.setProperty(FIELD_TEXT_PROP, None)
+    if not originals:
+        return
+    QPalette = _gui("QPalette")
+    palette = QPalette(widget.palette)
+    for name, color in originals.items():
+        palette.setColor(getattr(QPalette, name), QPalette.Text, color)
+    widget.setPalette(palette)
+
+
 def _page(widget):
     """One of PAGE_NAMES (the browser), or its viewport. Never raises."""
     try:
@@ -3595,6 +3667,22 @@ def _show_page(widget):
     if browser is not widget:
         return  # (the browser does the page)
     page = _record(browser)
+    if "page_slot" not in page:
+        # FontLab sets the page's HTML after the window shows (fetched from its server): it stood white for ten seconds
+        # and more, until a sweep came by (the owner's images 208 and 210, 2026-11-27). Its every new text is turned
+        # dark as it comes (our own setHtml comes back here, finds its dark HTML, and does nothing).
+        def changed(browser=browser):
+            try:
+                module = _module()
+                if module is not None and module._state().get("on"):
+                    module._show_page(browser)
+            except Exception as exc:  # a slot must not raise
+                _note_error("page", exc)
+        page["page_slot"] = changed  # (held: PythonQt drops a slot no Python object holds)
+        try:
+            browser.connect("textChanged()", changed)
+        except Exception as exc:
+            _note_error("page", exc)
     try:
         html = browser.toHtml()
         if page.get("dark_html") == html:
@@ -4235,7 +4323,8 @@ def _asked_to_be_left_alone(obj):
 
 def _left_alone(widget, name):
     return (name in SKIP_CLASSES or any(word in name for word in SKIP_CLASS_WORDS) or _asked_to_be_left_alone(widget)
-            or (widget.inherits("QAbstractButton") and (_prop(widget, "objectName") or u"").startswith(SWATCH_NAME_PREFIXES))
+            or (widget.inherits("QAbstractButton") and (_prop(widget, "objectName") or u"").startswith(SWATCH_NAME_PREFIXES)
+                and (_prop(widget, "objectName") or u"") not in FLAG_TOOL_NAMES)
             or (widget.inherits("QAbstractSlider") and _within(widget, COLOR_SLIDER_PANELS)))
 
 
@@ -4400,7 +4489,7 @@ def _set_effect(widget, record, kind, keys=None):
     effect.freelab_keep_tint = KEEP_TINT_CONTENT if content else 0.0
     effect.freelab_edge_target = frame_target(keys) if keys else 0
     effect.freelab_kind = kind
-    effect.freelab_gray = kind == "ink" and _gray_text(widget)
+    effect.freelab_gray = kind == "ink" and _grays_text(widget)
     # a list's rows (the font window's sidebar): drawn on nothing, gray sub-items and dark glyph icons are ink too
     parent = widget.parentWidget()
     effect.freelab_list = kind == "ink" and parent is not None and parent.inherits("QAbstractItemView")
@@ -4429,8 +4518,10 @@ def _forget_effect(widget):
         widget.setProperty(ISLAND_PROP, None)
 
 
-def _gray_text(widget):
-    """Fields and selectors: drawn in grays before mapping (their light text's ClearType fringes)."""
+def _grays_text(widget):
+    """Fields and selectors: drawn in grays before mapping (their light text's ClearType fringes). (Named apart from
+    _gray_text below, which sets a font: under one name, the later definition answered this question with None and
+    set the font, so no ink effect grayed its text.)"""
     return (_class_name(widget) in GRAYSCALE_TEXT_CLASSES or _class_name(widget) in GRAY_INK_CLASSES
             or widget.inherits("QLineEdit")
             or (_class_name(widget) == "QLabel" and _prop(widget, "objectName") in GRAYSCALE_TEXT_NAMES))
@@ -4591,6 +4682,11 @@ def _undo_widget(widget, keep_props=False, keep_placeholder=False):
         if "palette" in record:
             palette = record.pop("palette")
             widget.setPalette(palette if palette is not None else _gui("QPalette")())  # empty: inherit again
+        if "page_slot" in record:  # (first: the HTML put back below must not be turned dark again)
+            try:
+                widget.disconnect("textChanged()", record.pop("page_slot"))
+            except Exception:
+                pass
         if "html" in record:  # a page turned dark (_show_page): its own HTML back, unless it changed since
             html, dark = record.pop("html"), record.pop("dark_html", None)
             if dark is None or widget.toHtml() == dark:
@@ -4604,6 +4700,8 @@ def _undo_widget(widget, keep_props=False, keep_placeholder=False):
         if "font" in record:
             font = record.pop("font")
             widget.setFont(font if font is not None else _gui("QFont")())  # (empty: inherit again)
+        if "field_text" in record or widget.property(FIELD_TEXT_PROP):
+            _restore_field_text(widget, record)
         record.pop("cross_hot", None)
         if "cursor" in record:
             _restore_cursor(widget, record)
@@ -4858,9 +4956,13 @@ def process(widget):
         # Under the native engine, a field on a dark ground is drawn by Qt right as it is, its text grayed by its font
         # (_gray_text) rather than by an effect. The ink effect mapped Qt's light caret, repainted alone as it blinks,
         # to the field's ground: no caret to be seen in some fields (the owner's image 198, 2026-11-27).
+        # FontLab gives most of its fields a palette of their own with black text, which the ink effect mapped: without
+        # the effect it stood black on the dark ground (the owner's images 205 to 207 and 214, 2026-11-27). Its dark
+        # text colors are mapped light in its palette instead, again whenever FontLab sets its palette (_light_field_text).
         record = _record(widget)
         _clear_effect(widget, record)
         _gray_text(widget)
+        _light_field_text(widget)
         _set_placeholder(widget)
         _protect(widget)
         return
