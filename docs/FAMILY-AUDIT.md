@@ -73,7 +73,7 @@ The units per em are the reference's; sources with other units per em are copied
 
 The sources are read again as *Assemble* starts, as they are then. Making the new font cannot be stopped halfway: its steps show in the top row until it is done.
 
-## FontLab calls proven live, and not yet
+## FontLab calls proven live
 
 Every FontLab call of the tool is a method of `FontLabCalls`, each with a docstring saying what it assumes. Proven before (FreeLab MCP's *FONTLAB7-API.md*, Font Compare, Feature Code, Glyph Compose): the open fonts and their numbers, `masters`, `master`, `tfn`, `tsn`, `path`, `versionMajor` and `versionMinor`, `fgPackage.glyphs` and their `unicodes`, `findName`, `getLayerByName` (with `True` to make a layer), a layer's shapes, contours, nodes and their types, components and anchors, `kerning(master)` read through FontKerning and written through it, `groups[name] = (members, side)`, `get_feature`, `get_prefix`, `set_feature`, `getAllGroups`, `requestLoadingFont`, `flPackage()` for a new font, `flGlyph()` and `addGlyph`, `flShape()` with `addContours` and `flContour.clone()`, `GlyphComponent` with `setGlyphComponents`, `flPinPoint` with `addAnchor`, `advanceWidth`, `fgGlyph.unicodes`, `flGlyph.update()`, `rebuildMaps()`, `notifyPackageContentUpdated`, and `setFlag(2, True)`. Proven on 2026-11-24, by assembling Sarabun Regular and Bold (two static fonts of 777 glyphs, opened from their files) in FontLab 7.2 and reading the new font back:
 
