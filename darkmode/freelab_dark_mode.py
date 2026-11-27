@@ -1511,7 +1511,7 @@ def _darken_sheet(widget):
         widget.setStyleSheet(dark)
 
 
-WATCHER_REVISION = 5  # raised when the filter below learns another event: a session that loaded an older one
+WATCHER_REVISION = 6  # raised when the filter below learns another event: a session that loaded an older one
 TAB_MOUSE_EVENTS = (2, 3, 5, 10, 11, 127, 128, 129)  # press, release, move, enter, leave, and the hover ones
 
 
@@ -1577,6 +1577,10 @@ def _watcher():
                         module = _module()
                         if module is not None and hasattr(module, "_on_field_palette"):
                             module._on_field_palette(obj)
+                    elif kind == SHOW_EVENT and obj.property(PAGE_SHOW_PROP):
+                        module = _module()
+                        if module is not None and hasattr(module, "_on_page_shown"):
+                            module._on_page_shown(obj)
                 except Exception as exc:  # an event filter must never raise
                     _note_error("watcher", exc)
                 return False
@@ -5163,6 +5167,7 @@ def process(widget):
         process(ancestor)
     widget.setProperty(SEEN_PROP, True)
     _drop_stray_effect(widget)
+    _watch_page(widget)
     visible_unchecked = widget.isVisible() and _unchecked(widget)
     first_look = visible_unchecked  # (kept: the rules below switch visible_unchecked off as they decide)
     if visible_unchecked:
@@ -5612,6 +5617,56 @@ def _menu_hook(menu):
         if module is not None:
             module._on_menu_shown(menu)
     return shown
+
+
+# A page: a hidden widget holding others (one of Preferences' pages, a stacked widget's), watched for its Show
+# event (sent once it and its children are shown, before they paint): its widgets are processed then, not at the
+# next sweep. What is decided only once a widget is visible (Preferences' icon toggles) flashed light each time a
+# page was first shown (the owner, with images 232 and 233, 2026-11-27).
+PAGE_SHOW_PROP = "freelab_page_show"
+SHOW_EVENT = 17  # QEvent::Show
+
+
+PAGE_NOT = ("QAbstractButton", "QAbstractSpinBox", "QAbstractItemView", "QAbstractSlider", "QTabBar", "QComboBox",
+            "QLineEdit")  # controls that hold widgets of their own: no pages
+
+
+def _watch_page(widget):
+    """A hidden widget holding others, not a window nor a control: watched for its Show event (_on_page_shown)."""
+    try:
+        if widget.isVisible() or not widget.isHidden() or widget.isWindow():
+            return
+        if any(widget.inherits(name) for name in PAGE_NOT):
+            return
+        if not any(child.isWidgetType() for child in widget.children()):
+            return
+    except Exception:
+        return
+    if widget.property(WATCHED_PROP) is None:
+        _record(widget)["page_watch_only"] = True  # (not watched for anything else: let go after its first show)
+    widget.setProperty(PAGE_SHOW_PROP, True)
+    _watch(widget)
+
+
+def _on_page_shown(page):
+    """A page now shown: its visible widgets not yet looked at, processed at once."""
+    state = _state()
+    if not state["on"] or state.get("busy") or not _alive(page):
+        return
+    state["busy"] = True  # the worker must not re-enter from a signal sent while processing
+    try:
+        for widget in [page] + _descendants(page):
+            try:
+                if widget.isVisible() and (widget.property(SEEN_PROP) is None or _unchecked(widget)):
+                    widget.setProperty(QUEUED_PROP, None)
+                    process(widget)
+            except Exception as exc:  # one odd widget must not stop the rest
+                _note_error(u"page shown %s" % _class_name(widget), exc)
+        page.setProperty(PAGE_SHOW_PROP, None)  # (shown once: looked at; later shows are the sweeps')
+        if _record(page).pop("page_watch_only", None):
+            _unwatch(page)
+    finally:
+        state["busy"] = False
 
 
 def lighter_name(name, factor):

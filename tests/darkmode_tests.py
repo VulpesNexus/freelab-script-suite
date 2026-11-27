@@ -321,6 +321,69 @@ class ShadeAndPickerTests(DarkModeCase):
         dm._on_field_palette(field)  # (FontLab's next palette: set once more, not without end)
         self.assertEqual(len(sets), 2)
 
+    def test_a_page_is_processed_as_it_is_shown(self):
+        """The owner, with images 232 and 233, 2026-11-27: Preferences' icon toggles flashed light for a sweep each
+        time a page was first shown. The page's visible widgets not yet looked at are processed at its Show event;
+        hidden ones and ones already looked at are left; a Show sent from inside processing (busy) is left to the
+        outer loop, and nothing happens with dark mode off."""
+        frame = FakeWidget("QFrame", u"frameContent")
+        page = FakeWidget("QWidget", u"page", parent=frame)
+        fresh = FakeWidget("QToolButton", u"fresh", parent=page)
+        hidden = FakeWidget("QToolButton", u"hidden", parent=page, visible=False)
+        looked = FakeWidget("QToolButton", u"looked", parent=page)
+        for widget in (page, looked):
+            widget.setProperty(dm.SEEN_PROP, True)
+            widget.setProperty(dm.CHECKED_PROP, dm._size_key(widget))
+        done = []
+        page.setProperty(dm.PAGE_SHOW_PROP, True)
+        dm._record(page)["page_watch_only"] = True
+        saved, saved_descendants, saved_unwatch = dm.process, dm._descendants, dm._unwatch
+        dm.process = lambda widget: done.append(widget.objectName)
+        dm._unwatch = lambda widget: done.append(u"let go of " + widget.objectName)
+        self.addCleanup(setattr, dm, "_unwatch", saved_unwatch)
+        dm._descendants = lambda widget: widget.findChildren(None)
+        self.addCleanup(setattr, dm, "_descendants", saved_descendants)
+        state = dm._state()
+        try:
+            state.update({"on": True, "busy": True})
+            dm._on_page_shown(page)
+            self.assertEqual(done, [], "busy: left to the outer loop")
+            state.update({"on": False, "busy": False})
+            dm._on_page_shown(page)
+            self.assertEqual(done, [], "dark mode off")
+            state["on"] = True
+            dm._on_page_shown(page)
+        finally:
+            dm.process = saved
+            state.update({"on": False, "busy": False})
+        self.assertEqual(done, [u"fresh", u"let go of page"], "watched only for its first show: let go after it")
+        self.assertIsNone(page.property(dm.PAGE_SHOW_PROP))
+        self.assertFalse(state.get("busy"))
+
+    def test_pages_are_hidden_widgets_holding_others(self):
+        """Watched for their Show event: a hidden widget, not a window, holding widgets. Not a visible one, nor one
+        hidden only with its parent, nor an empty one, nor a window."""
+        def made(cls, hidden=True, holds=True, window=False, visible=False):
+            widget = FakeWidget(cls, u"w", visible=visible)
+            widget.isHidden = lambda: hidden
+            widget.isWindow = lambda: window
+            if holds:
+                FakeWidget("QToolButton", u"child", parent=widget)
+            return widget
+
+        watched = []
+        saved = dm._watch
+        dm._watch = lambda widget: watched.append(widget)
+        try:
+            page = made("Pref_Groups")
+            for widget in (page, made("QWidget", visible=True, hidden=False), made("QWidget", hidden=False),
+                           made("QWidget", holds=False), made("QDialog", window=True)):
+                dm._watch_page(widget)
+        finally:
+            dm._watch = saved
+        self.assertEqual(watched, [page])
+        self.assertTrue(page.property(dm.PAGE_SHOW_PROP))
+
     def test_lists_drawing_check_pictures_get_the_checks_overlay(self):
         """The owner's images 211 and 235, 2026-11-27: FontAudit's and the OCR languages' lists draw their check boxes
         as FontLab's pictures (LanguagesDelegate), unlike every other check box; their viewports get the "checks"
