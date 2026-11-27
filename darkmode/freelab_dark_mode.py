@@ -899,12 +899,40 @@ def _recolor_token(match, prop):
 
 
 def recolor_sheet(sheet):
-    """Return a stylesheet with its literal colors turned dark (see recolor)."""
+    """Return a stylesheet with its literal colors turned dark (see recolor), a disabled widget's text dimmed
+    (_dim_disabled)."""
     def declaration(match):
         prop = match.group(1).lower()
         value = _COLOR_RE.sub(lambda color: _recolor_token(color, prop), match.group(3))
         return match.group(1) + match.group(2) + value
-    return _DECLARATION_RE.sub(declaration, sheet)
+    return _dim_disabled(_DECLARATION_RE.sub(declaration, sheet))
+
+
+_RULE_RE = re.compile(r"([^{}]+)\{([^{}]*)\}")
+_TEXT_COLOR_RE = re.compile(r"(?<![-\w])(color\s*:\s*)([^;}]+)", re.I)
+
+
+def _dim_disabled(sheet):
+    """A sheet's :disabled rules given the dark palette's disabled text for their color. FontLab grays a disabled
+    field, label, or button with a light gray (#a0a0a0, #b0b0b0), faint on white; kept on dark, it stood nearly as
+    bright as enabled text, and a field that takes no typing looked like one that does (the owner's images 222 to 231,
+    2026-11-27)."""
+    gray = _disabled_text()
+
+    def rule(match):
+        if u":disabled" not in match.group(1):
+            return match.group(0)
+        return match.group(1) + u"{" + _TEXT_COLOR_RE.sub(lambda c: c.group(1) + gray, match.group(2)) + u"}"
+    return _RULE_RE.sub(rule, sheet)
+
+
+def _disabled_text():
+    """The disabled text color of the shade's palette (#7f7f7f in the dark shade)."""
+    try:
+        palette = SHADES.get(_state().get("shade") or "dark", SHADES["dark"])[0]
+    except Exception:
+        palette = PALETTE_DARK
+    return dict((role, disabled) for role, _color, disabled in palette).get("Text") or u"#7f7f7f"
 
 
 def _native():
@@ -3660,11 +3688,16 @@ def _light_field_text(widget):
         for name in FIELD_TEXT_GROUPS:
             group = getattr(QPalette, name)
             color = palette.color(group, QPalette.Text)
-            if _color_lightness(color) >= 0.5:
+            if _color_lightness(color) >= 0.5 or (name == "Disabled" and color.name() == _disabled_text()):
                 continue
             originals.setdefault(name, QColor(color))
-            r, g, b = map_rgb(color.red(), color.green(), color.blue())
-            palette.setColor(group, QPalette.Text, QColor(r, g, b, color.alpha()))
+            if name == "Disabled":
+                # (dim, as the palette's disabled text: mapped light, a field that takes no typing looked like one
+                # that does, the owner's images 222 to 231)
+                palette.setColor(group, QPalette.Text, QColor(_disabled_text()))
+            else:
+                r, g, b = map_rgb(color.red(), color.green(), color.blue())
+                palette.setColor(group, QPalette.Text, QColor(r, g, b, color.alpha()))
             changed = True
         if widget.property(FIELD_TEXT_PROP) is None:
             widget.setProperty(FIELD_TEXT_PROP, True)
@@ -5849,6 +5882,15 @@ def _island(widget):
         # FontLab styled it. FontLab's segmented buttons (Anchors and Pins, the Font Info panel's Change...) came out
         # white once FontLab restyled them, as a toggle or a refresh does, and a sweep found them light (the owner's
         # images 193 to 196, 2026-11-27). Their stylesheet is darkened instead, as any widget's.
+        # An island look given before (the script engine's: its ancestors' light sheets copied onto it, kept as dark
+        # mode's own, and mapped by an effect) is undone first: Font Info's Change... came out dim, its text the effect's
+        # mapping of light text on light, and its sheet, taken for ours, was never darkened (the owner's image 223)
+        _forget_effect(widget)
+        own = widget.property(SHEET_PROP)
+        if own is not None and widget.property(DARK_SHEET_PROP) == _prop(widget, "styleSheet"):
+            widget.setProperty(SHEET_PROP, None)
+            widget.setProperty(DARK_SHEET_PROP, None)
+            widget.setStyleSheet(own)
         _unhook(widget)
         _darken_sheet(widget)
     elif state.get("engine") == "native" and state.get("hooked") and _hookable(widget):
@@ -5860,8 +5902,20 @@ def _island(widget):
 def _qt_drawn_styled(widget):
     """A widget of Qt's own class and drawing (QT_DRAWN_BASES) with a stylesheet, but a tab bar (its names: see
     _hook_island). FontLab's subclasses paint themselves (YRoundedLabel's pill): the hooks map them."""
-    return bool(_prop(widget, "styleSheet")) and _class_name(widget).startswith("Q") \
-        and not widget.inherits("QTabBar") and any(widget.inherits(base) for base in QT_DRAWN_BASES)
+    if not (_class_name(widget).startswith("Q") and not widget.inherits("QTabBar")
+            and any(widget.inherits(base) for base in QT_DRAWN_BASES)):
+        return False
+    if _prop(widget, "styleSheet"):
+        return True
+    # A text button styled by its ancestors' sheets (Font Info's Change..., Preferences' Check now): Qt draws it from them
+    # too. Not one showing a picture: Preferences' icon toggles have light pictures of FontLab's, which the island maps
+    # (taken for Qt's drawing, they stood light: the owner's images 232 and 233, 2026-11-27).
+    try:
+        icon = _prop(widget, "icon")
+        return (widget.inherits("QAbstractButton") and type(widget.style()).__name__ == "QStyleSheetStyle"
+                and bool((_prop(widget, "text") or u"").strip()) and (icon is None or icon.isNull()))
+    except Exception:
+        return False
 
 
 def _unhook(widget):

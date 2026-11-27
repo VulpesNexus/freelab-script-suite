@@ -321,6 +321,33 @@ class ShadeAndPickerTests(DarkModeCase):
         dm._on_field_palette(field)  # (FontLab's next palette: set once more, not without end)
         self.assertEqual(len(sets), 2)
 
+    def test_disabled_text_is_dimmed_in_sheets(self):
+        """The owner's images 222 to 231, 2026-11-27: FontLab grays disabled fields and labels with #a0a0a0 and #b0b0b0,
+        faint on white; kept on dark, they looked enabled. A :disabled rule's text takes the palette's disabled gray."""
+        sheet = (u"QWidget:disabled{color:#a0a0a0;}\nQLineEdit:disabled{color: #b0b0b0;background-color:transparent;"
+                 u"border-color:#d0d0d0;}\nQLabel{color:#202020;}")
+        dark = dm.recolor_sheet(sheet)
+        self.assertIn(u"QWidget:disabled{color:#7f7f7f;}", dark)
+        self.assertIn(u"QLineEdit:disabled{color: #7f7f7f;background-color:transparent;", dark)
+        self.assertNotIn(u"border-color:#7f7f7f", dark, "only the text's color")
+        self.assertNotIn(u"QLabel{color:#7f7f7f", dark, "enabled rules as mapped")
+
+    def test_a_button_styled_by_its_ancestors_leaves_its_island_look(self):
+        """The owner's image 223, 2026-11-27: Font Info's Change..., styled by its dialog's sheets, was made an island:
+        its ancestors' light sheets copied onto it, kept as dark mode's own, and an effect mapping it, its text dim. It
+        is Qt's own drawing: its own sheet back, darkened, no effect."""
+        light = u"QToolButton{background-color: white;}"
+        button = FakeWidget("QToolButton", u"buttonUpm", sheet=light, inherits=("QAbstractButton",))
+        button.setProperty(dm.SHEET_PROP, u"")  # (its own sheet: none; the light one is the island's cascade)
+        button.setProperty(dm.DARK_SHEET_PROP, light)
+        dm._state().update({"engine": "native", "hooked": True})
+        try:
+            dm._island(button)
+        finally:
+            dm._state().update({"engine": None, "hooked": None})
+        self.assertEqual(button.styleSheet, u"", "its own (empty) sheet back: the dialog's darkened sheets style it")
+        self.assertIsNone(button.effect)
+
     def test_typing_areas_are_never_held(self):
         """The owner's video of 2026-11-27: in Font Info's Font Lib, the text vanished while the mouse was held, the
         editor held as a modal dialog's large widget is during a color drag (and its picture from an earlier press)."""
