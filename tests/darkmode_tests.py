@@ -321,6 +321,16 @@ class ShadeAndPickerTests(DarkModeCase):
         dm._on_field_palette(field)  # (FontLab's next palette: set once more, not without end)
         self.assertEqual(len(sets), 2)
 
+    def test_typing_areas_are_never_held(self):
+        """The owner's video of 2026-11-27: in Font Info's Font Lib, the text vanished while the mouse was held, the
+        editor held as a modal dialog's large widget is during a color drag (and its picture from an earlier press)."""
+        editor = FakeWidget("QsciScintilla", inherits=("QsciScintilla",))
+        self.assertTrue(dm._typing_area(FakeWidget("QWidget", u"qt_scrollarea_viewport", parent=editor)))
+        self.assertTrue(dm._typing_area(FakeWidget("QLineEdit", inherits=("QLineEdit",))))
+        overlay_list = FakeWidget("QListWidget", inherits=("QAbstractItemView",))
+        self.assertFalse(dm._typing_area(FakeWidget("QWidget", u"qt_scrollarea_viewport", parent=overlay_list)),
+                         "Overlay Fonts' list still held during a color drag")
+
     def test_a_freelab_dropdowns_list_is_in_its_window(self):
         """The owner's image 215, 2026-11-27: Quick Overlay's flag dropdown, its list a window of its own, was taken for
         one of FontLab's and given the ink effect, which drew each flag color twice."""

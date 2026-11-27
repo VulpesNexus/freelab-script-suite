@@ -2284,35 +2284,83 @@ def _swap_item_icons(widget):
     gray ones nearly vanished on dark. Mapped as button icons are; colorful ones and logos (Export
     Profiles' formats) stay as drawn. Items are never kept: FontLab deletes and rebuilds them, and a
     deleted item is no Qt object Python can tell is gone (restoring through one crashed FontLab)."""
-    state = _state()
     record = _record(widget)
     tree = widget.inherits("QTreeWidget")
     for item in _list_items(widget):
-        icon = item.icon(0) if tree else item.icon()
-        if icon is None or icon.isNull():
-            continue
-        key = icon.cacheKey()
-        if key in state["mapped_keys"] or key in state["swatches"]:
-            continue
-        if key not in state["icon_cache"] and (icon_is_swatch(icon) or not icon_is_gray(icon)):
-            state["swatches"].add(key)  # colorful (Export Profiles' format logos): left as drawn, mapped they turned jagged
-            continue
-        new = state["icon_cache"].get(key)
+        new = _mapped_item_icon(item.icon(0) if tree else item.icon())
         if new is None:
-            large = any(s.width() >= LOGO_MIN_SIDE for s in icon.availableSizes())  # a logo: its colors kept
-            new = state["icon_cache"][key] = dark_logo(icon) if large else dark_icon(icon)
-            state["mapped_keys"].add(new.cacheKey())
-            state["originals"][new.cacheKey()] = icon
+            continue
         record["item_icons"] = True
         if tree:
             item.setIcon(0, new)
         else:
             item.setIcon(new)
+    if record.get("item_icons") and "icons_timer" not in record:
+        # FontLab gives a list's items their own icons again as one is selected (Font Info's pages): its Zones icon's
+        # white band flashed until a sweep came by (the owner's images 219 and 220, 2026-11-27). Mapped again at once.
+        try:
+            timer = _core("QTimer")(widget)  # (its parent the list: Qt deletes it with it)
+            timer.setSingleShot(True)
+            timer.setInterval(0)
+            slot = record["icons_slot"] = lambda w=widget: _reswap_item_icons(w)  # (held: PythonQt drops a slot nothing holds)
+            timer.connect("timeout()", slot)
+            record["icons_timer"] = timer
+            widget.connect("itemSelectionChanged()", timer.start)
+        except Exception as exc:
+            _note_error("item icons", exc)
+    if tree:
+        # Its header's icons too: Font Info's masters and instances lists showed theirs black on the dark header (the
+        # owner's images 217 and 218, 2026-11-27)
+        header = widget.headerItem() if hasattr(widget, "headerItem") else None
+        for column in range(header.columnCount() if header is not None else 0):
+            new = _mapped_item_icon(header.icon(column))
+            if new is not None:
+                record["item_icons"] = True
+                header.setIcon(column, new)
+
+
+def _reswap_item_icons(widget):
+    """A list's selection changed: its items' icons mapped again, should FontLab have put its own back. Never raises."""
+    try:
+        module = _module()
+        if module is not None and module._state().get("on"):
+            module._swap_item_icons(widget)
+    except Exception as exc:
+        _note_error("item icons", exc)
+
+
+def _mapped_item_icon(icon):
+    """The mapped icon to show for a list's icon, or None when it is to stay as it is (none, mapped already, or colorful:
+    Export Profiles' format logos, which mapped turned jagged)."""
+    if icon is None or icon.isNull():
+        return None
+    state = _state()
+    key = icon.cacheKey()
+    if key in state["mapped_keys"] or key in state["swatches"]:
+        return None
+    if key not in state["icon_cache"] and (icon_is_swatch(icon) or not icon_is_gray(icon)):
+        state["swatches"].add(key)
+        return None
+    new = state["icon_cache"].get(key)
+    if new is None:
+        large = any(s.width() >= LOGO_MIN_SIDE for s in icon.availableSizes())  # a logo: its colors kept
+        new = state["icon_cache"][key] = dark_logo(icon) if large else dark_icon(icon)
+        state["mapped_keys"].add(new.cacheKey())
+        state["originals"][new.cacheKey()] = icon
+    return new
 
 
 def _restore_item_icons(widget, record):
     """Put back the originals of the mapped icons the list shows now, through its current items."""
     record.pop("item_icons", None)
+    timer = record.pop("icons_timer", None)
+    record.pop("icons_slot", None)
+    if timer is not None:
+        try:
+            widget.disconnect("itemSelectionChanged()", timer.start)
+            timer.stop()
+        except Exception:
+            pass
     originals = _state()["originals"]
     tree = widget.inherits("QTreeWidget")
     for item in _list_items(widget):
@@ -2324,6 +2372,12 @@ def _restore_item_icons(widget, record):
             item.setIcon(0, original)
         else:
             item.setIcon(original)
+    header = widget.headerItem() if tree and hasattr(widget, "headerItem") else None
+    for column in range(header.columnCount() if header is not None else 0):
+        icon = header.icon(column)
+        original = originals.get(icon.cacheKey()) if icon is not None and not icon.isNull() else None
+        if original is not None:
+            header.setIcon(column, original)
 
 
 def _restore_icons(obj, record):
@@ -2509,7 +2563,14 @@ def _effect_classes():
                     box = self.sourceBoundingRect(Qt.LogicalCoordinates).toAlignedRect()
                     if _held_in_popup(hold, self.freelab_widget):
                         held_down = bool(int(_qt()[0].instance().mouseButtons()) & int(Qt.LeftButton))
-                        if not (hold[0] == MODAL_HOLD and held_down and box.width() * box.height() >= MODAL_OWN_PIXELS):
+                        if not (hold[0] == MODAL_HOLD and held_down and box.width() * box.height() >= MODAL_OWN_PIXELS
+                                and not _typing_area(self.freelab_widget)):
+                            # (a picture held for an earlier press let go: shown at the next press, it was the dialog
+                            # as it was then, Font Info's Font Lib text gone while the mouse was held, the owner's
+                            # video of 2026-11-27)
+                            kept = _held().get(id(self))
+                            if kept is not None and kept[0] and kept[0][0] == MODAL_OWN_HOLD:
+                                _held().pop(id(self), None)
                             return False
                         hold = (MODAL_OWN_HOLD, hold[1])  # (the dialog's own, while a color is dragged)
                     elif box.width() * box.height() < HOLD_PIXELS:
@@ -3057,6 +3118,19 @@ def _held_in_popup(hold, widget):
         return popup is None or widget is popup or popup.isAncestorOf(widget) or widget.window().inherits("QMenu")
     except Exception:
         return True
+
+
+def _typing_area(widget):
+    """A text editor's or field's area (the viewport of a QScintilla editor or a text box, or a field): never held while
+    the mouse is down, since a drag there selects text and must show it. Never raises."""
+    try:
+        if widget.inherits("QLineEdit"):
+            return True
+        parent = widget.parentWidget()
+        return (_prop(widget, "objectName") == "qt_scrollarea_viewport" and parent is not None
+                and any(parent.inherits(c) for c in EDGES_PARENTS + TEXT_BOX_CLASSES))
+    except Exception:
+        return False
 
 
 def _held():
