@@ -339,7 +339,7 @@ Run live on 2026-11-24, the day the next scope was built: on a Latin font of one
 
 Built live on 2026-11-27, the day it was added: on Hahmlet (three masters) the circled, parenthesized, and half-width Hangul, the half-width signs, and *‰*; on Shippori Mincho the parenthesized ideographs, two kanbun marks, *‰*, and a half-width arrow; on Rubik (three masters, Bold sparse) two small capitals with *Thicker strokes for small capitals* and *‰*. In the heavy masters the content first ran into its ring and parentheses, and the thickened small capitals closed their counters; both are fitted now ([HISTORY.md](HISTORY.md)). The circled, parenthesized, and half-width signs' glyphs and the kanbun marks are scaled components or copies, the half-width jamo second code points, written as the earlier ways write them; *‰*'s third ring and a thickened small capital are cloned contours given their nodes' places, added as a new shape (`flShape`, `addContours`, `place_node`), as a bar is. The tests build each through FontLab's objects stubbed, in two masters planned apart.
 
-### Next
+### What it leaves, and why
 
 The research's next scope (superscript and subscript signs and letters, signs made of letters, circled figures and letters, and full-width forms; then, as starting points, small capitals, letters with bars, small kana, and half-width forms) is built since 2026-11-24, and what it left since 2026-11-27 (*What it builds*): the circled Hangul, the parenthesized Hangul and ideographs, the half-width Hangul and signs, the kanbun annotation marks, *‰*, and thicker strokes for the small capitals. What stays, and why:
 

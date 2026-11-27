@@ -4,7 +4,7 @@ This is a comprehensive script suite for FontLab to help you build and manage yo
 
 It all started because I had wanted a dark theme for FontLab for ages. I was so happy to see that FontLab 8 came with one. I was not so happy when I found out I had to pay an extra $150 on top of the $200 I had already paid a year prior just to qualify for an upgrade. I want the fonts I make to be free, but I don't want to sacrifice the quality of the tools I use to make them. Thanks to the recent boom in AI, I finally had enough power to turn FontLab 7 into what I wish it were. The result of those efforts is what you see here, FreeLab Script Suite.
 
-**Status: 0.3.0.** Every tool below runs in FontLab 7.2 for Windows. Not done yet: a few FontLab calls are still to be proven live, dark mode still has display defects in some of FontLab's panels and dialogs, and nothing has run on a Mac ([docs/ROADMAP.md](docs/ROADMAP.md)).
+**Status: 0.3.0.** Every tool below runs in FontLab 7.2 for Windows, and nothing else is planned: the [roadmap](docs/ROADMAP.md) has nothing outstanding, and its known limits say what FreeLab leaves as it is, and why. macOS is not supported.
 
 ![FontLab 7's main window: its own light look on the left, FreeLab's dark mode on the right](docs/images/dark-mode.png)
 
@@ -85,7 +85,7 @@ It runs every suite under Python 3, then the suites of the scripts FontLab runs 
 - Each tool's page, linked above.
 - [docs/SOURCES.md](docs/SOURCES.md): the data sources in use, those left out, and those to watch.
 - [docs/COVERAGE-GAPS.md](docs/COVERAGE-GAPS.md): what Font Check knows of and does not check.
-- [docs/ROADMAP.md](docs/ROADMAP.md): what comes next.
+- [docs/ROADMAP.md](docs/ROADMAP.md): what is done, and the known limits (nothing else is planned).
 - [docs/HISTORY.md](docs/HISTORY.md): how the tools got to where they are.
 - [docs/FEATURE-SURVEY.md](docs/FEATURE-SURVEY.md): what already exists for dark mode, kerning, diacritics, and feature code.
 - [FreeLab MCP](https://github.com/VulpesNexus/freelab-mcp), a separate repository, lets an AI app such as Claude Code read and drive the font open in FontLab. Neither needs the other; installed together, they share *Scripts > FreeLab*, and the MCP's window tools drive FreeLab's windows as a user would ([docs/WINDOWS.md](docs/WINDOWS.md#driving-freelab-with-freelab-mcp)).

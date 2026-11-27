@@ -39,7 +39,7 @@ Font Check, Glyph Compose, and Font Builder draw their lists in FreeLang, a font
 
 ## macOS
 
-macOS is not supported yet, and nothing has run on a Mac. FontLab 7 for macOS has the same Qt, PythonQt, and Python 2.7 (installed separately on macOS 12.3 and newer), and most of FreeLab is plain Qt and Python that should carry over (a saved file's log link opens the Finder there). What is Windows-only: the installer (PowerShell, Windows paths), the native libraries (built as Windows DLLs), dark mode's title bars and its following of the system theme ([DARKMODE.md](DARKMODE.md#platforms-and-builds)), and Font Compare's list of installed fonts, which reads Windows' font folders only.
+FreeLab is for Windows: macOS is not supported, nothing has run on a Mac, and no Mac version is planned. FontLab 7 for macOS has the same Qt, PythonQt, and Python 2.7 (installed separately on macOS 12.3 and newer), and most of FreeLab is plain Qt and Python that should carry over (a saved file's log link opens the Finder there). What is Windows-only: the installer (PowerShell, Windows paths), the native libraries (built as Windows DLLs), dark mode's title bars and its following of the system theme ([DARKMODE.md](DARKMODE.md#platforms-and-builds)), and Font Compare's list of installed fonts, which reads Windows' font folders only.
 
 ## Tests
 
