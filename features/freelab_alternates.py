@@ -492,9 +492,9 @@ def strength_of(key):
 def variant_params(glyph, number, strength, seed, baseline=0, upm=1000.0):
     """(rotation degrees, x scale, y scale, slant degrees, baseline shift in em) of glyph's variant number:
     each drawn within the strength's reach, from the seed (the same seed, the same variants; Python 2 and
-    3 alike: the generator is seeded with a CRC of the text, not Python's hash). baseline: up to that many
-    units more up or down, drawn from the same seed after the others (owner's image 366; 0: the variants
-    are as before it existed)."""
+    3 alike: the generator is seeded with a CRC of the text, not Python's hash). baseline: that many units at
+    most more up or down (owner's image 366; 0: the variants are as before it existed), the variants taking
+    turns up and down (variant_lift)."""
     _, _, rotation, scale, slant, rise = strength_of(strength)
     key = (u"%s|%s|%d|%s" % (seed, glyph, number, strength)).encode("utf-8")
     rng = random.Random(zlib.crc32(key) & 0xFFFFFFFF)
@@ -502,8 +502,25 @@ def variant_params(glyph, number, strength, seed, baseline=0, upm=1000.0):
     params = (round(pick(rotation), 3), round(1.0 + pick(scale), 4), round(1.0 + pick(scale), 4),
               round(pick(slant), 3), round(pick(rise), 5))
     if baseline:
-        params = params[:4] + (round(params[4] + pick(float(baseline)) / float(upm or 1000.0), 5),)
+        lift = variant_lift(glyph, number, strength, seed, float(baseline), rng)
+        params = params[:4] + (round(params[4] + lift / float(upm or 1000.0), 5),)
     return params
+
+
+BASELINE_LEAST = 1 / 3.0  # of the Baseline reach: the least a variant moves, so each move shows
+
+
+def variant_lift(glyph, number, strength, seed, reach, rng):
+    """Units a variant moves up (or down, negative) within reach: the variants take turns, one up and the next
+    down, the first's way drawn from the seed and the glyph (so that glyphs side by side do not all start the
+    same way), each move between a third of the reach and all of it, drawn from the variant's own generator.
+    Drawn each on its own, up or down, a run of variants could go further down at each one: Q's four at seed 6
+    went up 496 units, then down 116, 229, and 353 (the owner's images 238 and 239, 2026-11-27: "they would
+    rather jump up and down alternatively")."""
+    first = zlib.crc32((u"%s|%s|%s|first" % (seed, glyph, strength)).encode("utf-8")) & 1
+    up = (number % 2 == 1) == bool(first)
+    size = rng.uniform(BASELINE_LEAST * reach, reach)
+    return size if up else -size
 
 
 def variant_matrix(params, cx, cy, upm):
@@ -768,7 +785,9 @@ class AlternatesPage(object):
         self.seed_box.setWhatsThis(what)
         settings.addWidget(self.seed_box)
         what = (u"How far each variant may move up or down besides the strength's own shift: up to this many units, "
-                u"drawn from the seed like the other changes (the same seed, the same moves). 0: none more.")
+                u"at least a third as far. The variants take turns, one up and the next down, so each differs from "
+                u"the one before; the first one's way and each move are drawn from the seed (the same seed, the "
+                u"same moves). 0: none more.")
         settings.addWidget(label_of(QtGui, u"Baseline: \u00b1", what))
         self.baseline_box = QtGui.QSpinBox()
         self.baseline_box.setRange(0, BASELINE_MOST)

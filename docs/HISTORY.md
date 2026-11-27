@@ -276,6 +276,7 @@ How each tool came to work as it does: what it did before, what it does now, and
 - *Baseline: ±* was added to the variant settings (owner's image 366). At 0 it adds nothing, so a seed builds the variants it built before the field existed.
 - *Also build variants from existing alternates.* was grayed out by the font rather than the scope, and variants built before did not count: after a build of variants, the font's only alternates, it stayed grayed out (owner's image 269). It now follows the glyphs in scope and counts built variants as alternates.
 - A new seed left nothing to build where variants already existed, while the owner wanted the same variants with another seed (owner's image 270). Variants the window built and nobody changed are now planned again with a new strength or seed and replaced in place.
+- 2026-11-27: Variants' *Baseline* moves were drawn each on its own, up or down, so a run could go further down at each variant (Q at seed 6: up 496 units, then down 116, 229, and 353; the owner's images 238 and 239). The variants now take turns, one up and the next down, each moving between a third of the reach and all of it; the first one's way comes from the seed and the glyph.
 
 ## Feature Check
 
@@ -313,6 +314,7 @@ How each tool came to work as it does: what it did before, what it does now, and
 - Dark mode took Proof's dropdown lists, which are windows of their own, for FontLab's lists and mapped them, so the *Proof* list's light text came out with ClearType's colored fringes (owner's report 162). The lists now ask dark mode to leave them alone, and Qt draws them from the dark palette.
 - The text section used the traditional pangrams of most languages. They were replaced with pangrams written for FreeLab, since their origins are unclear; English, Vietnamese, and Japanese keep public-domain texts.
 - 2026-11-27, Codex's review: the cleanup before a save deleted any file named like a staging file (*proof.backup.part.pdf* among them). Staging files now carry FreeLab's mark, and only those are removed.
+- 2026-11-27: The collisions tick read as a sentence (*Draw colliding glyphs in red.*) and stood further from the section ticks than they stand from each other (the owner's image 240). It reads *Collisions*, spaced as they are, and its tooltip says what it does.
 
 ## Font Check
 

@@ -1223,6 +1223,20 @@ class BaselineReachTests(unittest.TestCase):
         self.assertNotEqual(moved[4], plain[4])
         self.assertEqual(moved, fa.variant_params(u"a", 1, "bold", 3, 40, 1000.0), "the same seed, the same move")
 
+    def test_variants_take_turns_up_and_down(self):
+        """The owner's images 238 and 239, 2026-11-27: Q's four variants at seed 6 went up, then further down at each
+        one; they take turns now, each moving at least a third of the reach."""
+        for glyph in (u"Q", u"a", u"period"):
+            for seed in range(1, 21):
+                lifts = [fa.variant_params(glyph, n, "subtle", seed, 500, 1000.0)[4] -
+                         fa.variant_params(glyph, n, "subtle", seed)[4] for n in range(1, 7)]
+                signs = [lift > 0 for lift in lifts]
+                self.assertTrue(all(a != b for a, b in zip(signs, signs[1:])), (glyph, seed, lifts))
+                self.assertTrue(all(500 / 3.0 / 1000 - 1e-6 <= abs(lift) <= 0.5 + 1e-6 for lift in lifts),
+                                (glyph, seed, lifts))
+        starts = set(fa.variant_params(g, 1, "subtle", 6, 500, 1000.0)[4] > 0 for g in u"ABCDEFGHQ")
+        self.assertEqual(starts, set([True, False]), "glyphs side by side do not all start the same way")
+
 
 if __name__ == "__main__":
     unittest.main()

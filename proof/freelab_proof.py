@@ -1778,7 +1778,9 @@ def section_text(layout, font, groups, sizes, left_out):
 
 
 COLLISIONS_NOTE = u" Glyphs whose ink overlaps the next glyph's are drawn in red."
-COLLISIONS_LABEL = u"Draw colliding glyphs in red."  # (the tick: a sentence, with its period)
+# (a word, as the section ticks beside it are: as a sentence with its period it looked apart from them, the owner's
+# image 240, 2026-11-27; its tooltip says what it does)
+COLLISIONS_LABEL = u"Collisions"
 
 
 def section_kerning(layout, font, keep=None, size=STRING_SIZE, collisions=False):
@@ -2829,7 +2831,7 @@ Pick the sections: the <b>character set</b> (every glyph with its name and code 
 <b>waterfalls</b> and <b>text</b> at the sizes typed (sample text in each script the font covers,
 from Font Check's language data), <b>kerning strings</b> (every kerned pair, or the common ones,
 between control letters: HH?HOHO, nn?nono), <b>spacing strings</b> (each letter as HHxHOxOO or
-nnxnoxoo, without kerning; <i>Draw colliding glyphs in red</i> marks the glyphs of both whose ink
+nnxnoxoo, without kerning; <i>Collisions</i> draws in red the glyphs of both whose ink
 overlaps the next one's), <b>diacritics</b>, and <b>figures and punctuation</b>; for the current
 master, or for each master (with a page of the masters side by side). The proof opens on a
 <b>summary</b>: the family's name in the font itself, the font and the master proofed, its vertical
@@ -2990,11 +2992,12 @@ class ProofDialog(object):
             box.setWhatsThis(tips[key])
             checks.addWidget(box)
             self.section_boxes[key] = box
-        checks.addSpacing(12)
-        # (owner's image 348: off at first, a script font's letters may overlap on purpose)
+        # (owner's image 348: off at first, a script font's letters may overlap on purpose; spaced as the section
+        # ticks are, owner's image 240)
         self.collisions_box = QtGui.QCheckBox(COLLISIONS_LABEL)
         self.collisions_box.setChecked(bool(self.settings.get("collisions")))
-        self.collisions_box.setWhatsThis(u"Draws in red, in <i>Kerning strings</i> and <i>Spacing strings</i>, the glyphs "
+        self.collisions_box.setWhatsThis(u"Draws colliding glyphs in red: in <i>Kerning strings</i> and <i>Spacing "
+                                         u"strings</i>, the glyphs "
                                          u"whose ink overlaps the next glyph's, kerning applied (the kerning strings) "
                                          u"or not (the spacing strings), in the preview and in the PDF. Off at first: "
                                          u"the letters of a script font may join on purpose. Kept from one FontLab "
