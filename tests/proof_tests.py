@@ -1212,8 +1212,9 @@ class SaveReplaceTests(unittest.TestCase):
                                                u"Nothing was saved or overwritten."))
 
     def test_staged_pdfs_an_earlier_save_left_are_cleared_and_only_those(self):
-        leftovers = {"Hand.ab12_xyz.part.pdf": True, "Hand.q9w8e7.part.pdf": True, "Hand.ab12_xyz.part.pdf.old": False,
-                     "Other.ab12_xyz.part.pdf": False, "Hand.ab.part.pdf": False}
+        leftovers = {"Hand.freelab-proof-ab12_xyz.part.pdf": True, "Hand.freelab-proof-q9w8e7.part.pdf": True,
+                     "Hand.freelab-proof-ab12_xyz.part.pdf.old": False, "Other.freelab-proof-ab12_xyz.part.pdf": False,
+                     "Hand.freelab-proof-ab.part.pdf": False, "Hand.ab12_xyz.part.pdf": False}
         for name in leftovers:
             self.existing(name)
         stand, asked, logged, written, marked = self.stand("Hand.pdf")
@@ -1222,6 +1223,17 @@ class SaveReplaceTests(unittest.TestCase):
                          sorted(["Hand.pdf"] + [name for name, gone in leftovers.items() if not gone]))
         self.assertTrue(fp.staged_pdf_pattern(u"Hand.pdf").match(os.path.basename(fp.staged_pdf(
             os.path.join(self.folder, u"Hand.pdf")))), "the pattern is staged_pdf's own")
+
+    def test_a_users_file_named_like_a_staged_one_is_kept(self):
+        """Any file named "<the PDF's name>.<6 to 8 letters>.part.pdf" was taken for a staged file a save left, and
+        deleted without a question, even when the save then failed (rest review 2, finding 5)."""
+        for name in ("Hand.backup.part.pdf", "Hand.draft1.part.pdf", "Hand.abcdef.part.pdf"):
+            self.existing(name)
+        stand, asked, logged, written, marked = self.stand("Hand.pdf")
+        stand.save_pdf()
+        self.assertEqual(sorted(os.listdir(self.folder)), sorted(["Hand.pdf", "Hand.backup.part.pdf", "Hand.draft1.part.pdf",
+                                                                  "Hand.abcdef.part.pdf"]))
+        self.assertIn(fp.STAGED_MARK, os.path.basename(fp.staged_pdf(os.path.join(self.folder, u"Other.pdf"))))
 
     def test_the_saved_line_gives_the_pdfs_size(self):
         sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))

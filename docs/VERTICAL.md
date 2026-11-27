@@ -73,7 +73,7 @@ What FontLab 7.2 lets a script read and write, found live on IBM Plex Sans JP (w
 
 ## Vertical metrics for an exported font
 
-*Add vertical metrics to an exported font…* (in the bottom row, after *Write* and *Put back vhea*) asks for the font FontLab exported (*.otf* or *.ttf*) and writes a copy of it beside it, *&lt;name&gt;.vert.otf* (or *.vert-2.otf* and on, never over a file), with:
+*Add vertical metrics to an exported font…* (in the bottom row, after *Write* and *Put back vhea*) asks for the font FontLab exported (*.otf* or *.ttf*) and writes a copy of it beside it, *&lt;name&gt;.vert.otf* or *.vert.ttf*, as exported (or *.vert-2* and on, never over a file), with:
 
 - vmtx: each glyph's advance height as the current master has it (the em where it has none), and its top sidebearing, the vertical origin less the top of its ink (0 for a glyph without ink). A glyph the export renamed is found by its code points.
 - vhea: the ascender, descender, and line gap of the font info (the suggested ones where it has none), and the extents from vmtx.

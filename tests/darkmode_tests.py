@@ -393,13 +393,17 @@ class ShadeAndPickerTests(DarkModeCase):
         dm._set_effect = lambda widget, record, kind, keys=None: calls.append((widget.objectName, kind))
         dm._clear_effect = lambda widget, record: calls.append((widget.objectName, None))
         try:
-            for delegate, name in (("LanguagesDelegate", u"languages"), ("QStyledItemDelegate", u"plain")):
+            for delegate, name in (("LanguagesDelegate", u"languages"), ("QStyledItemDelegate", u"plain"),
+                                   (None, u"header")):
                 view = FakeWidget("QListWidget", name + u"-list", inherits=("QAbstractItemView",))
-                view.itemDelegate = (lambda d: lambda: FakeWidget(d))(delegate)
-                dm._native_ink(FakeWidget("QWidget", name, parent=view))
+                view.itemDelegate = (lambda d: lambda: FakeWidget(d) if d else None)(delegate)
+                viewport = FakeWidget("QWidget", name, parent=view)
+                dm._native_ink(viewport)
+                self.assertTrue(viewport.property(dm.NATIVE_INK_PROP), name)
         finally:
             dm._set_effect, dm._clear_effect = saved
-        self.assertEqual(calls, [(u"languages", "checks"), (u"plain", None)])
+        self.assertEqual(calls, [(u"languages", "checks"), (u"plain", None), (u"header", None)],
+                         "a view with no delegate (a header's) is native ink too, not an error")
 
     def test_disabled_text_is_dimmed_in_sheets(self):
         """The owner's images 222 to 231, 2026-11-27: FontLab grays disabled fields and labels with #a0a0a0 and #b0b0b0,
@@ -3834,6 +3838,273 @@ class MoveGuardTests(unittest.TestCase):
         self.deliver = deliver
         deliver("bar", self.Event(5, 1))
         self.assertEqual(seen, ["bar", "frame"])
+
+
+class ReviewTests(DarkModeCase):
+    """The dark mode reviews of 2026-11-27 (rounds 1 and 2): what they found, checked on the fakes."""
+
+    def test_a_timers_slot_is_held_beside_the_timer(self):
+        """Round 1, #1: the slot _new_timer connects was held by the connection alone; PythonQt drops a slot no
+        Python object holds where its only holder goes. Held in the session's state too."""
+        import gc
+        import weakref
+        saved = qtfakes.QTimer.connect
+
+        def weak_connect(timer, signal, callback):  # (a connection that holds nothing)
+            timer.weak_slot = weakref.ref(callback)
+            return True
+        qtfakes.QTimer.connect = weak_connect
+        self.addCleanup(setattr, qtfakes.QTimer, "connect", saved)
+        timer = dm._new_timer("_reapply_if_on")
+        gc.collect()
+        self.assertIsNotNone(timer.weak_slot(), "held while the timer is")
+
+    def test_an_effects_fallback_drawing_never_raises(self):
+        """Round 1, #2: a mapping that failed fell back on drawSource unguarded; one that raised too escaped the
+        effect's draw(), which can take FontLab down."""
+        self.patch("_paint_hold", lambda: None)
+        self.patch("_paint_timed", lambda effect, ms: None)
+
+        def fails(*args):
+            raise RuntimeError("source gone")
+        classes = dm._effect_classes()
+        for kind in ("map", "title"):
+            effect = classes[kind]()
+            effect.freelab_kind, effect.freelab_widget = "ink", FakeWidget("QWidget")
+            effect.sourcePixmap = effect.drawSource = fails
+            effect.draw("painter")  # (raised before)
+        errors = dm._state()["errors"]
+        self.assertTrue([e for e in errors if e.startswith("effect fallback")], errors)
+
+    def field(self):
+        field = FakeWidget("YLineEditSuffix", inherits=("QLineEdit",))
+        field.palette.setColor(QPalette.Base, QColor("#1f1f1f"))
+        field.palette.setColor(QPalette.Text, QColor("#000000"))
+        field.palette.setColor(QPalette.Disabled, QPalette.Text, QColor("#a0a0a0"))
+        return field
+
+    def text(self, field, group=QPalette.Active):
+        return field.palette.color(group, QPalette.Text).name()
+
+    def test_a_fields_palette_fontlab_sets_later_is_the_one_put_back(self):
+        """Round 1, #3: the first text colors alone were kept; a dark red FontLab set later went back to the first
+        black as dark mode went off, and a light color it set later was overwritten by it."""
+        dm._state()["on"] = True
+        field = self.field()
+        dm._light_field_text(field)
+        self.assertNotEqual(self.text(field), u"#000000")
+        field.palette.setColor(QPalette.Active, QPalette.Text, QColor("#800000"))  # (FontLab's new palette)
+        field.palette.setColor(QPalette.Inactive, QPalette.Text, QColor("#e0e0e0"))
+        dm._on_field_palette(field)
+        self.assertNotEqual(self.text(field), u"#800000", "its dark red mapped light")
+        self.assertEqual(self.text(field, QPalette.Inactive), u"#e0e0e0", "a light color left as it is")
+        dm._restore_field_text(field, dm._record(field))
+        self.assertEqual(self.text(field), u"#800000", "FontLab's latest color back, not its first")
+        self.assertEqual(self.text(field, QPalette.Inactive), u"#e0e0e0", "FontLab's light color stays")
+        self.assertEqual(self.text(field, QPalette.Disabled), u"#a0a0a0")
+
+    def test_a_color_fontlab_sets_without_dark_mode_seeing_it_stays(self):
+        dm._state()["on"] = True
+        field = self.field()
+        dm._light_field_text(field)
+        dm._state()["on"] = False  # (a palette set as dark mode goes off: not handled)
+        field.palette.setColor(QPalette.Active, QPalette.Text, QColor("#204080"))
+        dm._restore_field_text(field, dm._record(field))
+        self.assertEqual(self.text(field), u"#204080", "FontLab's, not dark mode's to take back")
+        self.assertEqual(self.text(field, QPalette.Inactive), u"#000000", "dark mode's own taken back")
+
+    def test_a_list_of_selectors_dims_only_its_disabled_ones(self):
+        """Round 1, #4: "QLabel:disabled, QLabel:enabled {...}" was dimmed as one: the enabled label came out gray."""
+        sheet = u"QLabel:disabled, QLabel:enabled { color: #202020; }\nQLabel[name=\"a,b\"]:disabled{color:#a0a0a0;}"
+        dark = dm.recolor_sheet(sheet)
+        gray = dm._disabled_text()
+        mapped = dm.recolor_sheet(u"QLabel{ color: #202020; }")[len(u"QLabel{"):-1]
+        self.assertIn(u"QLabel:enabled{" + mapped + u"}", dark, "the enabled one as mapped")
+        self.assertIn(u"QLabel:disabled{ color: " + gray + u"; }", dark, "the disabled one dimmed")
+        self.assertIn(u"QLabel[name=\"a,b\"]:disabled{color:" + gray + u";}", dark, "a comma in quotes: one selector")
+        self.assertNotIn(u"QLabel:enabled{ color: " + gray, dark)
+        self.assertEqual(dm.recolor_sheet(dark), dm.recolor_sheet(dm.recolor_sheet(dark)), "stable when recolored again")
+
+    def test_a_page_watched_for_another_reason_at_its_show_stays_watched(self):
+        """Round 1, #5: a page watched for its first show alone, watched for its stylesheet while processed at that
+        show, was let go at its end all the same."""
+        frame = FakeWidget("QFrame", u"frameContent")
+        page = FakeWidget("QWidget", u"page", parent=frame, visible=False)
+        FakeWidget("QToolButton", u"child", parent=page)
+        page.isHidden = lambda: True
+        self.app.roots = [frame]
+        dm._watch_page(page)
+        self.assertTrue(dm._record(page).get("page_watch_only"))
+        dm._watch_page(page)  # (looked at again, still hidden)
+        self.assertTrue(dm._record(page).get("page_watch_only"), "still watched for its show alone")
+        page.visible = True
+        page.isHidden = lambda: False
+        self.patch("process", lambda widget: dm._watch(widget) if widget is page else None)
+        dm._state()["on"] = True
+        dm._on_page_shown(page)
+        self.assertIsNotNone(page.property(dm.WATCHED_PROP), "watched still")
+        self.assertIn(dm._watcher(), page.filters)
+        dm._state()["on"] = False
+
+    def test_a_page_watched_for_its_show_alone_is_let_go_after_it(self):
+        frame = FakeWidget("QFrame", u"frameContent")
+        page = FakeWidget("QWidget", u"page", parent=frame, visible=False)
+        FakeWidget("QToolButton", u"child", parent=page)
+        page.isHidden = lambda: True
+        self.app.roots = [frame]
+        dm._watch_page(page)
+        page.visible = True
+        self.patch("process", lambda widget: None)
+        dm._state()["on"] = True
+        dm._on_page_shown(page)
+        dm._state()["on"] = False
+        self.assertIsNone(page.property(dm.WATCHED_PROP))
+        self.assertNotIn(dm._watcher(), page.filters)
+
+    def test_check_boxes_are_placed_by_each_rows_own_geometry(self):
+        """Round 1, #6: the check picture's place was measured on the first checkable row and used for every row:
+        a row of another height (after a change of font or style) had its check box put above FontLab's."""
+        tests = self
+
+        class Point(object):
+            def __init__(self, x=0, y=0):
+                self.px, self.py = x, y
+
+            def x(self):
+                return self.px
+
+            def y(self):
+                return self.py
+
+        class Rect(object):
+            def __init__(self, *args):
+                self.box = args if len(args) == 4 else (0, 0, 200, 70)  # (QRect(offset, size): the whole picture)
+
+            def x(self):
+                return self.box[0]
+
+            def y(self):
+                return self.box[1]
+
+            def width(self):
+                return self.box[2]
+
+            def height(self):
+                return self.box[3]
+
+            def center(self):
+                return Point(self.box[0] + self.box[2] // 2, self.box[1] + self.box[3] // 2)
+
+        class Region(object):
+            def __init__(self, rect):
+                pass
+
+            def subtracted(self, other):
+                return self
+
+        boxes = [(4, 4, 12), (4, 29, 12), (24, 54, 12)]  # (x, y, side): rows 20, 30, and 20 high, the last one deeper
+        rows = [Rect(0, 0, 200, 20), Rect(0, 20, 200, 30), Rect(20, 50, 180, 20)]
+
+        class Image(object):
+            def width(self):
+                return 200
+
+            def height(self):
+                return 70
+
+            def pixel(self, x, y):
+                inside = any(bx <= x < bx + side and by <= y < by + side for bx, by, side in boxes)
+                return 0xff000000 if inside else 0xffffffff
+
+        class Pixmap(object):
+            def toImage(self):
+                return Image()
+
+            def size(self):
+                return (200, 70)
+
+            def width(self):
+                return 200
+
+            def height(self):
+                return 70
+
+        class Picture(object):
+            def width(self):
+                return 12
+
+            def height(self):
+                return 12
+
+        class Item(object):
+            def flags(self):
+                return 0x10
+
+            def checkState(self, column=0):
+                return 2
+
+        class Painter(object):
+            def __init__(self):
+                self.placed = []
+
+            def save(self):
+                pass
+
+            def restore(self):
+                pass
+
+            def setClipRegion(self, region, how):
+                pass
+
+            def drawPixmap(self, *args):
+                if len(args) == 3:
+                    self.placed.append(args[:2])
+
+        core, gui = sys.modules["PythonQt.QtCore"], sys.modules["PythonQt.QtGui"]
+        core.QPoint, core.QRect, gui.QRegion = Point, Rect, Region
+        for name, value in (("ItemIsUserCheckable", 0x10), ("IntersectClip", 1)):
+            if not hasattr(qtfakes.Qt, name):
+                setattr(qtfakes.Qt, name, value)
+                self.addCleanup(delattr, qtfakes.Qt, name)
+        if not hasattr(qtfakes.QGraphicsEffect, "NoPad"):
+            qtfakes.QGraphicsEffect.NoPad = 0
+            self.addCleanup(delattr, qtfakes.QGraphicsEffect, "NoPad")
+        items = [Item() for _ in rows]
+        view = FakeWidget("QTreeWidget", inherits=("QTreeWidget", "QAbstractItemView"))
+        view.itemAt = lambda point: next((item for item, rect in zip(items, rows)
+                                          if rect.y() <= point.y() < rect.y() + rect.height()), None)
+        view.visualItemRect = lambda item: rows[items.index(item)]
+        viewport = FakeWidget("QWidget", u"qt_scrollarea_viewport", parent=view, width=200, height=70)
+        effect = dm._effect_classes()["map"]()
+        effect.freelab_kind, effect.freelab_widget = "checks", viewport
+        effect.freelab_check_pictures = {2: Picture()}
+        effect.sourcePixmap = lambda *args: Pixmap()
+        painter = Painter()
+        effect.paint_mapped(painter)
+        tests.assertEqual(dm._state()["errors"], [])
+        tests.assertEqual(painter.placed, [(4, 4), (4, 29), (24, 54)], "each box where FontLab drew its picture")
+
+    def test_a_pickers_swatches_reach_the_hooks(self):
+        """Round 2, #2: the swatches were looked for with findChildren(QWidget), which gives [] under PythonQt: none
+        ever reached the hooks. They sit in the picker's popup, a window of its own."""
+        picker = FakeWidget("QtColorPicker", parent=self.content)
+        popup = FakeWidget("ColorPickerPopup", parent=picker, window=True, visible=False)
+        swatches = [FakeWidget("ColorPickerItem", parent=popup, visible=False) for _ in range(3)]
+        FakeWidget("ColorPickerButton", parent=popup, visible=False)
+        for widget in [picker, popup] + swatches:
+            widget.findChildren = lambda _cls: []  # (as under PythonQt)
+        addresses = dict((id(swatch), 0x1000 + k) for k, swatch in enumerate(swatches))
+        self.patch("_sci_pointer", lambda widget: addresses.get(id(widget)))
+        sent = []
+        self.patch("_send_swatches", lambda state: sent.append(list(state.get("swatch_addresses", []))))
+        dm._state().update({"engine": "native", "hooked": True})
+        try:
+            dm._mark_swatches(picker)
+            dm._mark_swatches(picker)  # (looked at again: nothing more)
+        finally:
+            dm._state().update({"engine": None, "hooked": None})
+        self.assertEqual(sent, [[0x1000, 0x1001, 0x1002]])
+        self.assertTrue(all(swatch.property(dm.SWATCH_PROP) for swatch in swatches))
 
 
 class CheckedIconTests(unittest.TestCase):

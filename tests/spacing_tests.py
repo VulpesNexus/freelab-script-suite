@@ -745,6 +745,90 @@ class HistoryFailureTests(unittest.TestCase):
         self.assertTrue(any(u"FontLab refused" in text for kind, text in dialog.logged if kind == "error"))
 
 
+class _Shift(object):
+    """QTransform as write_spacings uses it: translate(dx, 0)."""
+
+    def __init__(self):
+        self.dx = 0.0
+
+    def translate(self, dx, dy):
+        self.dx += dx
+
+
+class _WriteLayer(object):
+    """A layer whose ink moves with applyTransform; refuse: how many advanceWidth sets FontLab refuses."""
+
+    def __init__(self, left, right, width, refuse=0, refuse_moves=0):
+        object.__setattr__(self, "refuse", refuse)
+        object.__setattr__(self, "refuse_moves", refuse_moves)
+        object.__setattr__(self, "ink", [left, right])
+        object.__setattr__(self, "advanceWidth", width)
+
+    @property
+    def boundingBox(self):
+        return _Box(self.ink[0], self.ink[1])
+
+    def applyTransform(self, shift):
+        if self.refuse_moves:
+            object.__setattr__(self, "refuse_moves", self.refuse_moves - 1)
+            raise RuntimeError("applyTransform refused")
+        self.ink = [self.ink[0] + shift.dx, self.ink[1] + shift.dx]
+
+    def __setattr__(self, name, value):
+        if name == "advanceWidth" and self.refuse:
+            object.__setattr__(self, "refuse", self.refuse - 1)
+            raise RuntimeError("advanceWidth refused")
+        object.__setattr__(self, name, value)
+
+
+class WriteFailureTests(unittest.TestCase):
+    """The outline moved, then the advance width refused: the glyph stayed moved under its old width, out of the
+    count and of the list the kerning check reads (rest review 2, finding 2)."""
+
+    def setUp(self):
+        self.helper = HistoryFailureTests("test_a_recorded_write_promises_undo")  # (its dialog, the real write)
+        self.helper.setUp()
+        self.addCleanup(self.helper.doCleanups)
+        old = sp._qt
+        sp._qt = lambda: (None, type("Gui", (), {"QTransform": _Shift}))
+        self.addCleanup(setattr, sp, "_qt", old)
+
+    def failing(self, layer):
+        dialog, steps = self.helper.dialog(refuse_before=False, refuse_after=False)
+        del dialog.write_spacings  # (the real one)
+        glyph = type("Glyph", (), {"getLayerByName": lambda g, master: layer, "update": lambda g: None})()
+        dialog.package.findName = lambda name: glyph
+        dialog.listed[0].changes = lambda tolerance: (15.0, -5.0)  # (looser on the left, tighter on the right)
+        dialog.apply()
+        return dialog
+
+    def test_a_refused_width_puts_the_outline_back(self):
+        layer = _WriteLayer(20.0, 475.0, 500.0, refuse=1)
+        dialog = self.failing(layer)
+        self.assertEqual((layer.ink, layer.advanceWidth), ([20.0, 475.0], 500.0), "as it was")
+        self.assertTrue(any(kind == "error" and u"advanceWidth refused" in text for kind, text in dialog.logged))
+        self.assertTrue(any(u"was put back as it was" in text and u"glyphname:T" in text for _, text in dialog.logged),
+                        dialog.logged)
+        self.assertEqual(dialog.spaced, [])
+
+    def test_a_glyph_that_cannot_be_put_back_is_named_and_listed(self):
+        stuck = _WriteLayer(20.0, 475.0, 500.0, refuse=1)
+        real_move = _WriteLayer.applyTransform
+
+        def move_once(layer, shift):  # (the write's move made; the put-back's refused)
+            if getattr(layer, "moved_once", False):
+                raise RuntimeError("applyTransform refused")
+            object.__setattr__(layer, "moved_once", True)
+            real_move(layer, shift)
+        _WriteLayer.applyTransform = move_once
+        self.addCleanup(setattr, _WriteLayer, "applyTransform", real_move)
+        dialog = self.failing(stuck)
+        self.assertEqual(stuck.ink, [35.0, 490.0], "moved, and could not be moved back")
+        self.assertEqual(dialog.spaced, [u"T"], "among the glyphs the kerning check reads")
+        self.assertTrue(any(kind == "warning" and u"could not be put back" in text and u"glyphname:T" in text
+                            and u"Edit &gt; Undo" in text for kind, text in dialog.logged), dialog.logged)
+
+
 class WordingTests(unittest.TestCase):
     """The owner's rules for interface texts, read from the script (its dialog needs FontLab)."""
 

@@ -398,6 +398,75 @@ wrapper(22, c_void_p, c_void_p, restype=c_void_p)(addr(other), addr(canvas))
 check("a painter on a surface not mapped: dark", read_text(), 0xdcdcdc)
 wrapper(23, c_void_p)(addr(other))
 
+# a painter's notes start clear (Codex's review, dark round 2, #3): a painter that ends with a warning brush and a white
+# pen left both noted in its slot, and the next painter there began with them
+hooks.freelab_hooks_test_devices((1 << WIDGET) | (1 << IMAGE))
+hooks.freelab_hooks_test_canvas(1)
+warning_red = brush(color(0xe0, 0x30, 0x20))
+painter_ctor_hooked, painter_dtor_hooked = wrapper(22, c_void_p, c_void_p, restype=c_void_p), wrapper(23, c_void_p)
+
+
+def after_a_warning(then):
+    first = buf()
+    painter_ctor_hooked(addr(first), addr(canvas))
+    set_pen_color(addr(first), addr(white))
+    set_brush(addr(first), addr(warning_red))
+    warned = pen_rgba(painter_pen(addr(first)))
+    painter_dtor_hooked(addr(first))
+    following = buf()
+    painter_ctor_hooked(addr(following), addr(canvas))
+    got = then(addr(following))
+    painter_dtor_hooked(addr(following))
+    return warned, got
+
+
+warned, got = after_a_warning(lambda p: (set_brush(p, addr(white_brush)), pen_rgba(painter_pen(p)))[1])
+check("a white pen under a warning brush: the ground", warned, "dark")
+check("the next painter's brush leaves its pen black", got, 0x000000)
+warned, got = after_a_warning(lambda p: (set_pen_color(p, addr(white)), pen_rgba(painter_pen(p)))[1])
+check("the next painter's white pen stays white", got, 0xffffff)
+hooks.freelab_hooks_test_canvas(0)
+
+# a swatch's checkerboard (Codex's review, dark round 2, #6): an opaque color drops the squares it covers, within the
+# clip, and the others are drawn first, as FontLab drew them
+hooks.freelab_hooks_test_swatch(1)
+held_n, dropped_n = ctypes.c_int64(), ctypes.c_int64()
+
+
+def dropped_squares():
+    hooks.freelab_hooks_swatch_counts(ctypes.byref(held_n), ctypes.byref(dropped_n))
+    return dropped_n.value
+
+
+fill_rect_hooked, fill_rectf_hooked = wrapper(0, c_void_p, c_void_p, c_void_p), wrapper(1, c_void_p, c_void_p, c_void_p)
+checker_light, swatch_red = color(0xe1, 0xe1, 0xe1), color(0xe0, 0x30, 0x20)
+top_left, bottom_right, whole = (c_int * 4)(0, 0, 3, 3), (c_int * 4)(4, 4, 7, 7), (c_int * 4)(0, 0, 7, 7)
+top_left_f = (c_double * 4)(0.0, 0.0, 4.0, 4.0)
+board = image(fill=0xff000000)
+swatch = buf()
+before = dropped_squares()
+painter_ctor_hooked(addr(swatch), addr(board))
+fill_rect_hooked(addr(swatch), addr(top_left), addr(checker_light))
+fill_rect_hooked(addr(swatch), addr(bottom_right), addr(white))
+fill_rectf_hooked(addr(swatch), addr(top_left_f), addr(swatch_red))  # covers the first square only
+painter_dtor_hooked(addr(swatch))
+check("an opaque color over one square: that one dropped", dropped_squares() - before, 1)
+check("the square it covers: the color", image_pixel(addr(board), 1, 1), 0xe03020)
+check("the square it leaves: drawn", image_pixel(addr(board), 5, 5), 0xffffff)
+set_clip_rect = fn("?setClipRect@QPainter@@QEAAXAEBVQRect@@W4ClipOperation@Qt@@@Z", c_void_p, c_void_p, c_int)
+board = image(fill=0xff000000)
+before = dropped_squares()
+painter_ctor_hooked(addr(swatch), addr(board))
+fill_rect_hooked(addr(swatch), addr(whole), addr(checker_light))
+set_clip_rect(addr(swatch), addr(top_left), 1)  # Qt::ReplaceClip: the square shows only where the color goes
+fill_rect_hooked(addr(swatch), addr(top_left), addr(swatch_red))
+painter_dtor_hooked(addr(swatch))
+check("a square larger than the color, clipped to it: dropped", dropped_squares() - before, 1)
+check("the clipped square under the color: the color", image_pixel(addr(board), 2, 2), 0xe03020)
+check("and nothing outside the clip", image_pixel(addr(board), 6, 6), 0x000000)
+hooks.freelab_hooks_test_swatch(0)
+hooks.freelab_hooks_test_devices(1 << WIDGET)
+
 calls = (ctypes.c_int64 * HOOKS)(); changed = (ctypes.c_int64 * HOOKS)()
 hooks.freelab_hooks_counts(calls, changed, HOOKS)
 

@@ -20,7 +20,7 @@ Unicode's own data, compared with what Font Check checks (languages, character s
 
 ## Han repertoires
 
-Font Check's languages had the ideographs of Hyperglot's Chinese, Japanese, and Korean rows (a few thousand). Each repertoire below is a character set under *Han repertoires*, from Unihan's fields as UAX #38 (revision 39) defines them; FreeLang draws each whole, Plangothic supplying what Noto Sans JP, KR, and SC lack. The Han script itself (103,351 ideographs) cannot be drawn whole: a font holds 65,535 glyphs at most, and FreeLang draws 36,179 of them.
+Font Check's languages had the ideographs of Hyperglot's Chinese, Japanese, and Korean rows (a few thousand). Each repertoire below is a character set under *Han repertoires*, from Unihan's fields as UAX #38 (revision 39) defines them; FreeLang draws each whole, Plangothic supplying what Noto Sans JP, KR, and SC lack. The Han script itself (103,351 ideographs) cannot be drawn whole: a font holds 65,535 glyphs at most, and FreeLang draws 36,391 of them.
 
 | Set | Ideographs | Drawn by FreeLang |
 | --- | --- | --- |
@@ -149,4 +149,4 @@ The fonts the build left out, or that earlier work dismissed, read again on 2026
 | Fairfax HD | not needed | OFL 1.1, a monospaced font drawn on a pixel grid |
 | JuliaMono 0.63.2, Charis 7.000 | not needed | OFL 1.1; nothing FreeLang lacks |
 | Symbola (later versions), Everson Mono, Code2000 | still left out | not free licenses |
-| The font Unicodia bundles for Syriac Supplement | still left out | its license forbids commercial use (as read on 2026-11-13); Unifont draws the eleven characters |
+| The font Unicodia bundles for Syriac Supplement | still left out | its license forbids commercial use (as read on 2026-11-13); Plangothic P2 draws the eleven characters |

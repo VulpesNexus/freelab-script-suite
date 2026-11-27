@@ -122,7 +122,7 @@ RECONSIDERED = (
     ("JuliaMono 0.63.2, Charis 7.000", "not needed", "OFL 1.1; nothing FreeLang lacks"),
     ("Symbola (later versions), Everson Mono, Code2000", "still left out", "not free licenses"),
     ("The font Unicodia bundles for Syriac Supplement", "still left out", "its license forbids commercial use (as "
-     "read on 2026-11-13); Unifont draws the eleven characters"),
+     "read on 2026-11-13); Plangothic P2 draws the eleven characters"),
 )
 # Fonts to consider for what FreeLang cannot draw: a font no FreeLang file can merge, or one too large
 # for the five files. Each license read from the font's own files on 2026-11-14. (RESOURCE_FOR: the

@@ -4108,27 +4108,36 @@ STOPPED_LINE = u"The operation was interrupted. Nothing was saved or overwritten
 CANCEL_NOTE = u"A PDF stopped leaves nothing behind: a file there stays as it was."
 
 
+# A staged file's name carries FreeLab's mark: the cleanup before a save removes only files whose names this tool
+# makes. Named "proof.k2x9_q4m.part.pdf" before, the cleanup took any file named so for FreeLab's (a user's
+# "proof.backup.part.pdf" or "proof.draft1.part.pdf" was deleted without a question: rest review 2, finding 5).
+# A staged file still being written by another FontLab is open, and Windows refuses to delete it.
+STAGED_MARK = u"freelab-proof-"
+
+
 def staged_pdf(path):
-    """A new, empty file beside path (its name, a dot, tempfile's random part, then .part.pdf), for the PDF to be
-    written whole before it takes path's place."""
+    """A new, empty file beside path (its name, a dot, STAGED_MARK, tempfile's random part, then .part.pdf), for the
+    PDF to be written whole before it takes path's place."""
     import tempfile
     folder = os.path.dirname(os.path.abspath(path))
     stem, ext = os.path.splitext(os.path.basename(path))
-    handle, staged = tempfile.mkstemp(prefix=stem + u".", suffix=u".part" + ext, dir=folder)
+    handle, staged = tempfile.mkstemp(prefix=stem + u"." + STAGED_MARK, suffix=u".part" + ext, dir=folder)
     os.close(handle)
     return staged
 
 
 def staged_pdf_pattern(path):
-    """What staged_pdf names a staged file of path (tempfile's random part: 6 letters, digits, or underscores in
-    Python 2.7, 8 in Python 3). Never put_pdf_in_place's .old file, which may be the only copy of a PDF."""
+    """What staged_pdf names a staged file of path (STAGED_MARK, then tempfile's random part: 6 letters, digits, or
+    underscores in Python 2.7, 8 in Python 3). Never put_pdf_in_place's .old file, which may be the only copy of a
+    PDF, nor a name without the mark (an earlier FreeLab's staged file is left: it cannot be told from a user's)."""
     stem, ext = os.path.splitext(os.path.basename(path))
-    return re.compile(u"^%s\\.[a-z0-9_]{6,8}\\.part%s$" % (re.escape(stem), re.escape(ext)), re.I)
+    return re.compile(u"^%s\\.%s[a-z0-9_]{6,8}\\.part%s$" % (re.escape(stem), re.escape(STAGED_MARK), re.escape(ext)),
+                      re.I)
 
 
 def clear_staged_pdfs(path):
     """The staged files a save of this very PDF left behind (FontLab ended while it wrote it), removed: only names
-    that match staged_pdf_pattern. Those removed. Never raises."""
+    that match staged_pdf_pattern, FreeLab's mark in them. Those removed. Never raises."""
     folder = os.path.dirname(os.path.abspath(path))
     pattern, removed = staged_pdf_pattern(path), []
     try:

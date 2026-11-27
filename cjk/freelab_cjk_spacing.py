@@ -1157,6 +1157,34 @@ def counted(number, one, many=None):
     return u"%s %s" % (format(int(number), ","), one if number == 1 else (many or one + u"s"))
 
 
+def transform_values(t):
+    """A shape's QTransform as six numbers (m11, m12, m21, m22, dx, dy)."""
+    return tuple(float(v) for v in (t.m11(), t.m12(), t.m21(), t.m22(), t.dx(), t.dy()))
+
+
+def put_back_layer(layer, shapes, saved, QtGui):
+    """A syllable's layer whose write raised put back as saved ((each shape's transform values, the width)):
+    each shape's transform and the width set again, read back: whether all are as they were."""
+    values, width = saved
+    for shape, own in zip(shapes, values):
+        try:
+            if any(abs(a - b) > 1e-6 for a, b in zip(transform_values(shape.transform), own)):
+                shape.transform = QtGui.QTransform(*own)
+        except Exception:
+            pass  # (read back below)
+    try:
+        if abs(float(layer.advanceWidth) - width) > 1e-6:
+            layer.advanceWidth = width
+    except Exception:
+        pass
+    try:
+        return (all(max(abs(a - b) for a, b in zip(transform_values(shape.transform), own)) <= 0.01
+                    for shape, own in zip(shapes, values))
+                and abs(float(layer.advanceWidth) - width) <= 0.5)
+    except Exception:
+        return False
+
+
 def hangul_note(count, where, bold=lambda text: text):
     """The status line's sentence about the font's Hangul syllables (count of them; where: the setting
     to look under, as shown; bold: how the count is set off), u"" for a font without any. It follows
@@ -2125,16 +2153,29 @@ class CJKSpacingDialog(object):
             self.log.add(u"Wrote %s%s.%s" % (
                 self.ak.b(u" and ".join(written)), u"; <i>Edit &gt; Undo</i> takes %s back" % them if undo else u"",
                 compiled), "done")
+        failed = getattr(self, "hangul_failed", None)
         if syllables:
-            self.log.add(u"Set %s in every master; the font's kerning of Hangul, if any, was set for the old widths.%s" % (
+            self.log.add(u"Set %s %s; the font's kerning of Hangul, if any, was set for the old widths.%s" % (
                 self.ak.b(counted(syllables, u"syllable width", u"syllable widths")),
+                u"in every master" if error is None else u"before it stopped (the others are as they were)",
                 u" <i>Edit &gt; Undo</i> takes it back." if undo else u""), "done")
-        if not written and not syllables:
+        if not written and not syllables and not (failed is not None and not failed[2]):
             self.log.add(u"Wrote nothing.")
         if not getattr(status, "ok", True):
             self.log.add(status.message(), "error")
         if error is not None:
             self.log.add(self.ak.error_sentence(u"Stopped by an error", error), "error")
+        if failed is not None:
+            name, master, back = failed
+            link = self.ak.glyph_name_link(name)
+            if back:
+                self.log.add(u"The syllable being set when it stopped was put back as it was: %s (master %s)." % (
+                    link, self.ak.html(master)), "info")
+            else:
+                self.log.add(u"The syllable being set when it stopped could not be put back, and stays as FontLab left "
+                             u"it: %s (master %s).%s" % (link, self.ak.html(master),
+                                                         u" <i>Edit &gt; Undo</i> takes it back." if undo else u""),
+                             "warning")
 
     def write_parts(self, package, features, new):
         """The write itself, under the top row's progress (write): None when nothing was written (said in
@@ -2159,6 +2200,7 @@ class CJKSpacingDialog(object):
                 self.ak.html(refusal), self.ak.tool_link(u"Feature Check")), "error")
             return None
         written, error, syllables = [], None, 0
+        self.hangul_written, self.hangul_failed = 0, None  # (write_hangul's, kept as it goes)
         shapes = set(c.shape for c in self.hangul_chosen())
         try:
             self.ak.before_changes(self.fontlab, package, u"FreeLab CJK Spacing")
@@ -2176,6 +2218,7 @@ class CJKSpacingDialog(object):
                                               lambda part: self.step(WRITE_STEPS, WIDTHS_STEP, part, False))
         except Exception as exc:
             error = exc
+            syllables = self.hangul_written  # (those set before the error: said, not lost)
         self.step(WRITE_STEPS, UPDATE_STEP, 0.0, False)
         status = self.ak.notify_changed(self.fontlab, package, u"FreeLab CJK Spacing")
         compiled = u""
@@ -2187,9 +2230,15 @@ class CJKSpacingDialog(object):
     def write_hangul(self, package, shapes, progress=None):
         """Each chosen syllable set anew in every master (each measured on its own): its shapes moved
         (components and outlines alike, by their transforms) and its width changed. How many changed.
-        progress(part), where given, as the masters are measured and set (the write's: never stops)."""
+        progress(part), where given, as the masters are measured and set (the write's: never stops).
+
+        A shape's move or the width that raised left the layer half set and the count lost: the log could say
+        "Wrote nothing" over the syllables already set (rest review 2, finding 3). So the count is kept as it
+        goes (self.hangul_written, read by the caller when this raises), each layer's shapes and width are saved
+        before it is set, and a layer whose write raised is put back, read back, and named (self.hangul_failed:
+        (glyph name, master, whether it was put back))."""
         QtCore, QtGui = _qt()
-        done = 0
+        self.hangul_written, self.hangul_failed = 0, None
         masters = list(package.masters) or [package.master]
         for number, master in enumerate(masters):
             share = lambda part: progress((number + part) / float(len(masters))) if progress is not None else None
@@ -2203,16 +2252,27 @@ class CJKSpacingDialog(object):
                 layer = glyph.getLayerByName(master) if glyph is not None else None
                 if layer is None:
                     continue
-                for shape in layer.shapes:
-                    t = shape.transform
-                    shape.transform = QtGui.QTransform(t.m11(), t.m12(), t.m21(), t.m22(), t.dx() + change.shift, t.dy())
-                layer.advanceWidth = change.advance
+                own = list(layer.shapes)
+                saved = [transform_values(shape.transform) for shape in own], float(layer.advanceWidth)
+                try:
+                    for shape in own:
+                        t = shape.transform
+                        shape.transform = QtGui.QTransform(t.m11(), t.m12(), t.m21(), t.m22(), t.dx() + change.shift,
+                                                           t.dy())
+                    layer.advanceWidth = change.advance
+                except Exception:
+                    self.hangul_failed = (change.name, master, put_back_layer(layer, own, saved, QtGui))
+                    try:
+                        glyph.update()
+                    except Exception:
+                        pass
+                    raise
                 try:
                     glyph.update()
                 except Exception:
                     pass
-                done += 1
-        return done
+                self.hangul_written += 1
+        return self.hangul_written
 
     def show(self):
         QtCore, QtGui = _qt()

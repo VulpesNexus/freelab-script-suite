@@ -8,7 +8,7 @@ No FontLab 7 build has one. Users asked for it on FontLab's forum in [2020](http
 
 ## Automated kerning
 
-FontLab 7 has a basic built-in autokern for selected pairs. Its managing director called it "basic autokerning for the current pair" in 2019 ([forum](https://forum.fontlab.com/fontlab-7/upgraded-from-studio-5-really-loving-7-question/msg43706/)). It is not reachable from Python, as far as the reference shows.
+FontLab 7 has a basic built-in autokern for selected pairs. Its managing director called it "basic autokerning for the current pair" in 2019 ([forum](https://forum.fontlab.com/fontlab-7/upgraded-from-studio-5-really-loving-7-question/msg43706/)). Python reaches it as `flPackage.autoKern(left, right, master)`, which returns its suggestion without writing it (below).
 
 | Prior art | License | Notes |
 |---|---|---|

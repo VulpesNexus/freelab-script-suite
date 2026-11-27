@@ -556,7 +556,8 @@ class ReleaseFolderTests(unittest.TestCase):
         self.assertEqual(len(files), text.count("@{ From = "), "every row of the installer's list")
         self.assertIn(("compose/freelab_glyph_generation.py", "freelab_glyph_generation.module", False), files)
         self.assertEqual([name for _s, name, optional in files if optional], OPTIONAL_FONTS)
-        self.assertEqual(self.pack.native_names(), ["freelab_pixels-v%s.dll" % VERSION, "freelab_kern-v%s.dll" % KERN])
+        self.assertEqual(self.pack.native_names(), ["freelab_pixels-v%s.dll" % VERSION, "freelab_hooks-v%s-%s.dll" % (HOOKS, VERSION),
+                                                    "freelab_kern-v%s.dll" % KERN], "the native dark mode engine too")
         for name in self.pack.native_names():
             (self.tmp / name).write_bytes(b"built")
         missing = [source for source, _n, _o in files if not (ROOT / source).is_file()]
@@ -574,7 +575,8 @@ class ReleaseFolderTests(unittest.TestCase):
         self.assertTrue(all(name.startswith("FreeLab/") for name in names), "one folder, unpacked into Scripts")
         self.assertEqual(len(names), len(set(names)))
         for name in ["freelab_auto_kerning.py", "freelab_setup.py", "LICENSE", "README.txt", "FreeLang-CJK.ttf",
-                     "bin/freelab_pixels-v%s.dll" % VERSION, "bin/freelab_kern-v%s.dll" % KERN]:
+                     "bin/freelab_pixels-v%s.dll" % VERSION, "bin/freelab_hooks-v%s-%s.dll" % (HOOKS, VERSION),
+                     "bin/freelab_kern-v%s.dll" % KERN]:
             self.assertIn("FreeLab/" + name, names)
         self.assertEqual(setup, (ROOT / "windows" / "freelab_setup.py").read_bytes())
         self.assertIn("FreeLab Script Suite %s," % self.pack.version(), notes)

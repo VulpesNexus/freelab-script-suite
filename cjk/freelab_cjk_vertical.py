@@ -2731,6 +2731,14 @@ class CJKVerticalDialog(object):
         glyph = package.findName(form.target)
         if glyph is None:
             return None, u"FontLab did not add it"
+        # The source looked up again, now that a glyph was added: its layers were read through the glyph object
+        # found before addGlyph (rest review 2, finding 4), and a glyph object kept while glyphs were added
+        # crashed FontLab when written to (live 2026-11-18, Family Audit: each glyph added moved the font's
+        # storage under them; Quick Overlay's find_glyph)
+        source = package.findName(form.name)
+        if source is None:
+            package.deleteGlyph(glyph)
+            return None, u"%s is gone" % form.name
         made = 0
         upm = float(package.upm)
         entry = (self.model.get("vert") or {}).get(u"U+%04X" % form.code) or {}

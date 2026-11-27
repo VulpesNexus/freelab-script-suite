@@ -643,6 +643,88 @@ class StaleCodeTests(unittest.TestCase):
         self.assertEqual(dialog.seen_history, "mark", "not read again for the History seen before")
         self.assertFalse(dialog.busy)
 
+    class Transform(object):
+        def __init__(self, *values):
+            self.values = tuple(float(v) for v in (values or (1, 0, 0, 1, 0, 0)))
+
+        def m11(self):
+            return self.values[0]
+
+        def m12(self):
+            return self.values[1]
+
+        def m21(self):
+            return self.values[2]
+
+        def m22(self):
+            return self.values[3]
+
+        def dx(self):
+            return self.values[4]
+
+        def dy(self):
+            return self.values[5]
+
+    class Shape(object):
+        """A shape whose transform setter FontLab refuses from its sets-th set on (refuse_from), or never."""
+
+        def __init__(self, refuse_from=None):
+            self._transform, self.sets, self.refuse_from = StaleCodeTests.Transform(), 0, refuse_from
+
+        @property
+        def transform(self):
+            return self._transform
+
+        @transform.setter
+        def transform(self, value):
+            self.sets += 1
+            if self.refuse_from is not None and self.sets >= self.refuse_from:
+                raise RuntimeError("transform refused")
+            self._transform = value
+
+    def hangul(self, shapes_of):
+        """A write of Hangul alone, in one master, of the glyphs {name: [Shape]} (each moved 30, set 900 wide)."""
+        dialog, features = self.make({})
+        layers = dict((name, type("Layer", (), {"shapes": shapes, "advanceWidth": 1000.0})())
+                      for name, shapes in shapes_of.items())
+        glyphs = dict((name, type("Glyph", (), {"getLayerByName": lambda g, master, layer=layer: layer,
+                                                "update": lambda g: None})()) for name, layer in layers.items())
+        dialog.package.masters, dialog.package.master = ["Regular"], "Regular"
+        dialog.package.findName = lambda name: glyphs.get(name)
+        dialog.palt_box = dialog.halt_box = type("Box", (), {"checked": False})()
+        dialog.trims = []
+        dialog.hangul_chosen = lambda: [type("Choice", (), {"shape": "square"})()]
+        change = lambda name: type("Change", (), {"name": name, "shape": "square", "shift": 30.0, "advance": 900.0})()
+        dialog.measure_hangul = lambda master, progress=None: [change(name) for name in sorted(shapes_of)]
+        dialog.ak.error_sentence = staticmethod(ak.error_sentence)
+        old = cj._qt
+        cj._qt = lambda: (None, type("Gui", (), {"QTransform": StaleCodeTests.Transform}))
+        self.addCleanup(setattr, cj, "_qt", old)
+        dialog.write()
+        return layers
+
+    def test_a_hangul_write_that_fails_puts_its_layer_back_and_keeps_its_count(self):
+        """A shape's move raised partway through a syllable: its other shapes stayed moved, and the count of the
+        syllables set before was lost, the log saying "Wrote nothing" (rest review 2, finding 3)."""
+        layers = self.hangul({u"uniAC00": [self.Shape()], u"uniAC01": [self.Shape(), self.Shape(refuse_from=1)]})
+        self.assertEqual((layers[u"uniAC00"].shapes[0].transform.dx(), layers[u"uniAC00"].advanceWidth), (30.0, 900.0))
+        failing = layers[u"uniAC01"]
+        self.assertEqual([s.transform.dx() for s in failing.shapes], [0.0, 0.0], "its first shape moved back")
+        self.assertEqual(failing.advanceWidth, 1000.0)
+        texts = [text for _, text in self.logged]
+        self.assertTrue(any(u"Set 1 syllable width before it stopped" in text for text in texts), texts)
+        self.assertNotIn(u"Wrote nothing.", texts)
+        self.assertTrue(any(u"put back as it was" in text and u"glyphname:uniAC01" in text for text in texts), texts)
+        self.assertTrue(any(kind == "error" and u"transform refused" in text for kind, text in self.logged))
+
+    def test_a_hangul_layer_that_cannot_be_put_back_is_named(self):
+        layers = self.hangul({u"uniAC00": [self.Shape(refuse_from=2), self.Shape(refuse_from=1)]})
+        self.assertEqual(layers[u"uniAC00"].shapes[0].transform.dx(), 30.0, "moved, and refused moving back")
+        texts = [text for kind, text in self.logged if kind == "warning"]
+        self.assertTrue(any(u"could not be put back" in text and u"glyphname:uniAC00" in text for text in texts),
+                        self.logged)
+        self.assertNotIn(u"Wrote nothing.", [text for _, text in self.logged])
+
     def test_a_new_prefix_is_seen_too(self):
         """The font's own positions are read through the prefix's classes: one changed since is a change."""
         dialog, features = self.make({"palt": self.USER_PALT})

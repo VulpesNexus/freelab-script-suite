@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 48
+#define FREELAB_HOOKS_VERSION 49
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -202,6 +202,8 @@ static void *(*qt_image_convert)(const void *, void *, int, int);
 static void *(*qt_font_copy)(void *, const void *);
 static void (*qt_font_dtor)(void *);
 static void (*qt_font_set_strategy)(void *, int);
+static char (*qt_painter_has_clipping)(const void *);
+static void *(*qt_painter_clip_bounds)(const void *, double *); /* a QRectF (x, y, w, h), returned by value */
 
 static struct {
     const char *name;
@@ -241,6 +243,8 @@ static struct {
     {"??0QFont@@QEAA@AEBV0@@Z", (void **)&qt_font_copy},
     {"??1QFont@@QEAA@XZ", (void **)&qt_font_dtor},
     {"?setStyleStrategy@QFont@@QEAAXW4StyleStrategy@1@@Z", (void **)&qt_font_set_strategy},
+    {"?hasClipping@QPainter@@QEBA_NXZ", (void **)&qt_painter_has_clipping},
+    {"?clipBoundingRect@QPainter@@QEBA?AVQRectF@@XZ", (void **)&qt_painter_clip_bounds},
 };
 #define QT_NEEDED (int)(sizeof(qt_needed) / sizeof(qt_needed[0]))
 
@@ -595,6 +599,9 @@ static void drop_note(painter_note *n)
         qt_brush_dtor(&n->brush);
     n->pen_n = n->brush_n = n->pen_next = n->brush_next = n->has_pen = n->has_brush = n->badge = n->dark_box = 0;
     n->light_box = 0;
+    /* (and the warning and the white pen: left set, the next painter noted in the slot began with them, its white pen
+     * drawn in the canvas' ground before any brush, or its pen turned white by its first brush: Codex's review) */
+    n->warning = n->white_pen = 0;
 }
 
 static void note_painter(const void *painter)
@@ -1359,9 +1366,9 @@ static void trace_pen(int hook, const void *painter, const void *in, const void 
  * squares), then its color over it, both inside rounded, smoothed corners. Where a corner is partly covered, the
  * checkerboard shows through the color: on light mode's light popup that is invisible, on the dark popup every swatch
  * had a light rim at its corners, a faint frame around the dark ones (the owner's image 187, 2026-11-26). On a swatch,
- * the checkerboard's squares are held back until the painter's next call: an opaque color filled next hides them
- * anyway, and they are dropped; anything else (a translucent color, no color, a pen, the painter's end) draws them first,
- * as FontLab drew them. */
+ * the checkerboard's squares are held back until the painter's next call: an opaque color filled next hides those it
+ * covers anyway, and they are dropped (see drop_covered); anything else (a translucent color, no color, a pen, the
+ * painter's end) draws them first, as FontLab drew them. */
 #define SWATCH_MAX 8192
 #define HELD_MAX 32
 #define CHECKER_LIGHT 0xffe1e1e1U
@@ -1376,16 +1383,22 @@ static struct {
 } held[HELD_MAX];
 static const void *held_painter;
 static int held_count;
+static int test_swatch; /* the self-test only: an image painter counts as on a swatch */
+static int64_t swatch_held, swatch_dropped; /* squares held back, and of them those dropped under a color */
 
 static int swatch_target(const void *painter)
 {
     void *device;
-    if (!hooks_on || !swatch_count)
+    int type;
+    if (!hooks_on || (!swatch_count && !test_swatch))
         return 0;
     device = qt_painter_device(painter);
-    if (!device || ((int (*)(const void *))((void ***)device)[0][1])(device) != DEVICE_WIDGET)
+    if (!device)
         return 0;
-    return in_sorted(swatch_widgets, swatch_count, (uintptr_t)device - QPAINTDEVICE_IN_QWIDGET);
+    type = ((int (*)(const void *))((void ***)device)[0][1])(device);
+    if (type != DEVICE_WIDGET)
+        return test_swatch && type == DEVICE_IMAGE; /* (freelab_hooks_test_swatch) */
+    return swatch_count && in_sorted(swatch_widgets, swatch_count, (uintptr_t)device - QPAINTDEVICE_IN_QWIDGET);
 }
 
 static uint32_t qcolor_argb(const qcolor *c)
@@ -1416,7 +1429,71 @@ static void settle_held(const void *painter)
         flush_held();
 }
 
-/* A fill on a swatch: 1 when it is a checkerboard square, held back; an opaque fill after held squares drops them. */
+/* A fill's area as left, top, right, bottom, in the painter's coordinates (empty when right <= left or bottom <= top). */
+static void fill_area(int index, const void *rect, const int *xywh, double *area)
+{
+    if (index == H_FILL_XYWH) {
+        area[0] = xywh[0];
+        area[1] = xywh[1];
+        area[2] = (double)xywh[0] + xywh[2];
+        area[3] = (double)xywh[1] + xywh[3];
+    } else if (index == H_FILL_RECTF) {
+        double f[4]; /* QRectF: x, y, width, height */
+        memcpy(f, rect, sizeof(f));
+        area[0] = f[0];
+        area[1] = f[1];
+        area[2] = f[0] + f[2];
+        area[3] = f[1] + f[3];
+    } else {
+        int32_t q[4]; /* QRect: x1, y1, x2, y2, its last pixels included */
+        memcpy(q, rect, sizeof(q));
+        area[0] = q[0];
+        area[1] = q[1];
+        area[2] = q[2] + 1.0;
+        area[3] = q[3] + 1.0;
+    }
+}
+
+/* An opaque color filled on a swatch after held squares: the squares it covers are dropped (hidden under it anyway, but
+ * for the smoothed corners), and the others are kept, to be drawn first. All of them had been dropped, so a color over
+ * part of the checkerboard took the rest of it away (Codex's review). A square counts as covered when the part of it
+ * the painter's clip can show (its bounding rectangle: the swatch's rounded corners) lies inside the color. */
+static void drop_covered(const void *painter, int index, const void *rect, const int *xywh)
+{
+    double fill[4], clip[4], square[4];
+    int i, n = 0, clipped = qt_painter_has_clipping(painter) != 0;
+    fill_area(index, rect, xywh, fill);
+    if (clipped) {
+        double bounds[4]; /* QRectF: x, y, width, height */
+        qt_painter_clip_bounds(painter, bounds);
+        clip[0] = bounds[0];
+        clip[1] = bounds[1];
+        clip[2] = bounds[0] + bounds[2];
+        clip[3] = bounds[1] + bounds[3];
+    }
+    for (i = 0; i < held_count; i++) {
+        int covered;
+        fill_area(held[i].index, held[i].rect, held[i].xywh, square);
+        if (clipped) {
+            if (square[0] < clip[0]) square[0] = clip[0];
+            if (square[1] < clip[1]) square[1] = clip[1];
+            if (square[2] > clip[2]) square[2] = clip[2];
+            if (square[3] > clip[3]) square[3] = clip[3];
+        }
+        if (square[2] <= square[0] || square[3] <= square[1])
+            covered = clipped; /* clipped away: nothing of it shows; (no area of its own: drawn as FontLab drew it) */
+        else
+            covered = square[0] >= fill[0] && square[1] >= fill[1] && square[2] <= fill[2] && square[3] <= fill[3];
+        if (covered)
+            swatch_dropped++;
+        else
+            held[n++] = held[i];
+    }
+    held_count = n;
+}
+
+/* A fill on a swatch: 1 when it is a checkerboard square, held back; an opaque fill after held squares drops those it
+ * covers and draws the others first. */
 static int swatch_fill(int index, const void *painter, const void *rect, int x, int y, int w, int h, const qcolor *c)
 {
     uint32_t argb;
@@ -1440,13 +1517,19 @@ static int swatch_fill(int index, const void *painter, const void *rect, int x, 
         }
         held[held_count].color = *c;
         held_count++;
+        swatch_held++;
         return 1;
     }
     if (held_count) {
-        if ((argb >> 24) == 255)
-            held_count = 0; /* the color covers them */
-        else
-            flush_held();
+        if ((argb >> 24) == 255) {
+            int xywh[4];
+            xywh[0] = x;
+            xywh[1] = y;
+            xywh[2] = w;
+            xywh[3] = h;
+            drop_covered(painter, index, rect, xywh); /* the color covers them, or some of them */
+        }
+        flush_held(); /* (the others, under the color as FontLab drew them) */
     }
     return 0;
 }
@@ -2508,6 +2591,18 @@ EXPORT void *freelab_hooks_test_wrapper(int index)
 EXPORT void freelab_hooks_test_canvas(int on)
 {
     test_canvas = on;
+}
+
+EXPORT void freelab_hooks_test_swatch(int on)
+{
+    test_swatch = on;
+}
+
+/* The swatches' checkerboard squares held back so far, and of them those dropped under an opaque color. */
+EXPORT void freelab_hooks_swatch_counts(int64_t *held_squares, int64_t *dropped)
+{
+    *held_squares = swatch_held;
+    *dropped = swatch_dropped;
 }
 
 EXPORT void freelab_hooks_test_devices(uint32_t mask)

@@ -1356,6 +1356,21 @@ class ReviewOfNovember24Tests(unittest.TestCase):
         self.assertLess(sum(edge), sum(orange), "the blend between them no lighter than the word")
         self.assertGreater(sum(edge), sum(halo))
 
+    def test_counting_a_halo_writes_nothing(self):
+        """Codex's review (dark round 2, #5): with apply 0 (dark mode's ink_count, a count of what the ink mapping would
+        change), the blends between a colored mark and its white halo were still drawn again in place."""
+        orange, white, blend = (200, 100, 0), (250, 250, 250), (223, 169, 116)
+        buf = bytearray()
+        for _ in range(6):
+            buf += pixels([(0, 0, 0)] * 2, alpha=0) + pixels([white] * 3, alpha=220) + pixels([blend], alpha=238)
+            buf += pixels([orange] * 10) + pixels([blend], alpha=238) + pixels([white] * 3, alpha=220)
+            buf += pixels([(0, 0, 0)] * 2, alpha=0)
+        before, applied = bytes(buf), bytearray(buf)
+        counted = anchors(LIB, buf, 22, "ink", apply=0)
+        self.assertEqual(bytes(buf), before, "a count leaves every pixel as it was")
+        self.assertEqual(counted, anchors(LIB, applied, 22, "ink"), "and counts what applying changes")
+        self.assertNotEqual(bytes(applied), before)
+
     def test_dark_cleartype_text_on_light_is_grayed_before_an_island_maps_it(self):
         """The Fonts panel's names: black ClearType text on its near-white list came out with orange and blue edges."""
         paper, left, core, right = (250, 250, 250), (250, 208, 125), (42, 0, 83), (125, 208, 250)

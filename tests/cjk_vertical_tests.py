@@ -1035,6 +1035,48 @@ class FakeQtTests(unittest.TestCase):
         self.assertEqual(shape.shapeData.componentGlyph, "uniFF08", "the glyph it points to")
         self.assertEqual(rounded(shape.transform.values), (0, -1, 1, 0, 120, 850), "the inner move, turned (30 across becomes 30 down)")
 
+    def test_the_source_is_looked_up_again_once_the_form_is_added(self):
+        """The source's layers were read through the glyph object found before addGlyph; a glyph object kept
+        while glyphs were added crashed FontLab (rest review 2, finding 4). A fake whose glyph objects go stale
+        at each addGlyph, as FontLab's storage moves under them."""
+        test = self
+
+        class Wrapper(object):
+            def __init__(self, glyph):
+                self.glyph, self.stale = glyph, False
+                self.name, self.isNull = glyph.name, False
+
+            def getLayerByName(self, master, create=False):
+                if self.stale:
+                    raise AssertionError("a glyph object kept while a glyph was added: %s" % self.name)
+                return self.glyph.getLayerByName(master, create)
+
+        class StalePackage(test.Package):
+            def __init__(self, glyphs, masters=("Regular",)):
+                test.Package.__init__(self, glyphs, masters)
+                self.handed = []
+
+            def findName(self, name):
+                glyph = self.glyphs.get(name)
+                if glyph is None:
+                    return None
+                wrapper = Wrapper(glyph)
+                self.handed.append(wrapper)
+                return wrapper
+
+            def addGlyph(self, glyph):
+                for wrapper in self.handed:
+                    wrapper.stale = True
+                test.Package.addGlyph(self, glyph)
+
+        package = StalePackage([self.Glyph("uni300C", {"Regular": self.Layer(1000.0)})])
+        dialog = self.dialog(package)
+        dialog.package = package
+        glyph, why = dialog.build_form(package, cv.Form(0x300C, "uni300C", "rotated", "uni300C.vert", "build",
+                                                        (0, -1, 1, 0, 120, 880)))
+        self.assertIsNone(why)
+        self.assertEqual(len(glyph.getLayerByName("Regular").shapes), 1)
+
     def test_a_form_fontlab_leaves_empty_is_taken_out(self):
         source = self.Glyph("uni300C", {"Regular": self.Layer(1000.0)})
         package = self.Package([source], masters=("Regular",))

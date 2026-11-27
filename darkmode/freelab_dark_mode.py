@@ -463,7 +463,7 @@ SWEEP_MS = 500  # how often to look for widgets FontLab created or showed (750 w
 FULL_SWEEP_EVERY = 60  # every Nth sweep revisits every widget (replaced stylesheets, new icons): every 30 s
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 158
+NATIVE_VERSION = 159
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -493,6 +493,7 @@ NATIVE_INK_PROP = "freelabNativeInk"  # a list whose dark pens the native engine
 # corners): the app's own check box is drawn over each ("checks" overlay: draw_item_checks)
 CHECK_PICTURE_DELEGATES = ("LanguagesDelegate",)
 CHECK_ROWS_MAX = 400  # rows looked at per paint
+CHECK_GEOMETRIES_MAX = 32  # a list's measured check places kept (one per row left edge and height), then measured anew
 CHECK_WIDGET_NAME = "freelab_check_picture"  # the hidden QCheckBox a list's check boxes are drawn by
 CHECK_SCAN = 18  # pixels from a row's left in which its check picture is looked for (its text begins past it)
 NATIVE_INK_DELEGATES = ("QStyledItemDelegate", "QItemDelegate", "MetricsDataDelegate", "LanguagesDelegate", "ScriptListDelegate")
@@ -961,10 +962,43 @@ def _dim_disabled(sheet):
     gray = _disabled_text()
 
     def rule(match):
-        if u":disabled" not in match.group(1):
+        selectors, body = match.group(1), match.group(2)
+        if u":disabled" not in selectors:
             return match.group(0)
-        return match.group(1) + u"{" + _TEXT_COLOR_RE.sub(lambda c: c.group(1) + gray, match.group(2)) + u"}"
+        dimmed = _TEXT_COLOR_RE.sub(lambda c: c.group(1) + gray, body)
+        if dimmed == body:
+            return match.group(0)
+        parts = _selector_list(selectors) if u"/*" not in selectors else [selectors]  # (a comment's commas: as one)
+        disabled = [part.strip() for part in parts if u":disabled" in part]
+        if len(disabled) == len(parts):
+            return selectors + u"{" + dimmed + u"}"
+        # A list of selectors, not all of them disabled ones ("QLabel:disabled, QLabel:enabled"): the others keep the
+        # rule as it is, and a rule of its own dims the disabled ones (dimmed as one, an enabled label came out gray:
+        # dark mode review, round 1, #4)
+        lead = selectors[:len(selectors) - len(selectors.lstrip())]
+        others = u", ".join(part.strip() for part in parts if u":disabled" not in part)
+        return lead + others + u"{" + body + u"}\n" + u", ".join(disabled) + u"{" + dimmed + u"}"
     return _RULE_RE.sub(rule, sheet)
+
+
+def _selector_list(selectors):
+    """A rule's selectors, split at the commas between them (not those inside quotes, brackets, or parentheses)."""
+    parts, depth, quote, start = [], 0, None, 0
+    for k, ch in enumerate(selectors):
+        if quote is not None:
+            if ch == quote:
+                quote = None
+        elif ch in u"\"'":
+            quote = ch
+        elif ch in u"([":
+            depth += 1
+        elif ch in u")]":
+            depth = max(0, depth - 1)
+        elif ch == u"," and depth == 0:
+            parts.append(selectors[start:k])
+            start = k + 1
+    parts.append(selectors[start:])
+    return parts
 
 
 def _disabled_text():
@@ -1595,7 +1629,15 @@ def _watcher():
 
 def _watch(widget):
     """The widget watched by this revision's filter (WATCHED_PROP holds the revision that watches it; True was
-    the first's)."""
+    the first's). Watched for a reason of its own now, a page watched for its first show alone (_watch_page) is no
+    longer let go after it: processed at that show, a page FontLab had restyled got watched for its stylesheet, and
+    was let go at the show's end all the same (dark mode review, round 1, #5)."""
+    try:
+        record = _record(widget, create=False)
+        if record is not None:
+            record.pop("page_watch_only", None)
+    except Exception:
+        pass
     seen = widget.property(WATCHED_PROP)
     if seen == WATCHER_REVISION and seen is not True:
         return
@@ -2557,6 +2599,17 @@ def _effect_classes():
             pixmap = effect.sourcePixmap(Qt.LogicalCoordinates, offset, QGraphicsEffect.NoPad)
             return pixmap, offset
 
+        def draw_as_it_is(effect, painter):
+            """The widget drawn as it is, the fallback of a drawing that failed: guarded too, as nothing may escape
+            an effect's draw() (an exception there can take FontLab down). Never raises."""
+            try:
+                effect.drawSource(painter)
+            except Exception as exc:
+                try:
+                    _note_error("effect fallback", exc)
+                except Exception:
+                    pass
+
         def draw_mapped(painter, pixmap, offset, area, min_l, keys=None, ink_below=-1.0, keep_tint=0.0, light_l=None,
                         edge_neutral=0.0, edge_target=0, anchors=None, dark_l=None, gray=False, analyze=None,
                         plain=False, defringe=False, cache=None, gray_ct=False, reground=False):
@@ -2847,7 +2900,7 @@ def _effect_classes():
                         draw_tab_crosses(self, painter, pixmap, offset)
                 except Exception as exc:
                     _note_error("effect", exc)
-                    self.drawSource(painter)
+                    draw_as_it_is(self, painter)  # (guarded: dark mode review, round 1, #2)
 
         def draw_selected(effect, painter, pixmap, offset):
             """A list's selected rows as Qt drew them, over the mapping: their highlight and light text
@@ -3071,8 +3124,11 @@ def _effect_classes():
             """Each checkable row's check box drawn as the application draws its own (a QCheckBox's), in place of
             the small picture FontLab's delegate draws: its blue box and the light-mode box's notched corners stood
             apart from every other check box (the owner's images 211 and 235, 2026-11-27: "you see how janky it
-            looks"). The picture's place in its row is measured once; FontLab's pictures are left out of the list's
-            own drawing (clipped), and the check box a hidden QCheckBox draws for each state put in their place."""
+            looks"). The picture's place in its row is measured once for each row's left edge and height (a tree's
+            deeper row starts further right, as Qt's visualItemRect gives it; a row of another height, after a change of
+            font or style, places it otherwise: one measure for every row, kept from the first, put the check boxes
+            beside FontLab's, dark mode review, round 1, #6); FontLab's pictures are left out of the list's own drawing
+            (clipped), and the check box a hidden QCheckBox draws for each state put in their place."""
             drawn = False
             try:
                 QPoint, QRect, QRegion = _core("QPoint"), _core("QRect"), _gui("QRegion")
@@ -3081,6 +3137,9 @@ def _effect_classes():
                 image = pixmap.toImage()
                 ox, oy = offset.x(), offset.y()
                 tree = view.inherits("QTreeWidget")
+                measured = getattr(effect, "freelab_check_boxes", None)
+                if measured is None:
+                    measured = effect.freelab_check_boxes = {}
                 boxes = []
                 y, rows = 0, 0
                 while y < viewport.height and rows < CHECK_ROWS_MAX:
@@ -3094,13 +3153,17 @@ def _effect_classes():
                     y = rect.y() + rect.height()
                     if not int(item.flags()) & int(Qt.ItemIsUserCheckable):
                         continue
-                    box = getattr(effect, "freelab_check_box", None)
+                    geometry = (rect.x(), rect.height())
+                    box = measured.get(geometry)
                     if box is None:
                         ground = image.pixel(min(image.width() - 1, max(0, rect.x() + 1 - ox)),
                                              min(image.height() - 1, max(0, rect.center().y() - oy)))
-                        box = effect.freelab_check_box = measure_check_box(image, rect, ground, ox, oy)
+                        box = measure_check_box(image, rect, ground, ox, oy)
                         if box is None:
                             break
+                        if len(measured) >= CHECK_GEOMETRIES_MAX:
+                            measured.clear()  # (the layout changed over and over: measured anew)
+                        measured[geometry] = box
                     dx, dy, side = box
                     boxes.append((QRect(rect.x() + dx, rect.y() + dy, side, side),
                                   int(item.checkState(0) if tree else item.checkState())))
@@ -3254,7 +3317,7 @@ def _effect_classes():
                             painter.drawImage(area.topLeft(), map_image(part, 0.0, None, -1.0, 0.0, None, 0.0, 0, "all"))
                 except Exception as exc:
                     _note_error("title", exc)
-                    self.drawSource(painter)
+                    draw_as_it_is(self, painter)
 
         _EFFECTS["map"] = MapEffect
         _EFFECTS["title"] = TitleEffect
@@ -3866,20 +3929,31 @@ def _light_field_text(widget):
         QColor = _gui("QColor")
         palette = QPalette(widget.palette)
         originals = record.setdefault("field_text", {})
+        # What dark mode wrote in each group (#aarrggbb, compared as text: PythonQt has no != for Qt's values). A group
+        # whose color is still dark mode's keeps its original; any other color is FontLab's, set since, and the one to
+        # put back (kept from the first palette alone, a dark red FontLab set later went back to its first black as dark
+        # mode went off, and a light color it set later was overwritten: dark mode review, round 1, #3)
+        written = record.setdefault("field_written", {})
         changed = False
         for name in FIELD_TEXT_GROUPS:
             group = getattr(QPalette, name)
             color = palette.color(group, QPalette.Text)
+            if written.get(name) == color.name(QColor.HexArgb):
+                continue  # (dark mode's own, mapped already)
+            written.pop(name, None)
             if _color_lightness(color) >= 0.5 or (name == "Disabled" and color.name() == _disabled_text()):
+                originals.pop(name, None)  # (FontLab's, left as it is: nothing of dark mode's to take back)
                 continue
-            originals.setdefault(name, QColor(color))
+            originals[name] = QColor(color)
             if name == "Disabled":
                 # (dim, as the palette's disabled text: mapped light, a field that takes no typing looked like one
                 # that does, the owner's images 222 to 231)
-                palette.setColor(group, QPalette.Text, QColor(_disabled_text()))
+                mapped = QColor(_disabled_text())
             else:
                 r, g, b = map_rgb(color.red(), color.green(), color.blue())
-                palette.setColor(group, QPalette.Text, QColor(r, g, b, color.alpha()))
+                mapped = QColor(r, g, b, color.alpha())
+            palette.setColor(group, QPalette.Text, mapped)
+            written[name] = mapped.name(QColor.HexArgb)
             changed = True
         if widget.property(FIELD_TEXT_PROP) is None:
             widget.setProperty(FIELD_TEXT_PROP, True)
@@ -3904,16 +3978,24 @@ def _on_field_palette(widget):
 
 
 def _restore_field_text(widget, record):
-    """The text colors FontLab gave the field, back as dark mode goes off."""
+    """The text colors FontLab gave the field, back as dark mode goes off: in the groups whose color is still the one
+    dark mode wrote (one FontLab set since stays)."""
     originals = record.pop("field_text", None)
+    written = record.pop("field_written", None) or {}
     widget.setProperty(FIELD_TEXT_PROP, None)
     if not originals:
         return
-    QPalette = _gui("QPalette")
+    QPalette, QColor = _gui("QPalette"), _gui("QColor")
     palette = QPalette(widget.palette)
+    restored = False
     for name, color in originals.items():
-        palette.setColor(getattr(QPalette, name), QPalette.Text, color)
-    widget.setPalette(palette)
+        group = getattr(QPalette, name)
+        if name in written and not written[name] == palette.color(group, QPalette.Text).name(QColor.HexArgb):
+            continue  # (FontLab's, set since)
+        palette.setColor(group, QPalette.Text, color)
+        restored = True
+    if restored:
+        widget.setPalette(palette)
 
 
 def _page(widget):
@@ -5642,10 +5724,12 @@ def _watch_page(widget):
             return
     except Exception:
         return
-    if widget.property(WATCHED_PROP) is None:
-        _record(widget)["page_watch_only"] = True  # (not watched for anything else: let go after its first show)
+    record = _record(widget, create=False)
+    only = widget.property(WATCHED_PROP) is None or bool(record and record.get("page_watch_only"))
     widget.setProperty(PAGE_SHOW_PROP, True)
-    _watch(widget)
+    _watch(widget)  # (which takes the mark below away: set again after it)
+    if only:
+        _record(widget)["page_watch_only"] = True  # (not watched for anything else: let go after its first show)
 
 
 def _on_page_shown(page):
@@ -5792,7 +5876,13 @@ def _new_timer(name=None):
     app = QApplication.instance()
     timer = QTimer(app) if app is not None else QTimer()
     if name is not None:
-        _connect_timeout(timer, _timer_slot(name))
+        slot = _timer_slot(name)
+        # Held in the session's state too, beside the timer (kept_timers): until now only the connection held it. The
+        # sweeper and the worker run every day that way, so PythonQt's connection holds a plain function, but a
+        # slot whose only holder went away was dropped elsewhere (Auto Kerning's, adversarial review 9), and this
+        # costs one entry per timer made, a few a session (dark mode review, round 1, #1)
+        _state().setdefault("timer_slots", []).append(slot)
+        _connect_timeout(timer, slot)
     return timer
 
 
@@ -5907,7 +5997,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 48
+HOOKS_VERSION = 49
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
@@ -5921,7 +6011,9 @@ def engine_setting(settings):
 
 def hooks_path():
     name = "freelab_hooks-v%d-%d.dll" % (HOOKS_VERSION, NATIVE_VERSION)  # both: a loaded library stays locked
-    return os.environ.get("FREELAB_HOOKS_DLL") or os.path.join(state_dir(), "bin", name)
+    # (built by the installer, else shipped beside the scripts by a release: a release without it ran the pixel
+    # engine though the native one is the default, found by the documentation audit of 2026-11-27)
+    return os.environ.get("FREELAB_HOOKS_DLL") or _built_or_beside(os.path.join(state_dir(), "bin", name), name)
 
 
 NATIVE_QT_VERSION = "5.14.2"  # the Qt the native engine's wrappers were written against (MSVC, 64-bit)
@@ -6373,12 +6465,14 @@ def _send_swatches(state):
 
 def _mark_swatches(picker):
     """A color picker's palette swatches to the hooks (see SWATCH_PROP): their light checkerboard no longer shows at
-    the corners of an opaque color (the owner's image 187)."""
+    the corners of an opaque color (the owner's image 187). Found through children(), level by level: findChildren(QWidget)
+    returns [] under PythonQt, so no swatch was ever marked (dark mode review, round 2, #2), and _descendants
+    (isAncestorOf) stops at a window, as the picker's popup (ColorPickerPopup), which holds them, is one."""
     state = _state()
     if not _native_hooked():
         return
     added = False
-    for child in picker.findChildren(_gui("QWidget")):
+    for child in _object_descendants(picker):
         try:
             if _class_name(child) != "ColorPickerItem" or child.property(SWATCH_PROP):
                 continue
@@ -6391,6 +6485,28 @@ def _mark_swatches(picker):
             pass
     if added:
         _send_swatches(state)
+
+
+OBJECT_DESCENDANTS_MAX = 2000  # widgets _object_descendants gives at most (a picker holds a few dozen)
+
+
+def _object_descendants(widget):
+    """The widgets under widget in Qt's object tree, through children() (whose widgets PythonQt gives, unlike
+    findChildren(QWidget)), windows of its own such as a popup included. Never raises."""
+    found, pending = [], [widget]
+    while pending and len(found) < OBJECT_DESCENDANTS_MAX:
+        try:
+            children = pending.pop().children()
+        except Exception:
+            continue
+        for child in children:
+            try:
+                if child.isWidgetType():
+                    found.append(child)
+                    pending.append(child)
+            except Exception:
+                pass
+    return found
 
 
 def _send_text_strategy(state):
@@ -6486,8 +6602,10 @@ def _native_ink(widget):
     whose delegate draws its check boxes as pictures: CHECK_PICTURE_DELEGATES)."""
     record = _record(widget)
     parent = widget.parentWidget()
-    delegate = _class_name(parent.itemDelegate()) if parent is not None and parent.inherits("QAbstractItemView") else None
-    if delegate in CHECK_PICTURE_DELEGATES:
+    delegate = parent.itemDelegate() if parent is not None and parent.inherits("QAbstractItemView") else None
+    # (a view with no delegate, a list header's, is native ink too: its None read as a class name raised, and the
+    # viewport was left unmarked, 50 times in a session, 2026-11-27)
+    if delegate is not None and _class_name(delegate) in CHECK_PICTURE_DELEGATES:
         _set_effect(widget, record, "checks")
     else:
         _clear_effect(widget, record)

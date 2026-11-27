@@ -4035,6 +4035,16 @@ def make_corrected(fontlab, ak, package, masters, source, axis, name):
     glyph = font_glyph(package, name)
     if glyph is None:
         raise MirrorError(u"FontLab did not add %s" % name)
+    # The source looked up again, now that a glyph was added: its layers were read through the glyph object
+    # found before addGlyph (rest review 2, finding 4), and a glyph object kept while glyphs were added crashed
+    # FontLab when written to (live 2026-11-18, Family Audit; Quick Overlay's find_glyph)
+    origin = font_glyph(package, source)
+    if origin is None:
+        try:
+            package.deleteGlyph(glyph)
+        except Exception:
+            pass
+        raise MirrorError(u"%s is not in the font" % source)
     try:
         drawn = 0
         for master in masters:
@@ -4222,6 +4232,13 @@ def make_dotless(fontlab, ak, package, masters, dotless):
     glyph = font_glyph(package, dotless.name)
     if glyph is None:
         raise DotlessError(u"FontLab did not add %s" % dotless.name)
+    origin = font_glyph(package, dotless.source)  # (looked up again once a glyph was added: make_corrected)
+    if origin is None:
+        try:
+            package.deleteGlyph(glyph)
+        except Exception:
+            pass
+        raise DotlessError(u"%s is not in the font" % dotless.source)
     try:
         drawn = 0
         for master in masters:

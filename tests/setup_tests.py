@@ -187,6 +187,21 @@ class NativeLibraryPathTests(unittest.TestCase):
         import freelab_dark_mode
         self.paths(freelab_dark_mode._built_or_beside)
 
+    def test_the_native_dark_mode_engine(self):
+        """A release ships the native engine too (the documentation audit of 2026-11-27: without it, a release ran
+        the pixel engine though the native one is the default): it is looked for beside the scripts as well."""
+        sys.path.insert(0, os.path.join(ROOT, "darkmode"))
+        self.addCleanup(sys.path.remove, os.path.join(ROOT, "darkmode"))
+        import freelab_dark_mode as dm
+        asked = []
+        saved = dm._built_or_beside
+        dm._built_or_beside = lambda built, name, here=None: asked.append((built, name)) or u"found"
+        self.addCleanup(setattr, dm, "_built_or_beside", saved)
+        os.environ.pop("FREELAB_HOOKS_DLL", None)
+        self.assertEqual(dm.hooks_path(), u"found")
+        name = "freelab_hooks-v%d-%d.dll" % (dm.HOOKS_VERSION, dm.NATIVE_VERSION)
+        self.assertEqual(asked, [(os.path.join(dm.state_dir(), "bin", name), name)])
+
     def test_the_kerning_core(self):
         sys.path.insert(0, os.path.join(ROOT, "kerning"))
         self.addCleanup(sys.path.remove, os.path.join(ROOT, "kerning"))

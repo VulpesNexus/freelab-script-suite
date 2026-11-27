@@ -3348,6 +3348,7 @@ class FontBuilderDialog(object):
         if not self.ak.begin_write(self.fontlab, package, TITLE, self.log, coverage=True):  # (the font info follows)
             return
         added, rebuilt, touched, kept, unencoded, twice, nowhere, error = [], [], [], [], [], [], [], None
+        restored, unrestored = [], []  # (the glyph whose write failed: put back as it was, or left as FontLab left it)
         clockwise_outer = not is_postscript(package)
         how = "even" if self.placement.currentIndex == 1 else "drawn"
         given = set()  # (code points given in this build: one glyph each)
@@ -3380,32 +3381,47 @@ class FontBuilderDialog(object):
                     shape.addContours([made_contour(self.fontlab, c, QtCore) for c in contours], True)
                 glyph = package.findName(target)
                 new = glyph is None
-                if new:
-                    made = self.fontlab.flGlyph()
-                    made.name = target
-                    held = getattr(sys, "_freelab_made_glyphs", None)
-                    if held is None:
-                        held = sys._freelab_made_glyphs = {}
-                    held.setdefault(getattr(package.fgPackage, "id", None), []).append(made)
-                    package.addGlyph(made)
-                    glyph = package.findName(target)
-                    if glyph is None:
-                        raise RuntimeError("FontLab did not add %s" % target)
-                layer = glyph.getLayerByName(master, True)
-                if new:
-                    layer.setGlyphComponents([], float(package.upm) / 2, package, False)
-                layer.removeAllShapes()
-                layer.addShape(shape)
-                layer.advanceWidth = float(advance)
-                if d.code is not None and not codes_of.get(target):
-                    # (a new glyph, or one of the font with no code point, takes its cell's character, unless
-                    # another glyph has it: never two)
-                    if d.code in by_code or d.code in given:
-                        unencoded.append(target)
+                saved = None if new else saved_layer(glyph, master)  # (before it is touched: put back on a failure)
+                try:
+                    if new:
+                        made = self.fontlab.flGlyph()
+                        made.name = target
+                        held = getattr(sys, "_freelab_made_glyphs", None)
+                        if held is None:
+                            held = sys._freelab_made_glyphs = {}
+                        held.setdefault(getattr(package.fgPackage, "id", None), []).append(made)
+                        package.addGlyph(made)
+                        glyph = package.findName(target)
+                        if glyph is None:
+                            raise RuntimeError("FontLab did not add %s" % target)
+                    layer = glyph.getLayerByName(master, True)
+                    if new:
+                        layer.setGlyphComponents([], float(package.upm) / 2, package, False)
+                    layer.removeAllShapes()
+                    layer.addShape(shape)
+                    layer.advanceWidth = float(advance)
+                    if d.code is not None and not codes_of.get(target):
+                        # (a new glyph, or one of the font with no code point, takes its cell's character, unless
+                        # another glyph has it: never two)
+                        if d.code in by_code or d.code in given:
+                            unencoded.append(target)
+                        else:
+                            glyph.fgGlyph.unicode = d.code
+                            given.add(d.code)
+                            by_code[d.code], codes_of[target] = target, [d.code]  # (a later drawing of it goes here)
+                except Exception:
+                    back = glyph_taken_out(package, target) if new else put_layer_back(glyph, master, saved)
+                    if not back:
+                        try:
+                            left = package.findName(target) if new else glyph
+                        except Exception:
+                            left = None
+                        if left is not None:
+                            touched.append(left)  # (recorded with the build's History step)
+                        unrestored.append(target)
                     else:
-                        glyph.fgGlyph.unicode = d.code
-                        given.add(d.code)
-                        by_code[d.code], codes_of[target] = target, [d.code]  # (a later drawing of it goes here)
+                        restored.append(target)
+                    raise
                 (added if new else rebuilt).append(target)
                 codes_of.setdefault(target, [])
                 written.add(target)
@@ -3442,6 +3458,11 @@ class FontBuilderDialog(object):
                          "uniXXXX names): %s." % named(nowhere), "warning")
         if error is not None:
             self.log.add(self.ak.error_sentence(u"Stopped by an error", error), "error")
+        if restored:
+            self.log.add("The glyph being written when it stopped was put back as it was: %s." % named(restored), "info")
+        if unrestored:
+            self.log.add("The glyph being written when it stopped could not be put back, and stays as FontLab left it: "
+                         "%s.%s" % (named(unrestored), status.undo(" <i>Edit &gt; Undo</i> takes it back.")), "warning")
         self.show_drawn()
 
     def new_font(self):
@@ -3672,6 +3693,65 @@ def target_name(name, code, by_code, codes_of=None):
     fallback = ("uni%04X" % code) if code <= 0xFFFF else ("u%05X" % code)
     other = codes_of.get(fallback)
     return fallback if not other or code in other else None
+
+
+# A glyph is written in steps (its shapes taken out, the drawing added, its advance, its code point), and a step
+# that raised stopped the build with the glyph emptied or half written, left out of the History step's glyphs and
+# of the log (rest review 1, finding 2). So the layer is saved before it is touched, and a glyph whose write
+# failed is put back as it was (a glyph the build added is taken out again), read back; one that could not be is
+# recorded with the build's step and named in the log.
+
+def saved_layer(glyph, master):
+    """A master's layer as it is, before a build writes it: (its shapes copied, its advance, the shapes'
+    count), or None where the glyph has no layer there. Raises where a shape cannot be copied: the glyph is
+    then left untouched."""
+    layer = glyph.getLayerByName(master)
+    if layer is None:
+        return None
+    shapes = list(layer.shapes)
+    copies = [shape.cloneTopLevel() if hasattr(shape, "cloneTopLevel") else shape.clone() for shape in shapes]
+    return copies, float(layer.advanceWidth or 0), len(shapes)
+
+
+def put_layer_back(glyph, master, saved):
+    """A layer put back as saved_layer saved it (None: the layer the build made taken out), read back: whether
+    it is as it was (its shapes' count and its advance)."""
+    try:
+        layer = glyph.getLayerByName(master)
+        if saved is None:
+            if layer is not None:
+                glyph.removeLayer(layer)
+        else:
+            if layer is None:
+                layer = glyph.getLayerByName(master, True)
+            layer.removeAllShapes()
+            for shape in saved[0]:
+                layer.addShape(shape)
+            layer.advanceWidth = saved[1]
+    except Exception:
+        pass  # (read back below)
+    try:
+        layer = glyph.getLayerByName(master)
+        if saved is None:
+            return layer is None
+        return (layer is not None and len(list(layer.shapes)) == saved[2]
+                and abs(float(layer.advanceWidth or 0) - saved[1]) <= 0.5)
+    except Exception:
+        return False
+
+
+def glyph_taken_out(package, name):
+    """A glyph the build added taken out again, read back: whether the font no longer has it."""
+    try:
+        glyph = package.findName(name)
+        if glyph is not None:
+            package.deleteGlyph(glyph)
+    except Exception:
+        pass
+    try:
+        return package.findName(name) is None
+    except Exception:
+        return False
 
 
 def alpha_table(threshold, paper=255):

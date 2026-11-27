@@ -511,6 +511,97 @@ class BuildTests(unittest.TestCase):
         self.assertEqual((11 * r + 16 * g + 5 * b) // 32, fb.GUIDE_GRAY)
         self.assertLessEqual(fb.THRESHOLD_MAX, fb.GUIDE_GRAY - 15)
 
+    # -- a glyph whose write fails (rest review 1, finding 2) --------------------------------------------
+
+    def failing_dialog(self, package, drawn):
+        d = self.dialog(package, drawn, replace=True)
+        self.notified = []
+        status = d.ak.notify_changed(None)
+        d.ak.notify_changed = lambda fontlab, package, title, glyphs, **k: self.notified.append(list(glyphs)) or status
+        d.ak.error_sentence = lambda lead, exc: u"%s: %s." % (lead, exc)
+        return d
+
+    def test_a_replaced_glyph_whose_write_fails_is_put_back(self):
+        """Replace on: the glyph's shapes were taken out, then addShape raised, and the glyph stayed emptied, out
+        of the History step's glyphs and the log."""
+        p = FakePackage()
+        glyph = self.add(p, "A", 0x41)
+        layer = FailingLayer([Ink("own")], fail="addShape")
+        layer.advanceWidth = 612
+        glyph.layers["Regular"] = layer
+        d = self.failing_dialog(p, [fb.Drawn("A", "A", "sheet", contours=[SQUARE])])
+        d.build_glyphs()
+        self.assertEqual([s.label for s in layer.shapes], ["own copy"], "its own shapes back")
+        self.assertEqual(layer.advanceWidth, 612)
+        self.assertTrue(any("Stopped by an error" in line for line in self.logged))
+        self.assertTrue(any("put back as it was" in line and "glyphname:A" in line for line in self.logged))
+
+    def test_a_new_glyph_whose_write_fails_is_taken_out(self):
+        p = FailingPackage(fail="advanceWidth")
+        d = self.failing_dialog(p, [fb.Drawn("A", "A", "sheet", contours=[SQUARE])])
+        d.build_glyphs()
+        self.assertIsNone(p.findName("A"), "the glyph the build added taken out again")
+        self.assertTrue(any("put back as it was" in line for line in self.logged))
+
+    def test_a_glyph_that_cannot_be_put_back_is_recorded_and_named(self):
+        p = FakePackage()
+        glyph = self.add(p, "A", 0x41)
+        layer = FailingLayer([Ink("own")], fail="addShape", fail_again=True)
+        glyph.layers["Regular"] = layer
+        d = self.failing_dialog(p, [fb.Drawn("A", "A", "sheet", contours=[SQUARE])])
+        d.build_glyphs()
+        self.assertEqual(self.notified, [[glyph]], "recorded with the build's History step")
+        self.assertTrue(any("could not be put back" in line and "glyphname:A" in line for line in self.logged))
+
+
+class Ink(object):
+    """A shape as a layer holds it: copied by cloneTopLevel."""
+
+    def __init__(self, label):
+        self.label = label
+
+    def cloneTopLevel(self):
+        return Ink(self.label + " copy")
+
+
+class FailingLayer(FakeLayer):
+    """A layer whose addShape (fail="addShape") or advance width (fail="advanceWidth") raises during the build's
+    write; fail_again: its put-back fails too."""
+
+    def __init__(self, shapes=(), fail=None, fail_again=False):
+        object.__setattr__(self, "fail", None)
+        FakeLayer.__init__(self, shapes)
+        self.fail, self.fail_again, self.calls = fail, fail_again, 0
+
+    def __setattr__(self, name, value):
+        if name == "advanceWidth" and getattr(self, "fail", None) == "advanceWidth":
+            self.fail = None if not self.fail_again else self.fail
+            raise RuntimeError("advanceWidth refused")
+        object.__setattr__(self, name, value)
+
+    def addShape(self, shape):
+        if self.fail == "addShape":
+            if not self.fail_again:
+                self.fail = None
+            raise RuntimeError("addShape refused")
+        FakeLayer.addShape(self, shape)
+
+
+class FailingPackage(FakePackage):
+    """A font whose new glyphs' layers fail as FailingLayer does; deleteGlyph takes a glyph out."""
+
+    def __init__(self, fail):
+        FakePackage.__init__(self)
+        self.fail = fail
+
+    def addGlyph(self, glyph):
+        FakePackage.addGlyph(self, glyph)
+        self.found[glyph.name].layers["Regular"] = FailingLayer(fail=self.fail)
+
+    def deleteGlyph(self, glyph):
+        self.found.pop(glyph.name, None)
+        self.fgPackage.glyphs.remove(glyph)
+
 
 class FakeLine(object):
     """A QHBoxLayout as FlowRow uses it: its widgets in order (its trailing stretch left out)."""

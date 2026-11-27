@@ -7,19 +7,19 @@
 
 ## Install from a release
 
-A [release](https://github.com/VulpesNexus/freelab-script-suite/releases) holds *FreeLab-Script-Suite-&lt;version&gt;.zip*: the *FreeLab* folder ready to use, with FreeLang's five fonts and the two native libraries built. Nothing is compiled and no installer runs.
+A [release](https://github.com/VulpesNexus/freelab-script-suite/releases) holds *FreeLab-Script-Suite-&lt;version&gt;.zip*: the *FreeLab* folder ready to use, with FreeLang's five fonts and the three native libraries built (the pixel helper, the native dark mode engine, and the auto kerning core). Nothing is compiled and no installer runs.
 
 1. Quit FontLab.
-2. Unpack the archive into FontLab's *Scripts* folder, *Documents\FontLab\FontLab 7\Scripts*, so that it holds a *FreeLab* folder.
+2. Unpack the archive into FontLab's *Scripts* folder, *Documents\FontLab\FontLab 7\Scripts* (or the *Scripts* folder in the data folder set in FontLab's preferences), so that it holds a *FreeLab* folder.
 3. Start FontLab and choose *Scripts > FreeLab > Set Up FreeLab*.
 
 *Set Up FreeLab* (*windows/freelab_setup.py*) adds FreeLab's block to FontLab's startup script, the one thing a dropped folder cannot do by itself, and starts it at once. The block arranges the *Scripts > FreeLab* menu, starts tab docking, and applies dark mode at launch when it was left on; until it is there, the tools open from the menu but are listed in file order, and neither tab docking nor dark mode starts with FontLab. It is the block the installer writes, to the letter, under the same rules (below), so either way of installing can follow the other.
 
-Dark mode makes FontLab slower, noticeably so even on a fast desktop (tab switches two to five times as long as in light mode), and more on a modest computer. It is off until you switch it on, *Mixed* keeps the canvases (its costliest part) as FontLab draws them, and switching it off needs no restart: [DARKMODE.md](DARKMODE.md#cost).
+Dark mode makes FontLab slower, noticeably so even on a fast desktop (tab switches two to three times as long as in light mode with the native engine), and more on a modest computer. It is off until you switch it on, *Mixed* keeps the canvases (its costliest part) as FontLab draws them, and switching it off needs no restart: [DARKMODE.md](DARKMODE.md#cost).
 
-To update, quit FontLab and unpack the newer archive over the folder. To remove FreeLab, switch dark mode off, choose *Set Up FreeLab* again and *Remove*, restart FontLab, and delete the *FreeLab* folder; the installer's `-Uninstall` does the same from a copy of the repository, and also removes FreeLab's settings.
+To update, quit FontLab and unpack the newer archive over the folder. To remove FreeLab, switch dark mode off, choose *Set Up FreeLab* again and *Remove*, restart FontLab, and delete the *FreeLab* folder; the installer's `-Uninstall` does the same from a copy of the repository, and also removes dark mode's settings and cache, Auto Kerning's cache, and Proof's and the windows' settings. The other tools' settings (Font Check's saved sets among them) stay in *%LOCALAPPDATA%\FreeLab*: delete that folder to remove them too.
 
-The native libraries are in the folder's *bin*; the tools take the ones the installer built in *%LOCALAPPDATA%\FreeLab\bin* first, where there are any. They are not signed: a virus scanner that objects to them leaves dark mode working with flipped hues in the widgets FontLab paints itself, but Auto Kerning, Auto Spacing, Kerning Check, and Glyph Compose need theirs, and installing from the source builds both on your own computer.
+The native libraries are in the folder's *bin*; the tools take the ones the installer built in *%LOCALAPPDATA%\FreeLab\bin* first, where there are any. They are not signed: a virus scanner that objects to them leaves dark mode working with flipped hues in the widgets FontLab paints itself, but Auto Kerning, Auto Spacing, Kerning Check, and Glyph Compose need theirs, and installing from the source builds all three on your own computer.
 
 ## Install from the source
 

@@ -42,7 +42,7 @@ palt trims each kana alone; some pairs still sit unevenly (a katakana with an op
 
 ## Hangul
 
-None of the 16 open-licensed Korean families looked at (Noto Sans and Serif KR, IBM Plex Sans KR, Gothic A1, Gowun Batang and Dodum, Jua, Dongle, Black Han Sans, and others) kerns Hangul or puts it in palt. Half set every syllable at one width (0.77 to 1.0 em; 0.9 em the median); the other half give each syllable its own width, by design. So Korean is made proportional by its widths, and *Hangul* sets them:
+None of the 16 open-licensed Korean families looked at (Noto Sans and Serif KR, IBM Plex Sans KR, Gothic A1, Gowun Batang and Dodum, Jua, Dongle, Black Han Sans, and others) kerns Hangul or puts it in palt. Of the 19 fonts *cjk/hangul_model.json* measures, eleven set every syllable at one width (0.9 em the median), and the other eight give each syllable its own width, by design. So Korean is made proportional by its widths, and *Hangul* sets them:
 
 - **One width for all, ink centered**: the font's own width where its syllables share one, else the corpus's 0.9 em.
 - **Proportional, by syllable shape**: each syllable keeps its ink and takes the sidebearings the proportional fonts give its shape, measured by *cjk/train/hangul.py* into *cjk/hangul_model.json*: about 0.03 em on the left; on the right, 0.055 em when the vowel stands beside the initial (가, 과) and 0.025 em when it sits under it (고). Noto Sans KR, set this way, would range from 753 to 917 units instead of 920.

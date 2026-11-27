@@ -509,9 +509,10 @@ class FakeCalls(object):
         if self.keep_masters:
             package.masters.append(name)
 
-    def set_names(self, package, family, style):
+    def set_names(self, package, family, style, psn=None):
         self.check("names")
         self.record.events.append(("named", family, style, package.current))
+        self.record.postscript = getattr(self.record, "postscript", []) + [(package.current, psn)]
 
     def show_package(self, package):
         self.record.events.append(("shown",))
@@ -773,6 +774,48 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(fa.postscript_name(u"Sans", u"Bold"), u"Sans-Bold")
         self.assertEqual(len(fa.postscript_name(u"A" * 80, u"Bold")), 63)
         self.assertEqual(fa.postscript_name(u"Café Sans", u"Light"), u"CafSans-Light", "ASCII only")
+
+    def test_postscript_names_stay_apart_once_cut(self):
+        """A 63-character family gave Regular and Bold one PostScript name, the style cut away; a family or style
+        all in another script gave "-" (rest review 1, finding 6)."""
+        family = u"F" * 63
+        names = fa.postscript_names(family, [u"Regular", u"Bold"])
+        self.assertEqual([len(name) for name in names], [63, 63])
+        self.assertTrue(names[0].endswith(u"-Regular") and names[1].endswith(u"-Bold"), names)
+        self.assertEqual(len(fa.postscript_name(u"F" * 40, u"S" * 50)), 63, "a long style cut too")
+        self.assertTrue(fa.postscript_name(u"F" * 40, u"S" * 50).startswith(u"F" * fa.POSTSCRIPT_FAMILY_KEPT + u"-"))
+        self.assertEqual(fa.postscript_names(u"日本語", [u"標準", u"太字"]), [u"Untitled-Style", u"Untitled-Style2"])
+        long_styles = [u"Condensed" * 8 + u"Bold", u"Condensed" * 8 + u"Light"]  # (alike for longer than they can keep)
+        cut = fa.postscript_names(u"Sans", long_styles)
+        self.assertEqual(len(set(name.lower() for name in cut)), 2, cut)
+        self.assertTrue(all(len(name) <= 63 for name in cut))
+        self.assertTrue(cut[1].endswith(u"2"))
+        self.assertEqual(fa.postscript_names(u"Sans", [u"Bold", u"bold"]), [u"Sans-Bold", u"Sans-bold2"], "case aside")
+
+    def test_each_master_gets_its_own_postscript_name(self):
+        regular, bold = self.sources()
+        regular.info["family"] = u"F" * 63
+        bold.info["style"], regular.info["style"] = u"Bold", u"Regular"
+        plan = fa.plan_assembly([regular, bold], regular.key)
+        calls = FakeCalls()
+        fa.build_font(calls, plan, dict((s.key, s) for s in (regular, bold)))
+        self.assertEqual([master for master, _ in calls.record.postscript], [u"Regular", u"Bold"])
+        self.assertEqual(len(set(psn for _, psn in calls.record.postscript)), 2, calls.record.postscript)
+
+    def test_a_master_not_made_current_is_not_named(self):
+        """The second master's switch refused: its names were written over the first master's, the one still
+        current (rest review 1, finding 7)."""
+        class Calls(FakeCalls):
+            def set_current_master(self, package, name):
+                if name == u"Bold" and package.current == u"Regular" and not getattr(self, "refused", False):
+                    self.refused = True
+                    raise RuntimeError(u"refused")
+                package.current = name
+        calls, plan, package, report = self.build(Calls())
+        named = [event for event in calls.record.events if event[0] == "named"]
+        self.assertEqual(named, [("named", u"Sans", u"Regular", u"Regular")], "the first master's names left as set")
+        self.assertTrue(any(line.startswith(u"Masters not made current, not named") and u"Bold" in line for line in report),
+                        report)
 
     def test_the_references_code_info_kerning_and_axes(self):
         calls, plan, package, report = self.build()

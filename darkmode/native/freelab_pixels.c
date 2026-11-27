@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 158
+#define FREELAB_PIXELS_VERSION 159
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -4667,8 +4667,16 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
                 changed++;
                 if (apply)
                     map_rgb(&px[2], &px[1], &px[0], dark_l, light_l, 0.0);
-            } else if (px[3] >= ANCHOR_MIN_ALPHA && halo_blend(px, dark_l, light_l)) {
-                changed++; /* (halo_blend draws it when apply: it is called on the pixel itself) */
+            } else if (px[3] >= ANCHOR_MIN_ALPHA) {
+                /* halo_blend draws the pixel in place: on the pixel itself when apply, else on a copy (a count, as
+                 * dark mode's ink_count makes, changed the caller's image: Codex's review) */
+                uint8_t copy[4];
+                copy[0] = px[0];
+                copy[1] = px[1];
+                copy[2] = px[2];
+                copy[3] = px[3];
+                if (halo_blend(apply ? px : copy, dark_l, light_l))
+                    changed++;
             }
         }
         return changed;

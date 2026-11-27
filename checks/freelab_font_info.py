@@ -10,7 +10,8 @@ what it follows. A bit is set when the write brought its range or code page into
 the write took the last of it out, and every other bit is left as declared, hand-set ones included.
 The Win ascent and descent are where Windows clips the glyphs: a glyph the write drew above or below
 them raises them to its ink (never lowered). FontLab exports them from each master's Safe top and Safe
-bottom, not from the font info's copy (ExportedInfo), so they are written to every master.
+bottom, not from the font info's copy (ExportedInfo), so each master's own are raised, recorded, and
+put back in that master (apply_win).
 
 FontLab's History takes the Unicode ranges and code pages back with the write that changed them, and
 redoes them (live 2026-11-18: they are the font's coding, fgPackage.coding, which a step of the whole
@@ -420,11 +421,12 @@ def _number(info, field):
 
 class Change(object):
     """One field FreeLab updated: its name, the bits set and cleared (a range or code page field), or the
-    value before and after (a Win field)."""
+    value before and after (a Win field), with the master it was set in where the font has several (master:
+    its name, or None)."""
 
-    def __init__(self, field, added=(), removed=(), before=None, after=None):
+    def __init__(self, field, added=(), removed=(), before=None, after=None, master=None):
         self.field, self.added, self.removed = field, sorted(added), sorted(removed)
-        self.before, self.after = before, after
+        self.before, self.after, self.master = before, after, master
 
     def text(self):
         if self.field in (INFO_UNICODE, INFO_PAGES):
@@ -436,6 +438,8 @@ class Change(object):
                 parts.append(u"removed %s" % u", ".join(name(bit) for bit in self.removed))
             return u"%s (%s)" % (u"Unicode ranges" if self.field == INFO_UNICODE else u"code pages", u"; ".join(parts))
         label = u"Win ascent" if self.field == INFO_WIN_ASCENT else u"Win descent"
+        if self.master is not None:
+            label = u"%s of %s" % (label, self.master)
         return u"%s (%s to %s)" % (label, self.before, self.after)
 
 
@@ -446,8 +450,9 @@ def changes_text(changes):
 
 def _record(font):
     """The session's record of the Win values FreeLab raised in this font's info (FontLab's History does
-    not take them back): {"win": {field: (the value before FreeLab's first raise, the value it left, glyph
-    names)}}. The range and code page bits are not recorded: the History takes them back itself."""
+    not take them back): {"win": {field: {master: (the value before FreeLab's first raise, the value it
+    left, glyph names)}}}, each master's own (master: None for a font info with no masters to switch, a
+    test's fake). The range and code page bits are not recorded: the History takes them back itself."""
     held = getattr(sys, "_freelab_font_info", None)
     if held is None:
         held = sys._freelab_font_info = {}
@@ -624,62 +629,139 @@ def win_needed(extents):
     return ascent, descent
 
 
+# The Win values are each master's own: FontLab exports a master's Safe top and Safe bottom as that master's
+# Win ascent and descent (live 2026-11-27), so each is read, raised, recorded, and put back in its own master.
+# Read and written as one value (the masters' largest, written to every master), a font whose masters held
+# 900 and 1100 was not raised for ink at 1000, which then clipped in the first; and ink at 1200 raised both
+# to 1200, recorded 1100 as the value before, and an undo then left 1100 in the first master, its own 900
+# lost (rest review 1, finding 1). A font info with no masters to switch (fgPackage.info, a test's fake) holds
+# one value, under the master None.
+
+def _win_values(info, field):
+    """{master: value} of a Win field (whole numbers, None where unreadable), and whether they are per master
+    (info is ExportedInfo); else {None: the one value}."""
+    if getattr(type(info), "master_values", None) is not None:
+        found = {}
+        for master, value in info.master_values(field).items():
+            try:
+                found[master] = None if value is None else int(round(float(value)))
+            except Exception:
+                found[master] = None
+        return found, True
+    return {None: _number(info, field)}, False
+
+
+def _set_win(info, field, values, per_master):
+    """Win values written ({master: value}: each into its own master; masters not named are left)."""
+    if per_master:
+        info.set_master_values(field, dict((master, float(value)) for master, value in values.items()))
+    else:
+        for value in values.values():
+            setattr(info, field, float(value))
+
+
+def _extents_of(extents, master):
+    """The ink a master's Win values must cover: extents a dict ({master: [(bottom, top)]}, each master's own
+    layers), or a list ([(bottom, top)] of every master layer: each master then covers them all, never
+    clipping a master's ink, if raising a master past its own)."""
+    if isinstance(extents, dict):
+        if master is None:
+            return [extent for found in extents.values() for extent in found]
+        return list(extents.get(master, ()))
+    return list(extents or ())
+
+
+def _in_order(info, masters):
+    """The masters named (keys of a dict), in the font's order (for the log), any it does not list after."""
+    try:
+        order = list(info.masters()) if getattr(type(info), "masters", None) is not None else []
+    except Exception:
+        order = []
+    first = [master for master in order if master in masters]
+    return first + sorted((master for master in masters if master not in first),
+                          key=lambda name: (name is None, u"%s" % name))
+
+
 def apply_win(info, font, extents, names):
-    """The Win ascent and descent raised to the ink of the glyphs the write drew (extents: [(bottom, top)]
-    of each of their master layers), never lowered, and never set where they are not (0 or none); recorded
-    with the glyphs' names. Glyphs whose ink is within a value FreeLab raised before but past the value
-    before that raise are recorded with it too, though the write raises nothing: they rely on the raise, and
-    a follow must not lower it under them once the glyphs it was raised for are gone (adversarial review 5:
-    A raised 900 to 1000, B built to 950 was not recorded, and A undone took the value back to 900, under
-    B). [Change]."""
+    """Each master's Win ascent and descent raised to the ink of the glyphs the write drew (extents: their
+    master layers' [(bottom, top)], or {master: [(bottom, top)]}: _extents_of), never lowered, and never set
+    where they are not (0 or none); recorded per master with the glyphs' names. Glyphs whose ink is within a
+    value FreeLab raised before but past the value before that raise are recorded with it too, though the
+    write raises nothing: they rely on the raise, and a follow must not lower it under them once the glyphs
+    it was raised for are gone (adversarial review 5: A raised 900 to 1000, B built to 950 was not recorded,
+    and A undone took the value back to 900, under B). [Change]."""
     changes = []
-    ascent, descent = win_needed(extents)
     record = _record(font)["win"]
-    for field, need in ((INFO_WIN_ASCENT, ascent), (INFO_WIN_DESCENT, descent)):
-        now = _number(info, field)
-        # (0 reads as not set, as Font Check takes it: a value made from these glyphs alone would clip the others)
-        if need is None or not now:
-            continue
-        if need <= now:
-            first, left, earlier = record.get(field, (None, None, ()))
-            if left is not None and left == now and need > first:  # (FreeLab's raise, as it left it)
-                record[field] = (first, left, tuple(sorted(set(earlier) | set(names))))
-            continue
-        setattr(info, field, float(need))
-        kept = _number(info, field)
-        if kept != need:
-            continue
-        first, _left, earlier = record.get(field, (now, now, ()))
-        record[field] = (first, need, tuple(sorted(set(earlier) | set(names))))
-        changes.append(Change(field, before=now, after=need))
+    for index, field in enumerate((INFO_WIN_ASCENT, INFO_WIN_DESCENT)):
+        values, per_master = _win_values(info, field)
+        held = record.setdefault(field, {})
+        if not isinstance(held, dict):  # (an earlier FreeLab's one value, recorded this session: not per master)
+            held = record[field] = {}
+        raise_to = {}
+        for master, now in values.items():
+            need = win_needed(_extents_of(extents, master))[index]
+            # (0 reads as not set, as Font Check takes it: a value made from these glyphs alone would clip the others)
+            if need is None or not now:
+                continue
+            if need <= now:
+                first, left, earlier = held.get(master, (None, None, ()))
+                if left is not None and left == now and need > first:  # (FreeLab's raise, as it left it)
+                    held[master] = (first, left, tuple(sorted(set(earlier) | set(names))))
+                continue
+            raise_to[master] = need
+        if raise_to:
+            _set_win(info, field, raise_to, per_master)
+            kept = _win_values(info, field)[0]
+            for master in _in_order(info, raise_to):
+                need, now = raise_to[master], values[master]
+                if kept.get(master) != need:
+                    continue
+                first, _left, earlier = held.get(master, (now, now, ()))
+                held[master] = (first, need, tuple(sorted(set(earlier) | set(names))))
+                changes.append(Change(field, before=now, after=need, master=master if len(values) > 1 else None))
+        if not held:
+            del record[field]
     return changes
 
 
 def follow(info, font, extent_of):
-    """After an undo or a redo: each Win value FreeLab raised this session put in step with the glyphs it
-    was raised for, as they are now (extent_of(names): [(bottom, top)] of those glyphs' master layers),
-    unless it was changed by hand since FreeLab left it (it is then left, and forgotten). [Change]."""
+    """After an undo or a redo: each Win value FreeLab raised this session put in step, in its own master,
+    with the glyphs it was raised for, as they are now (extent_of(names): their master layers' extents, a list
+    or a dict as apply_win takes them), unless it was changed by hand since FreeLab left it (it is then left,
+    and forgotten). [Change]."""
     held = getattr(sys, "_freelab_font_info", None) or {}
     entry = held.get(font)
     if not entry:
         return []
-    changes = []
-    for field in (INFO_WIN_ASCENT, INFO_WIN_DESCENT):
+    changes, measured = [], {}  # (measured: extent_of's reading of each list of names, read once for every master)
+    for index, field in enumerate((INFO_WIN_ASCENT, INFO_WIN_DESCENT)):
         if field not in entry["win"]:
             continue
-        first, left, names = entry["win"][field]
-        value = _number(info, field)
-        if value != left:
+        raised = entry["win"][field]
+        if not isinstance(raised, dict):  # (an earlier FreeLab's one value, recorded this session: forgotten)
             del entry["win"][field]
             continue
-        ascent, descent = win_needed(extent_of(names))
-        need = ascent if field == INFO_WIN_ASCENT else descent
-        want = max(first, need) if need is not None else first
-        if want == left:
-            continue
-        setattr(info, field, float(want))
-        entry["win"][field] = (first, want, names)
-        changes.append(Change(field, before=left, after=want))
+        values, per_master = _win_values(info, field)
+        put = {}
+        for master in _in_order(info, raised):
+            first, left, names = raised[master]
+            if values.get(master) != left:
+                del raised[master]
+                continue
+            if names not in measured:
+                measured[names] = extent_of(names)
+            need = win_needed(_extents_of(measured[names], master))[index]
+            want = max(first, need) if need is not None else first
+            if want != left:
+                put[master] = (first, left, want, names)
+        if put:
+            _set_win(info, field, dict((master, found[2]) for master, found in put.items()), per_master)
+            for master in _in_order(info, put):
+                first, left, want, names = put[master]
+                raised[master] = (first, want, names)
+                changes.append(Change(field, before=left, after=want, master=master if len(values) > 1 else None))
+        if not raised:
+            del entry["win"][field]
     return changes
 
 

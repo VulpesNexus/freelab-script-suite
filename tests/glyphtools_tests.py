@@ -3953,6 +3953,46 @@ FL_MARK = [(0, 0), (0, 200), (200, 200), (300, 0)]
 FLIP_Y, MIRROR_X = (1, 0, 0, -1, 250, 600), (-1, 0, 0, 1, 550, 400)  # each lands the mark on 250..550 by 400..600
 
 
+class StaleWrapper(object):
+    """A glyph object as findName hands it out, gone stale once a glyph is added (stale_on_add): a glyph object
+    kept while glyphs were added crashed FontLab (live 2026-11-18, Family Audit; Quick Overlay's find_glyph)."""
+
+    CHECKED = ("getLayerByName", "layers", "fgGlyph")
+
+    def __init__(self, glyph):
+        object.__setattr__(self, "_glyph", glyph)
+        object.__setattr__(self, "_stale", False)
+
+    def __getattr__(self, name):
+        if name in StaleWrapper.CHECKED and object.__getattribute__(self, "_stale"):
+            raise AssertionError(u"a glyph object kept while a glyph was added: %s" % self._glyph.name)
+        return getattr(self._glyph, name)
+
+    def __setattr__(self, name, value):
+        setattr(self._glyph, name, value)
+
+
+def stale_on_add(font):
+    """font, its findName handing out a new StaleWrapper at each call, each gone stale at the next addGlyph."""
+    handed = []
+    real_find, real_add = font.findName, font.addGlyph
+
+    def find_name(name):
+        glyph = real_find(name)
+        if glyph is None:
+            return None
+        wrapper = StaleWrapper(glyph)
+        handed.append(wrapper)
+        return wrapper
+
+    def add_glyph(new):
+        for wrapper in handed:
+            object.__setattr__(wrapper, "_stale", True)
+        real_add(new)
+    font.findName, font.addGlyph = find_name, add_glyph
+    return font
+
+
 def fl_font(how="bake"):
     """o (a square), mark (a bar), and letters whose mark is a mirrored component over the o's top edge."""
     font = FlFont(how)
@@ -4101,6 +4141,14 @@ class MirrorFixTests(unittest.TestCase):
         across = font.glyphs["mark.mirrored"].by_master["Regular"].shapes[0]
         self.assertEqual(sorted(across.own[0].points), [(0.0, 0.0), (100.0, 200.0), (300.0, 0.0), (300.0, 200.0)],
                          "left to right about the middle of its advance width")
+
+    def test_the_source_is_looked_up_again_once_the_corrected_glyph_is_added(self):
+        """make_corrected read the source's layers through the glyph object found before addGlyph (rest review 2,
+        finding 4)."""
+        font = stale_on_add(fl_font("bake"))
+        glyph = ac.make_corrected(FL, Stub(layer_path=fl_path), font, font.masters, "mark", "y", "mark.flipped")
+        self.assertEqual(sorted(glyph.getLayerByName("Regular").shapes[0].own[0].points),
+                         [(0.0, 0.0), (0.0, 200.0), (200.0, 0.0), (300.0, 200.0)])
 
     def test_a_fontlab_that_sets_the_direction_right_by_itself_is_not_reversed_twice(self):
         self.check_corrected("bake+reverse")
@@ -4554,6 +4602,15 @@ class DotlessTests(unittest.TestCase):
             named_link(u"dotlessj"), named_link(u"j"))), dialog.lines)
         self.assertTrue(any(line.startswith(u"Built 3 glyphs: ") for line in lines), lines)
         self.assertFalse(any(level == "warning" for level, _ in dialog.lines), dialog.lines)
+
+    def test_the_letter_is_looked_up_again_once_the_dotless_glyph_is_added(self):
+        """make_dotless read the letter's layers through the glyph object found before addGlyph, as make_corrected
+        did (rest review 2, finding 4)."""
+        fl = stale_on_add(self.fl())
+        dotless = ac.Dotless("made", 0x131, 1)
+        dotless.name, dotless.source = u"dotlessi", u"i"
+        ac.make_dotless(FL_SHAPES, Stub(layer_path=fl_path), fl, fl.masters, dotless)
+        self.made_glyph(fl, "dotlessi", I_STEM)
 
     def test_its_own_row_alone_is_one_step(self):
         fl = FlFont("bake")

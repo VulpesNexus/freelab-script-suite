@@ -1532,16 +1532,17 @@ class FontLabCalls(object):
         package.setLocation(self.fontlab.flLocation(dict(location)), master)
 
     @staticmethod
-    def set_names(package, family, style):
+    def set_names(package, family, style, psn=None):
         """Live (2026-11-24): a new font's flPackage.tfn reads "Unnamed", its ffn "Unnamed Regular", and its
         psn "Unnamed-Regular", whatever fgPackage.info.familyName is set to, and its Font window's tab is
         titled by them (title_name(): the ffn, or "tfn: master" once it has several masters): the assembled
         Sarabun came up as "Unnamed: Bold" (the owner, 2026-11-24). All four are settable; set before the
         window opens, since a tab already open kept its title when ffn was set after. tsn, ffn, and psn are the
-        current master's (live 2026-11-27): the caller names each master in turn."""
+        current master's (live 2026-11-27): the caller names each master in turn. psn: the master's PostScript
+        name, told apart from the other masters' (postscript_names)."""
         package.tfn, package.tsn = family, style
         package.ffn = u"%s %s" % (family, style)
-        package.psn = postscript_name(family, style)
+        package.psn = psn or postscript_name(family, style)
 
     def show_package(self, package):
         """Live (2026-11-24, Sarabun Regular and Bold assembled): fontlab.flItems.notifyPackageAdded(package) opens the new
@@ -1568,11 +1569,41 @@ POSTSCRIPT_FORBIDDEN = u"[](){}<>/%"
 REFERENCE_SETTLE_MS = 300  # the new font's reference master made current again once its window is made
 
 
-def postscript_name(family, style):
-    """"Family-Style" as a PostScript name: printable ASCII without spaces or [](){}<>/%, at most 63 characters."""
-    def clean(text):
-        return u"".join(c for c in u"%s" % text if 32 < ord(c) < 127 and c not in POSTSCRIPT_FORBIDDEN)
-    return (u"%s-%s" % (clean(family), clean(style)))[:63]
+POSTSCRIPT_MOST = 63
+POSTSCRIPT_FAMILY_KEPT = 31  # (a family cut for a long style keeps this much at the least; the style the rest)
+
+
+def _postscript_clean(text):
+    return u"".join(c for c in u"%s" % text if 32 < ord(c) < 127 and c not in POSTSCRIPT_FORBIDDEN)
+
+
+def postscript_name(family, style, suffix=u""):
+    """"Family-Style" as a PostScript name: printable ASCII without spaces or [](){}<>/%, at most 63 characters.
+    The style is never cut away for a long family (a 63-character family gave two masters one name, the style
+    cut off: rest review 1, finding 6): the family is cut first, down to POSTSCRIPT_FAMILY_KEPT, then the style;
+    suffix (a number told apart by postscript_names) is kept whole. A family or style with nothing PostScript
+    allows (a name all in another script) is "Untitled" or "Style" (it was empty: "-")."""
+    fam = _postscript_clean(family) or u"Untitled"
+    sty = _postscript_clean(style) or u"Style"
+    room = POSTSCRIPT_MOST - 1 - len(suffix)
+    if len(fam) + len(sty) > room:
+        fam = fam[:max(room - len(sty), min(len(fam), POSTSCRIPT_FAMILY_KEPT))]
+        sty = sty[:max(1, room - len(fam))]
+    return u"%s-%s%s" % (fam, sty, suffix)
+
+
+def postscript_names(family, styles):
+    """[a PostScript name for each style], told apart (case aside, as Windows takes font names): a name that
+    another master's has already is numbered (Sans-Bold, Sans-Bold2), so that no two masters export one."""
+    found, taken = [], set()
+    for style in styles:
+        name, number = postscript_name(family, style), 1
+        while name.lower() in taken:
+            number += 1
+            name = postscript_name(family, style, u"%d" % number)
+        taken.add(name.lower())
+        found.append(name)
+    return found
 
 
 # The font info read and, for the reference, written to the new font: (INFO_FIELDS key, fgPackage.info name)
@@ -1751,12 +1782,17 @@ def build_font(calls, plan, sources, progress=None):
     family = u"%s" % ((reference.info or {}).get("family") or u"")
     if family:  # (before its window opens: the window's tab is titled by these names)
         # Each master has its own style, full, and PostScript names (live 2026-11-27: the second master of an
-        # assembled font kept "Unnamed Regular" and "Unnamed-Regular"), each its source's style
-        for name, key in plan.masters:
+        # assembled font kept "Unnamed Regular" and "Unnamed-Regular"), each its source's style, and a PostScript
+        # name no other master has (postscript_names). A master that could not be made current is not named: the
+        # names went to the master current before, over its own (rest review 1, finding 7)
+        styles = [u"%s" % ((sources[key].info or {}).get("style") or name) for name, key in plan.masters]
+        unswitched = u"Masters not made current, not named"
+        for (name, key), style, psn in zip(plan.masters, styles, postscript_names(family, styles)):
             if len(names) > 1:
-                failed.attempt(u"Masters not made current, not named", name, calls.set_current_master, package, name)
-            style = u"%s" % ((sources[key].info or {}).get("style") or name)
-            failed.attempt(u"Font not named", name, calls.set_names, package, family, style)
+                failed.attempt(unswitched, name, calls.set_current_master, package, name)
+                if name in failed.items.get(unswitched, []):
+                    continue
+            failed.attempt(u"Font not named", name, calls.set_names, package, family, style, psn)
         if len(names) > 1:
             failed.attempt(u"Masters not made current", names[0], calls.set_current_master, package, names[0])
     failed.attempt(u"Font window not opened", u"the new font", calls.show_package, package)

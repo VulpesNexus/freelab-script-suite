@@ -203,11 +203,11 @@ class FollowTests(unittest.TestCase):
         self.extents = {u"C": [(-100.0, 850.0)]}
         fi.follow(info, 101, self.extent_of)
         self.assertEqual((info.openTypeOS2WinAscent, info.openTypeOS2WinDescent), (900.0, 250.0), "both gone: as before")
-        self.assertNotIn(u"C", sys._freelab_font_info[101]["win"][fi.INFO_WIN_ASCENT][2])
+        self.assertNotIn(u"C", sys._freelab_font_info[101]["win"][fi.INFO_WIN_ASCENT][None][2])
         # A value changed by hand since FreeLab left it: a later glyph within it is not FreeLab's to record
         info.openTypeOS2WinAscent = 1200.0
         fi.apply_win(info, 101, [(-100.0, 1100.0)], [u"D"])
-        self.assertNotIn(u"D", sys._freelab_font_info[101]["win"][fi.INFO_WIN_ASCENT][2])
+        self.assertNotIn(u"D", sys._freelab_font_info[101]["win"][fi.INFO_WIN_ASCENT][None][2])
 
     def test_every_undo_and_redo_across_successive_writes_follows(self):
         """A redrawn twice, the Win ascent raised 900 to 1000, then to 1100, the glyph count unchanged: a second
@@ -329,9 +329,63 @@ class ExportedInfoTests(unittest.TestCase):
     def test_apply_win_raises_every_master(self):
         package = ModelPackage()
         changes = fi.apply_win(fi.ExportedInfo(package), 201, [(-100.0, 1150.0)], [u"Aringacute"])
-        self.assertEqual([(c.before, c.after) for c in changes], [(1100, 1150)])
+        self.assertEqual([(c.master, c.before, c.after) for c in changes], [(u"Light", 1066, 1150), (u"Bold", 1100, 1150)])
+        self.assertEqual(fi.changes_text(changes), u"Win ascent of Light (1066 to 1150); Win ascent of Bold (1100 to 1150)")
         self.assertEqual([package.values[m]["openTypeOS2WinAscent"] for m in package.masters], [1150, 1150])
+        self.assertEqual(package.master, u"Light")
         fi.forget(201)
+
+    def win(self, package, field="openTypeOS2WinAscent"):
+        return [package.values[m][field] for m in package.masters]
+
+    def test_each_master_raised_for_its_own_value(self):
+        """Masters holding 900 and 1100, ink drawn to 1000: the Win values read as one, the masters' largest
+        (1100), raised neither and left the first clipping the glyph (rest review 1, finding 1)."""
+        package = ModelPackage()
+        package.values[u"Light"]["openTypeOS2WinAscent"] = 900
+        changes = fi.apply_win(fi.ExportedInfo(package), 202, [(-100.0, 1000.0)], [u"A"])
+        self.assertEqual(self.win(package), [1000, 1100], "the first raised to the ink, the second left")
+        self.assertEqual([(c.master, c.before, c.after) for c in changes], [(u"Light", 900, 1000)])
+        fi.forget(202)
+
+    def test_an_undo_puts_each_masters_own_value_back(self):
+        """Ink to 1200 over masters of 900 and 1100: both raised to 1200, then the undo wrote the one value
+        recorded (1100) to both, the first master's own 900 lost (rest review 1, finding 1)."""
+        package = ModelPackage()
+        package.values[u"Light"]["openTypeOS2WinAscent"] = 900
+        package.values[u"Bold"]["openTypeOS2WinDescent"] = 350
+        info = fi.ExportedInfo(package)
+        fi.apply_win(info, 203, [(-320.0, 1200.0)], [u"A"])
+        self.assertEqual(self.win(package), [1200, 1200])
+        self.assertEqual(self.win(package, "openTypeOS2WinDescent"), [320, 350], "the Bold descent already deep enough")
+        extents = {u"A": []}
+        changes = fi.follow(info, 203, lambda names: [e for n in names for e in extents.get(n, [])])
+        self.assertEqual(self.win(package), [900, 1100], "undone: each master's own value back")
+        self.assertEqual(self.win(package, "openTypeOS2WinDescent"), [300, 350])
+        self.assertEqual(len(changes), 3)
+        extents[u"A"] = [(-320.0, 1200.0)]
+        fi.follow(info, 203, lambda names: [e for n in names for e in extents.get(n, [])])
+        self.assertEqual(self.win(package), [1200, 1200], "redone")
+        fi.forget(203)
+
+    def test_a_master_changed_by_hand_is_left_the_others_followed(self):
+        package = ModelPackage()
+        package.values[u"Light"]["openTypeOS2WinAscent"] = 900
+        info = fi.ExportedInfo(package)
+        fi.apply_win(info, 204, [(-100.0, 1200.0)], [u"A"])
+        package.values[u"Bold"]["openTypeOS2WinAscent"] = 1300  # (set by hand in Font Info)
+        fi.follow(info, 204, lambda names: [])
+        self.assertEqual(self.win(package), [900, 1300], "Light put back; Bold's hand value left")
+        self.assertEqual(list(sys._freelab_font_info[204]["win"][fi.INFO_WIN_ASCENT]), [u"Light"], "Bold forgotten")
+        fi.forget(204)
+
+    def test_per_master_ink_raises_each_master_to_its_own(self):
+        package = ModelPackage()
+        changes = fi.apply_win(fi.ExportedInfo(package), 205, {u"Light": [(-100.0, 1080.0)], u"Bold": [(-100.0, 1150.0)]},
+                               [u"A"])
+        self.assertEqual(self.win(package), [1080, 1150])
+        self.assertEqual(len(changes), 2)
+        fi.forget(205)
 
     def test_a_fake_without_a_model_uses_the_font_infos(self):
         package = ModelPackage()
@@ -478,6 +532,53 @@ class WriteTests(unittest.TestCase):
         self.assertEqual((self.info.openTypeOS2UnicodeRanges, self.info.openTypeOS2WinAscent), ([0], 900.0),
                          "the Win ascent put back before the write; B changes nothing")
         self.assertEqual(status.info_changes, [])
+
+
+class MasterExtentsTests(unittest.TestCase):
+    """Codex's review of 2026-11-27: the ink measured for the Win values came as one list for all masters, so
+    every master was raised to the highest ink of any. It is now each master's own."""
+
+    def test_each_masters_own_ink(self):
+        class Rect(object):
+            def __init__(self, bottom, top):
+                self.bottom_, self.top_ = bottom, top
+
+            def top(self):
+                return self.bottom_  # (font units grow upward: the rect's top is the ink's bottom)
+
+            def bottom(self):
+                return self.top_
+
+        class Path(object):
+            def __init__(self, extent):
+                self.extent = extent
+
+            def isEmpty(self):
+                return self.extent is None
+
+            def boundingRect(self):
+                return Rect(*self.extent)
+
+        class Glyph(object):
+            def __init__(self, layers):
+                self.layers = layers
+
+            def getLayerByName(self, name):
+                return self.layers.get(name)
+
+        class Package(object):
+            masters = [u"Light", u"Bold"]
+
+        saved = ak.layer_path
+        ak.layer_path = lambda layer: Path(layer)
+        try:
+            found = ak.master_extents(Package(), [Glyph({u"Light": (-10, 900), u"Bold": (-20, 1100)}),
+                                                  Glyph({u"Light": None})])
+        finally:
+            ak.layer_path = saved
+        self.assertEqual(found, {u"Light": [(-10, 900)], u"Bold": [(-20, 1100)]})
+        self.assertEqual(fi.win_needed(fi._extents_of(found, u"Light")), (900, 10), "Light's own ink only")
+        self.assertEqual(fi.win_needed(fi._extents_of(found, None)), (1100, 20), "one font info: every master's")
 
 
 if __name__ == "__main__":

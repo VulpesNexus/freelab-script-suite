@@ -1,6 +1,6 @@
 """Pack a release's ready-made folder into dist/FreeLab-Script-Suite-<version>.zip: the FreeLab folder as
-tools/install-fontlab.ps1 lays it out in FontLab's Scripts folder, with the two native libraries built
-(bin/) and the setup script (freelab_setup.py), so that it is unpacked into the Scripts folder and set up
+tools/install-fontlab.ps1 lays it out in FontLab's Scripts folder, with the three native libraries built
+(bin/: the pixel helper, the native dark mode engine, and the auto kerning core) and the setup script (freelab_setup.py), so that it is unpacked into the Scripts folder and set up
 from FontLab's own menu, with no compiler and no installer (docs/INSTALL.md).
 
 The files and their installed names are read from the installer's own list, so the two cannot differ. The
@@ -53,20 +53,30 @@ def version():
     return re.search(r"\*\*Status: (\d+\.\d+\.\d+)\.\*\*", text).group(1)
 
 
+def _define(source, define):
+    text = open(os.path.join(ROOT, source), encoding="utf-8").read()
+    return re.search(r"#define %s (\d+)" % define, text).group(1)
+
+
+def native_builds():
+    """[(the library's file name, build-native.ps1's switches)]: the pixel helper, the native dark mode engine (named
+    after both its own version and the pixel helper's, which it includes), and the auto kerning core."""
+    pixels = _define("darkmode/native/freelab_pixels.c", "FREELAB_PIXELS_VERSION")
+    hooks = _define("darkmode/native/freelab_hooks.c", "FREELAB_HOOKS_VERSION")
+    kern = _define("kerning/native/freelab_kern.c", "FREELAB_KERN_VERSION")
+    return [("freelab_pixels-v%s.dll" % pixels, []), ("freelab_hooks-v%s-%s.dll" % (hooks, pixels), ["-Hooks"]),
+            ("freelab_kern-v%s.dll" % kern, ["-Kern"])]
+
+
 def native_names():
-    names = []
-    for source, name, define in (("darkmode/native/freelab_pixels.c", "freelab_pixels", "FREELAB_PIXELS_VERSION"),
-                                 ("kerning/native/freelab_kern.c", "freelab_kern", "FREELAB_KERN_VERSION")):
-        text = open(os.path.join(ROOT, source), encoding="utf-8").read()
-        names.append("%s-v%s.dll" % (name, re.search(r"#define %s (\d+)" % define, text).group(1)))
-    return names
+    return [name for name, _switches in native_builds()]
 
 
 def build_native(folder):
-    """Both libraries built into folder from this copy's sources."""
+    """The three libraries built into folder from this copy's sources."""
     os.makedirs(folder, exist_ok=True)
     script = os.path.join(ROOT, "tools", "build-native.ps1")
-    for name, extra in zip(native_names(), ([], ["-Kern"])):
+    for name, extra in native_builds():
         subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script] + extra +
                        ["-Out", os.path.join(folder, name)], check=True)
 

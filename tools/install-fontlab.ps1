@@ -1,13 +1,13 @@
-# Install FreeLab's FontLab 7 tools (dark mode, auto kerning) for the current user, or remove them.
+# Install FreeLab Script Suite's FontLab 7 tools for the current user, or remove them.
 #
-#   install-fontlab.ps1             copy the dark-mode and auto kerning scripts into FontLab 7's
+#   install-fontlab.ps1             copy the scripts and their data into FontLab 7's
 #                                   Scripts\FreeLab folder (a FreeLab submenu of the
-#                                   Scripts menu), and add the FreeLab tools block to
-#                                   FontLab's startupScript.py
+#                                   Scripts menu), build the three native libraries, and
+#                                   add the FreeLab tools block to FontLab's startupScript.py
 #   install-fontlab.ps1 -Uninstall  remove that block, the copied scripts, the native
-#                                   helper, dark mode's settings (putting back the
-#                                   workspace color dark mode replaced), the tools'
-#                                   window size, and Proof's settings
+#                                   libraries, dark mode's settings (putting back the
+#                                   workspace color dark mode replaced), Auto Kerning's
+#                                   cache, the tools' window size, and Proof's settings
 #
 # FreeLab MCP, a separate repository, installs its listener beside these with a
 # startup block of its own: either can be installed or removed without the other.

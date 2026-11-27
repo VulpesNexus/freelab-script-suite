@@ -3950,11 +3950,26 @@ class GenerationPage(object):
                             failed.append((r.char, still_there(u"%s" % exc, getattr(exc, "varied", []),
                                                                getattr(exc, "master", u"?"))))
                         return
+                # Its code point, on the glyph looked up again (as a glyph built below takes it): a setter that
+                # raised left the glyph drawn in the font, unencoded, out of the History's step and of the log
+                # (rest review 2, finding 1). A new glyph: taken out, read back; one left stays recorded
+                try:
+                    package.findName(r.name).fgGlyph.unicode = r.code
+                except Exception as exc:
+                    if taken_out(package, r.name):
+                        failed.append((r.char, u"its code point was not set (%s); it was taken out again" % exc))
+                    else:
+                        try:
+                            left = package.findName(r.name)
+                        except Exception:
+                            left = None
+                        touched.append(left if left is not None else glyph)  # (in the font all the same: recorded)
+                        failed.append((r.char, still_there(u"its code point was not set (%s)" % exc)))
+                    return
                 for master in masters:  # (a sparse master its source has no layer in: said with the others)
                     planned = plans[master].by_hex.get(r.hex)
                     if planned is None or planned.layout is None:
                         sparse.setdefault(master, []).append(r.char)
-                glyph.fgGlyph.unicode = r.code
                 touched.append(glyph)
                 made.append(r.char)
                 built_names.add(r.name)

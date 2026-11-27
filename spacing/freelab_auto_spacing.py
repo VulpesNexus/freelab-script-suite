@@ -487,6 +487,30 @@ def ink_sides(layer):
     return box.left(), layer.advanceWidth - box.right(), layer.advanceWidth
 
 
+def put_back_sides(layer, left_was, width_was, QtGui):
+    """A layer whose spacing write failed put back: its outline moved back to its left sidebearing as it was
+    (by what its ink reads now, whatever part of the move FontLab made), its width as it was; read back:
+    whether both are (within half a unit)."""
+    try:
+        moved = layer.boundingBox.left() - left_was
+        if abs(moved) > 1e-6:
+            shift = QtGui.QTransform()
+            shift.translate(-moved, 0)
+            layer.applyTransform(shift)
+    except Exception:
+        pass  # (read back below)
+    try:
+        if abs(float(layer.advanceWidth) - width_was) > 1e-6:
+            layer.advanceWidth = width_was
+    except Exception:
+        pass
+    try:
+        left_now, _right, width_now = ink_sides(layer)
+        return abs(left_now - left_was) <= 0.5 and abs(width_now - width_was) <= 0.5
+    except Exception:
+        return False
+
+
 HELP = u"""<b>FreeLab Auto Spacing</b><br>
 Suggests sidebearings for the drawn glyphs of this master, so that each sits beside its
 straight reference (H for capitals, n for lowercase, 0 for figures) as the references sit beside each
@@ -1295,6 +1319,7 @@ class AutoSpacingDialog(object):
         others = [s for s in chosen if not getattr(s, "reference", False)]
         totals, stale, error, moved = {}, 0, None, []
         passes, again, measured_again, unread = 0, 0, 0, False
+        self.write_failed = None  # (the glyph whose write raised, and whether it was put back: write_spacings)
         if not self.ak.begin_write(self.fontlab, self.package, u"FreeLab Auto Spacing", self.log):
             return  # (nothing written: the reason in the log)
         self.busy = True
@@ -1353,6 +1378,9 @@ class AutoSpacingDialog(object):
             self.ak.busy_end(self)
         ak = self.ak
         self.spaced = sorted(totals) + sorted(name for name in moved if name not in totals)
+        failed = getattr(self, "write_failed", None)
+        if failed is not None and not failed[1] and failed[0] not in self.spaced:
+            self.spaced.append(failed[0])  # (changed all the same: among those the kerning check reads)
         lines = [u"Spaced %s%s." % (ak.b(counted(len(totals), u"glyph")),
                                     u", and %s built on them followed" % ak.b(counted(len(moved), u"glyph"))
                                     if self.follow.checked and totals else u"")]
@@ -1378,6 +1406,14 @@ class AutoSpacingDialog(object):
                 "warning")
         if error is not None:
             self.log.add(ak.error_sentence(u"Stopped by an error", error), "error")
+        if failed is not None:
+            link = ak.glyph_name_link(failed[0])
+            if failed[1]:
+                self.log.add(u"The glyph being spaced when it stopped was put back as it was: %s." % link, "info")
+            else:
+                self.log.add(u"The glyph being spaced when it stopped could not be put back, and stays as FontLab left it "
+                             u"(its outline or width changed): %s.%s" % (
+                                 link, status.undo(u" <i>Edit &gt; Undo</i> takes it back.")), "warning")
         if asked_to_stop:  # (what was clicked is done now: the glyphs are not measured again under it)
             self.stopped(u"Measuring again")
             self.seen_history = ak.history_mark(self.package)  # (this write's own step: not measured again for it)
@@ -1413,11 +1449,20 @@ class AutoSpacingDialog(object):
             left, right = s.changes(tolerance)
             if not left and not right:
                 continue
-            if left:
-                shift = QtGui.QTransform()
-                shift.translate(left, 0)
-                layer.applyTransform(shift)  # the outline's nodes move (checked in FontLab 7.2)
-            layer.advanceWidth = width_now + left + right
+            # The outline moved, then the width set: a width FontLab refused left the outline moved under its old
+            # width (both sidebearings changed, neither as asked), out of the count and of the list the kerning
+            # check reads (rest review 2, finding 2). A glyph whose write raised is put back as it was, read back,
+            # and named (self.write_failed: its name, whether it was put back) before the error stops the write
+            try:
+                if left:
+                    shift = QtGui.QTransform()
+                    shift.translate(left, 0)
+                    layer.applyTransform(shift)  # the outline's nodes move (checked in FontLab 7.2)
+                layer.advanceWidth = width_now + left + right
+            except Exception:
+                self.write_failed = (s.name, put_back_sides(layer, left_now, width_now, QtGui))
+                self.touched(glyph)
+                raise
             before = totals.get(s.name, (0, 0))
             totals[s.name] = (before[0] + left, before[1] + right)
             written.append((s, left, right))

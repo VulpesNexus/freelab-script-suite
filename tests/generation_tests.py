@@ -1269,6 +1269,43 @@ class WriteTests(unittest.TestCase):
         self.assertIsNotNone(ya, logged)
         self.assertEqual(page.cm.mirrored, [("R", ya.name)], "R's outlines mirrored into it, contours set right")
 
+    def test_a_mirror_whose_code_point_is_refused_is_taken_out_or_recorded(self):
+        """The mirrored glyph was added and drawn, then its code point's setter raised: the glyph stayed in the font,
+        unencoded, out of the History's step and the log's failures (rest review 2, finding 1)."""
+        glyphs = dict(BARE, R=(0x0052, 640, [rect(90, 0, 590, 700)], None))
+
+        class Refusing(FgGlyph):
+            @property
+            def unicode(self):
+                return None
+
+            @unicode.setter
+            def unicode(self, code):
+                raise RuntimeError("FontLab said no")
+
+        for deletion in ("works", "does nothing"):
+            page, package, steps, logged = self.page(FakeFont(glyphs))
+            real_add = package.addGlyph
+
+            def add(new, real_add=real_add, package=package):
+                real_add(new)
+                package.glyphs[new.name].fgGlyph = Refusing([])
+            package.addGlyph = add
+            if deletion == "does nothing":
+                package.deleteGlyph = lambda glyph: None
+            self.build(page, [0x042F])
+            name = page.cm.mirrored[0][1]
+            texts = [text for kind, text in logged if kind == "warning"]
+            self.assertTrue(any(u"its code point was not set (FontLab said no)" in text for text in texts), texts)
+            if deletion == "works":
+                self.assertIsNone(package.findName(name))
+                self.assertTrue(any(u"it was taken out again" in text for text in texts), texts)
+                continue
+            self.assertIsNotNone(package.findName(name))
+            self.assertTrue(any(u"it could not be taken out again" in text for text in texts), texts)
+            recorded = [names for title, names in steps if title == u"FreeLab Glyph Compose"]
+            self.assertTrue(recorded and any(getattr(g, "name", None) == name for g in recorded[0]), steps)
+
     def failing_after_writing(self, master, restores_failing):
         """write_parts that writes, then changes the width and raises in master; put_back that fails its first
         restores_failing tries in that master's layer."""
