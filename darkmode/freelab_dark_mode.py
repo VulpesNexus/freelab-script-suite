@@ -311,12 +311,22 @@ PICKER_SWATCH_GAP = 3  # the swatch's side ends this far past a square as tall a
 def swatch_flat(image, rect):
     """Whether the swatch in `rect` of a QImage is one color (every other pixel looked at, edges included); a
     translucent color shows over a checkerboard, and four corners alone may fall on squares of one color."""
-    first = image.pixel(rect.left(), rect.top())
+    first = image.pixel(rect.left() + rect.width() // 2, rect.top() + rect.height() // 2)
     for y in list(range(rect.top(), rect.bottom() + 1, 2)) + [rect.bottom()]:
         for x in list(range(rect.left(), rect.right() + 1, 2)) + [rect.right()]:
-            if image.pixel(x, y) != first:
+            if not swatch_near(image.pixel(x, y), first):
                 return False
     return True
+
+
+# FontLab shades a swatch's edge a unit or so off its color (#3c3c77 around #3c3c78): one color still. A
+# checkerboard's squares differ by tens (#e1e1e1 and white).
+SWATCH_TOLERANCE = 3
+
+
+def swatch_near(a, b):
+    """Whether two ARGB pixels are one color, within SWATCH_TOLERANCE in each channel."""
+    return all(abs(((a >> s) & 255) - ((b >> s) & 255)) <= SWATCH_TOLERANCE for s in (0, 8, 16, 24))
 
 
 def checker_rect(image, rect, max_x, max_y):
@@ -356,15 +366,40 @@ def swatch_rect(image, x, y, max_x):
     QRect = _core("QRect")
     color = image.pixel(x, y)
     left, right, top, bottom = x, x, y, y
-    while left > 0 and image.pixel(left - 1, y) == color:
+    while left > 0 and swatch_near(image.pixel(left - 1, y), color):
         left -= 1
-    while right + 1 < max_x and image.pixel(right + 1, y) == color:
+    while right + 1 < max_x and swatch_near(image.pixel(right + 1, y), color):
         right += 1
-    while top > 0 and image.pixel(x, top - 1) == color:
+    while top > 0 and swatch_near(image.pixel(x, top - 1), color):
         top -= 1
-    while bottom + 1 < image.height() and image.pixel(x, bottom + 1) == color:
+    while bottom + 1 < image.height() and swatch_near(image.pixel(x, bottom + 1), color):
         bottom += 1
     return QRect(left, top, right - left + 1, bottom - top + 1)
+
+
+PICKER_CORNER = 2  # a swatch's rounded corner: this many pixels each way, blended into the frame
+
+
+def swatch_corner_pixels(image, rect):
+    """(x, y, pixel) for each pixel of a swatch's four corners (PICKER_CORNER square, inside `rect` of a QImage) that
+    FontLab blended into its light frame to round them: the pixel to put there, the one past the corner on its row
+    (of the same square in a checkerboard), where the corner's differs from it."""
+    found = []
+    if rect.width() < 2 * PICKER_CORNER + 1 or rect.height() < 2 * PICKER_CORNER:
+        return found
+    for cx, sx in ((rect.left(), 1), (rect.right(), -1)):
+        for cy, sy in ((rect.top(), 1), (rect.bottom(), -1)):
+            for dy in range(PICKER_CORNER):
+                y = cy + sy * dy
+                source = cx + sx * PICKER_CORNER
+                if not (0 <= y < image.height() and 0 <= source < image.width()):
+                    continue
+                value = image.pixel(source, y)
+                for dx in range(PICKER_CORNER):
+                    x = cx + sx * dx
+                    if 0 <= x < image.width() and not swatch_near(image.pixel(x, y), value):
+                        found.append((x, y, value))
+    return found
 
 
 PICKER_DARK_RING = 0x80  # the frame's pixels darker than this in every channel are dark mode's own
@@ -454,6 +489,12 @@ NATIVE_INK_PROP = "freelabNativeInk"  # a list whose dark pens the native engine
 # which the ink effect turned dark (the owner's image 202, 2026-11-27); its rows are text Qt draws.
 # ScriptListDelegate: the Scripting panel's list, whose names a partial repaint mapped on its own came out half dark
 # (the owner's image 200, 2026-11-27).
+# Delegates that draw their rows' check boxes as small pictures of FontLab's (a blue box, a light-mode box with notched
+# corners): the app's own check box is drawn over each ("checks" overlay: draw_item_checks)
+CHECK_PICTURE_DELEGATES = ("LanguagesDelegate",)
+CHECK_ROWS_MAX = 400  # rows looked at per paint
+CHECK_WIDGET_NAME = "freelab_check_picture"  # the hidden QCheckBox a list's check boxes are drawn by
+CHECK_SCAN = 18  # pixels from a row's left in which its check picture is looked for (its text begins past it)
 NATIVE_INK_DELEGATES = ("QStyledItemDelegate", "QItemDelegate", "MetricsDataDelegate", "LanguagesDelegate", "ScriptListDelegate")
 # Islands Qt draws (from their stylesheet), out of the hooks' reach: the script engine's island
 # under either engine (the continue edge's white line stayed white).
@@ -2636,6 +2677,7 @@ def _effect_classes():
                         draw_mapped(painter, pixmap, offset, whole, 0.0, None, -1.0, 0.0, None, 0.0, 0, "relight")
                         return
                     if kind == "picker":  # the swatch as it is; its frame and the dark arrow beside it mapped
+                        pixmap = picker_source(self, pixmap)
                         side = pixmap.height() - 2  # the swatch: a square at the left, inside a 2-px frame
                         image = pixmap.toImage()
                         draw_mapped(painter, pixmap, offset, whole, 0.0, None, -1.0, 0.0, None, 0.0, 0, "all")
@@ -2656,12 +2698,18 @@ def _effect_classes():
                                 flat = swatch_flat(image, inside)
                                 if not flat:
                                     inside = checker_rect(image, inside, reach, pixmap.height())
+                                # Its rounded corners, blended by FontLab into its light frame: kept as drawn, and
+                                # carried out to its edge, two lighter (or darker) pixels at each corner on the dark
+                                # frame (the owner's image 236, 2026-11-27). Squared, in the picture all of it is
+                                # drawn from.
+                                for x, y, value in swatch_corner_pixels(image, inside):
+                                    image.setPixel(x, y, value)
                                 ring = dark_ring_image(image, inside)
                                 if ring is not None:
                                     painter.drawImage(offset, ring)
                                 border = (inside, _gui("QColor").fromRgba(image.pixel(probe_x, probe_y)) if flat
                                           else image)
-                            painter.drawPixmap(inside.translated(offset), pixmap, inside)
+                            painter.drawImage(inside.translated(offset), image, inside)
                         # Around that square, only the light frame is mapped: a picker that paints its
                         # swatch at full height (the mark color's) keeps its color to the edges.
                         split = min(pixmap.width(), pixmap.height() + PICKER_SWATCH_GAP)
@@ -2702,6 +2750,9 @@ def _effect_classes():
                     if kind == "crosses":  # a tab bar the hooks map: drawn as it is, dark mode's close crosses over it
                         painter.drawPixmap(offset, pixmap)
                         draw_tab_crosses(self, painter, pixmap, offset)
+                        return
+                    if kind == "checks":  # a list the hooks map: drawn as it is, the app's check boxes over FontLab's
+                        draw_item_checks(self, painter, pixmap, offset)
                         return
                     if kind == "defringe":  # dark already (its stylesheet): only its text's fringes made gray
                         area = whole
@@ -2993,6 +3044,133 @@ def _effect_classes():
                         painter.restore()
                 except Exception as exc:
                     _note_error("checked tool", exc)
+
+        def picker_source(effect, pixmap):
+            """The picture a color picker's effect maps: while its popup is open, the one it drew before. Open, FontLab
+            draws its arrow's side with a light face and a white arrow, which mapped came out a gray face with a dark
+            arrow (the owner's images 227 and 228, 2026-11-27: "dropdown arrows reinvert themselves"); its color only
+            changes once the popup closes."""
+            try:
+                widget = effect.freelab_widget
+                app = _qt()[0].instance()
+                if _prop(widget, "checked") and app.activePopupWidget() is not None:
+                    kept = getattr(effect, "freelab_closed_source", None)
+                    if kept is not None and kept.size() == pixmap.size():
+                        return kept
+                    return pixmap
+                effect.freelab_closed_source = _gui("QPixmap")(pixmap)
+            except Exception as exc:
+                _note_error("picker source", exc)
+            return pixmap
+
+        def draw_item_checks(effect, painter, pixmap, offset):
+            """Each checkable row's check box drawn as the application draws its own (a QCheckBox's), in place of
+            the small picture FontLab's delegate draws: its blue box and the light-mode box's notched corners stood
+            apart from every other check box (the owner's images 211 and 235, 2026-11-27: "you see how janky it
+            looks"). The picture's place in its row is measured once; FontLab's pictures are left out of the list's
+            own drawing (clipped), and the check box a hidden QCheckBox draws for each state put in their place."""
+            drawn = False
+            try:
+                QPoint, QRect, QRegion = _core("QPoint"), _core("QRect"), _gui("QRegion")
+                viewport = effect.freelab_widget
+                view = viewport.parentWidget()
+                image = pixmap.toImage()
+                ox, oy = offset.x(), offset.y()
+                tree = view.inherits("QTreeWidget")
+                boxes = []
+                y, rows = 0, 0
+                while y < viewport.height and rows < CHECK_ROWS_MAX:
+                    item = view.itemAt(QPoint(viewport.width // 2, y))
+                    if item is None:
+                        break
+                    rect = view.visualItemRect(item)
+                    if rect.height() <= 0:
+                        break
+                    rows += 1
+                    y = rect.y() + rect.height()
+                    if not int(item.flags()) & int(Qt.ItemIsUserCheckable):
+                        continue
+                    box = getattr(effect, "freelab_check_box", None)
+                    if box is None:
+                        ground = image.pixel(min(image.width() - 1, max(0, rect.x() + 1 - ox)),
+                                             min(image.height() - 1, max(0, rect.center().y() - oy)))
+                        box = effect.freelab_check_box = measure_check_box(image, rect, ground, ox, oy)
+                        if box is None:
+                            break
+                    dx, dy, side = box
+                    boxes.append((QRect(rect.x() + dx, rect.y() + dy, side, side),
+                                  int(item.checkState(0) if tree else item.checkState())))
+                region = QRegion(QRect(ox, oy, pixmap.width(), pixmap.height()))
+                for target, _state in boxes:
+                    region = region.subtracted(QRegion(target))
+                painter.save()
+                try:
+                    painter.setClipRegion(region, Qt.IntersectClip)
+                    painter.drawPixmap(offset, pixmap)
+                finally:
+                    painter.restore()
+                drawn = True
+                for target, state in boxes:
+                    picture = check_picture(effect, view, state)
+                    if picture is not None:
+                        painter.drawPixmap(target.x() + (target.width() - picture.width()) // 2,
+                                           target.y() + (target.height() - picture.height()) // 2, picture)
+            except Exception as exc:
+                _note_error("item checks", exc)
+                if not drawn:
+                    painter.drawPixmap(offset, pixmap)
+
+        def check_picture(effect, view, state):
+            """The application's check box in a state (0 unchecked, 1 partly, 2 checked), drawn once by a hidden
+            QCheckBox, the list its parent (PythonQt: no parentless widget), on a transparent ground."""
+            pictures = getattr(effect, "freelab_check_pictures", None)
+            if pictures is None:
+                pictures = effect.freelab_check_pictures = {}
+            if state in pictures:
+                return pictures[state]
+            QCheckBox, QPalette, QColor, QStyle = _gui("QCheckBox"), _gui("QPalette"), _gui("QColor"), _gui("QStyle")
+            box = getattr(effect, "freelab_check_widget", None)
+            if box is None:
+                # (one per list, found again by its name after a reload: not one more each time)
+                box = [child for child in view.children() if _prop(child, "objectName") == CHECK_WIDGET_NAME]
+                box = box[0] if box else QCheckBox(view)
+                box.objectName = CHECK_WIDGET_NAME
+                effect.freelab_check_widget = box
+                box.hide()
+                palette = QPalette(_qt()[0].instance().palette())
+                palette.setColor(QPalette.Window, QColor(0, 0, 0, 0))
+                box.setPalette(palette)
+                box.setAutoFillBackground(False)
+                side = _qt()[0].instance().style().pixelMetric(QStyle.PM_IndicatorWidth)
+                box.resize(side, side)
+            box.setTristate(state == 1)
+            box.setCheckState(Qt.PartiallyChecked if state == 1 else Qt.Checked if state == 2 else Qt.Unchecked)
+            pictures[state] = box.grab()
+            return pictures[state]
+
+        def measure_check_box(image, rect, ground, ox, oy):
+            """(dx, dy, side) of FontLab's check picture in a row: the run of pixels unlike the row's ground from its
+            left (within CHECK_SCAN pixels), as a square; None when none is found."""
+            g = ground & 0xffffff
+            left = top = right = bottom = None
+            for yy in range(rect.y(), rect.y() + rect.height()):
+                for xx in range(rect.x(), rect.x() + CHECK_SCAN):
+                    px, py = xx - ox, yy - oy
+                    if not (0 <= px < image.width() and 0 <= py < image.height()):
+                        continue
+                    v = image.pixel(px, py) & 0xffffff
+                    if max(abs(((v >> s) & 255) - ((g >> s) & 255)) for s in (0, 8, 16)) < 24:
+                        continue
+                    left = xx if left is None or xx < left else left
+                    right = xx if right is None or xx > right else right
+                    top = yy if top is None or yy < top else top
+                    bottom = yy if bottom is None or yy > bottom else bottom
+            if left is None:
+                return None
+            side = max(right - left, bottom - top) + 1
+            if side < 8 or side > 18:
+                return None  # (not a check picture: text, or nothing alike)
+            return (left - rect.x(), top - rect.y(), side)
 
         def draw_tab_crosses(effect, painter, pixmap, offset):
             """A document tab's close cross, light, over the bar's mapping, where FontLab drew its own (see
@@ -6249,8 +6427,15 @@ def _native_ink_target(widget):
 
 
 def _native_ink(widget):
-    """A list's viewport: its dark pens are mapped by the hooks, with no effect."""
-    _clear_effect(widget, _record(widget))
+    """A list's viewport: its dark pens are mapped by the hooks, with no effect (but the "checks" overlay on a list
+    whose delegate draws its check boxes as pictures: CHECK_PICTURE_DELEGATES)."""
+    record = _record(widget)
+    parent = widget.parentWidget()
+    delegate = _class_name(parent.itemDelegate()) if parent is not None and parent.inherits("QAbstractItemView") else None
+    if delegate in CHECK_PICTURE_DELEGATES:
+        _set_effect(widget, record, "checks")
+    else:
+        _clear_effect(widget, record)
     widget.setProperty(NATIVE_INK_PROP, True)
     _protect(widget)
     if NATIVE_GRAY_TEXT and widget.parentWidget() is not None:

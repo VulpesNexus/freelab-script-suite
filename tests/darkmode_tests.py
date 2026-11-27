@@ -321,6 +321,23 @@ class ShadeAndPickerTests(DarkModeCase):
         dm._on_field_palette(field)  # (FontLab's next palette: set once more, not without end)
         self.assertEqual(len(sets), 2)
 
+    def test_lists_drawing_check_pictures_get_the_checks_overlay(self):
+        """The owner's images 211 and 235, 2026-11-27: FontAudit's and the OCR languages' lists draw their check boxes
+        as FontLab's pictures (LanguagesDelegate), unlike every other check box; their viewports get the "checks"
+        overlay. Other lists' viewports keep no effect."""
+        calls = []
+        saved = dm._set_effect, dm._clear_effect
+        dm._set_effect = lambda widget, record, kind, keys=None: calls.append((widget.objectName, kind))
+        dm._clear_effect = lambda widget, record: calls.append((widget.objectName, None))
+        try:
+            for delegate, name in (("LanguagesDelegate", u"languages"), ("QStyledItemDelegate", u"plain")):
+                view = FakeWidget("QListWidget", name + u"-list", inherits=("QAbstractItemView",))
+                view.itemDelegate = (lambda d: lambda: FakeWidget(d))(delegate)
+                dm._native_ink(FakeWidget("QWidget", name, parent=view))
+        finally:
+            dm._set_effect, dm._clear_effect = saved
+        self.assertEqual(calls, [(u"languages", "checks"), (u"plain", None)])
+
     def test_disabled_text_is_dimmed_in_sheets(self):
         """The owner's images 222 to 231, 2026-11-27: FontLab grays disabled fields and labels with #a0a0a0 and #b0b0b0,
         faint on white; kept on dark, they looked enabled. A :disabled rule's text takes the palette's disabled gray."""
@@ -1419,9 +1436,93 @@ class SwatchRectTests(DarkModeCase):
             def bottom(self):
                 return 17
 
+            def width(self):
+                return 17
+
+            def height(self):
+                return 17
+
         self.assertTrue(len(set(Checker().pixel(x, y) for x in (1, 17) for y in (1, 17))) == 1)
         self.assertFalse(dm.swatch_flat(Checker(), Rect()))
         self.assertTrue(dm.swatch_flat(self.Picker(), Rect()), "the black swatch: one color")
+
+    def test_rounded_corners_are_squared(self):
+        """Image 236, 2026-11-27: FontLab rounds a swatch's corners by blending them into its light frame; kept as
+        drawn, each corner showed two lighter pixels on the dark frame. They are the pixels unlike its color."""
+        fill, blend = 0xff3c3c78, 0xff4a4a7b
+
+        class Swatch(object):
+            def pixel(self, x, y):
+                corner = min(x, 21 - x) + min(y, 19 - y) <= 1 and min(x, 21 - x) <= 1 and min(y, 19 - y) <= 1
+                return blend if corner else fill
+
+            def width(self):
+                return 22
+
+            def height(self):
+                return 20
+
+        class FakeRect(object):
+            def __init__(self, x, y, w, h):
+                self.x, self.y, self.w, self.h = x, y, w, h
+
+            def left(self):
+                return self.x
+
+            def top(self):
+                return self.y
+
+            def right(self):
+                return self.x + self.w - 1
+
+            def bottom(self):
+                return self.y + self.h - 1
+
+            def width(self):
+                return self.w
+
+            def height(self):
+                return self.h
+
+        rect = FakeRect(0, 0, 22, 20)
+        found = sorted(dm.swatch_corner_pixels(Swatch(), rect))
+        self.assertEqual(found, sorted((x, y, fill) for x, y in [
+            (0, 0), (1, 0), (0, 1), (21, 0), (20, 0), (21, 1), (0, 19), (1, 19), (0, 18), (21, 19), (20, 19), (21, 18)]))
+        self.assertEqual(dm.swatch_corner_pixels(Swatch(), FakeRect(0, 0, 3, 3)), [], "too small to have corners")
+
+    def test_a_shaded_edge_is_one_color(self):
+        """FontLab shades a swatch's edge a unit off its color (#3c3c77 around #3c3c78): not a checkerboard, so it is
+        flat, and found whole."""
+        class Shaded(object):
+            def pixel(self, x, y):
+                if x in (0, 23) or y in (0, 19):
+                    return 0xff2d2d30  # (the frame)
+                return 0xff3c3c77 if x in (1, 22) or y in (1, 18) else 0xff3c3c78
+
+            def height(self):
+                return 20
+
+        class Rect(object):
+            def left(self):
+                return 1
+
+            def top(self):
+                return 1
+
+            def right(self):
+                return 22
+
+            def bottom(self):
+                return 18
+
+            def width(self):
+                return 22
+
+            def height(self):
+                return 18
+
+        self.assertTrue(dm.swatch_flat(Shaded(), Rect()))
+        self.assertEqual(dm.swatch_rect(Shaded(), 5, 5, 24).args, (1, 1, 22, 18))
 
     def test_the_dark_frame_around_it_is_drawn_as_it_is(self):
         """Image 153: dark mode's own dark frame, mapped again, made a faint light edge."""
