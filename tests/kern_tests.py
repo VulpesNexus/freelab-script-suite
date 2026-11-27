@@ -8090,6 +8090,65 @@ class DocsClaimTests(unittest.TestCase):
         self.assertIn(u"within 1.2% of the em", self.page("GLYPH-COMPOSE.md"))
 
 
+class AboutLineTests(unittest.TestCase):
+    """Asked for on 2026-11-27 (image 242): every tool window's log opens with the suite's version and, where it
+    is installed, FreeLab MCP's, each linking to its repository."""
+
+    def test_the_line_names_what_is_installed(self):
+        self.assertEqual(ak.about_line(look=False),
+                         u'<a href="https://github.com/VulpesNexus/freelab-script-suite">FreeLab Script Suite</a> %s.'
+                         % ak.VERSION)
+        line = ak.about_line(u"1.3.0")
+        self.assertIn(u', <a href="https://github.com/VulpesNexus/freelab-mcp">FreeLab MCP</a> 1.3.0.', line)
+
+    def test_the_mcp_version_is_read_from_its_installed_file_never_imported(self):
+        folder = tempfile.mkdtemp(prefix="freelab-about-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        saved = sys.modules.pop("freelab_listener", None)
+        self.addCleanup(lambda: saved is not None and sys.modules.__setitem__("freelab_listener", saved))
+        self.assertIsNone(ak.installed_mcp_version(folder), "not installed: no MCP")
+        with io.open(os.path.join(folder, ak.LISTENER_FILE), "w", encoding="utf-8") as handle:
+            handle.write(u'"""The listener."""\nimport os\nVERSION = "1.3.0"\nraise SystemExit("never imported")\n')
+        self.assertEqual(ak.installed_mcp_version(folder), u"1.3.0")
+
+    def test_the_versions_agree(self):
+        """The suite's version is said in three places: the README's Status line (the release's), dark mode, and the
+        tools (this line)."""
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir)
+        readme = io.open(os.path.join(root, "README.md"), encoding="utf-8").read()
+        status = re.search(r"\*\*Status: (\d+\.\d+\.\d+)\.\*\*", readme).group(1)
+        dark = re.search(r'^VERSION = "([^"]+)"', io.open(os.path.join(root, "darkmode", "freelab_dark_mode.py"),
+                                                         encoding="utf-8").read(), re.M).group(1)
+        self.assertEqual((ak.VERSION, dark), (status, status))
+
+    def test_a_repository_link_opens_in_the_browser(self):
+        opened = []
+        log = ak.Log.__new__(ak.Log)
+        log.link_handler = lambda target: opened.append(("handler", target))
+        log.add = lambda text, level="info": None
+        saved = ak._qt
+
+        class Services(object):
+            @staticmethod
+            def openUrl(url):
+                opened.append(("browser", url))
+
+        class Url(object):
+            def __init__(self, text):
+                self.text = text
+
+            def __eq__(self, other):
+                return getattr(other, "text", other) == self.text
+
+        ak._qt = lambda: (type("QtCore", (), {"QUrl": Url}), type("QtGui", (), {"QDesktopServices": Services}))
+        try:
+            log.link_clicked(ak.MCP_REPOSITORY)
+        finally:
+            ak._qt = saved
+        self.assertEqual([(kind, getattr(url, "text", url)) for kind, url in opened], [("browser", ak.MCP_REPOSITORY)],
+                         "opened in the browser, not handed to the tool")
+
+
 class NumberRangeTests(unittest.TestCase):
     """The review of 2026-11-27 (image 241): number fields say what they take, from their own bounds, in their
     tooltip and their help, their caption's too."""

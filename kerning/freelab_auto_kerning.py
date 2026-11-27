@@ -22,6 +22,7 @@ Valid Python 2.7 (FontLab 7) and Python 3. The core below needs no Qt and no Fon
 
 from __future__ import absolute_import, division, print_function
 
+import io
 import json
 import math
 import re
@@ -7894,7 +7895,43 @@ def section_row(item, tree):
 LOG_LINES = 4  # the log's height, in lines
 LOG_KEPT = 200  # entries kept
 LOG_COLORS = {"warning": ((224, 160, 40), (150, 95, 0)), "error": ((240, 96, 86), (190, 30, 20)),
-              "done": ((120, 200, 120), (30, 120, 40))}  # (on a dark background, on a light one)
+              "done": ((120, 200, 120), (30, 120, 40)),
+              "about": ((150, 150, 150), (115, 115, 115))}  # (on a dark background, on a light one)
+
+# Every tool window's log opens with what is installed, each name linking to its repository (asked for on
+# 2026-11-27, image 242): the line to read out when something is to be reported, whichever tool is open.
+SUITE_REPOSITORY = u"https://github.com/VulpesNexus/freelab-script-suite"
+MCP_REPOSITORY = u"https://github.com/VulpesNexus/freelab-mcp"
+LISTENER_FILE = u"freelab_listener.py"  # FreeLab MCP's listener, installed beside these scripts
+_LISTENER_VERSION = re.compile(r'^VERSION\s*=\s*"([^"]+)"', re.M)
+
+
+def installed_mcp_version(folder=None):
+    """FreeLab MCP's version where its listener is installed beside these scripts (read from its file, never
+    imported: importing it would start it), else the running listener's; None where it is not installed."""
+    try:
+        folder = folder or os.path.dirname(os.path.abspath(globals().get("__file__") or "."))
+        path = os.path.join(folder, LISTENER_FILE)
+        if os.path.isfile(path):
+            with io.open(path, encoding="utf-8", errors="replace") as handle:
+                found = _LISTENER_VERSION.search(handle.read(20000))
+            if found:
+                return found.group(1)
+    except Exception:
+        pass
+    running = sys.modules.get("freelab_listener")
+    version = getattr(running, "VERSION", None)
+    return u"%s" % version if version else None
+
+
+def about_line(mcp_version=None, look=True):
+    """The log's first line: FreeLab Script Suite's version and, where it is installed, FreeLab MCP's, each name a
+    link to its repository."""
+    text = u'<a href="%s">FreeLab Script Suite</a> %s' % (SUITE_REPOSITORY, VERSION)
+    mcp = mcp_version if mcp_version is not None or not look else installed_mcp_version()
+    if mcp:
+        text += u', <a href="%s">FreeLab MCP</a> %s' % (MCP_REPOSITORY, mcp)
+    return text + u"."
 
 
 LOG_HEIGHT = []  # the log's height as last dragged, kept for the next window (pixels)
@@ -8006,6 +8043,7 @@ class Log(object):
         self.start = None
         self.drag = Drag(grip)  # (its parent the grip: Qt deletes it with the grip, never PythonQt at random)
         grip.installEventFilter(self.drag)
+        self.add(about_line(), "about")  # (what is installed, its oldest line: at the bottom as the log grows)
 
     def wanted_height(self):
         """The log's height when the window has room: as last dragged (LOG_HEIGHT), else LOG_LINES lines."""
@@ -8113,6 +8151,10 @@ class Log(object):
         handed to the dialog's handler (its text: the link's target)."""
         try:
             target = u"%s" % (url.toString() if hasattr(url, "toString") else url)
+            if target.startswith((u"https://", u"http://")):  # (a repository: opened in the browser)
+                QtCore, QtGui = _qt()
+                QtGui.QDesktopServices.openUrl(QtCore.QUrl(target))
+                return
             if target.startswith(TOOL_LINK):
                 title = target[len(TOOL_LINK):].replace(u"%20", u" ")
                 if title in FONT_TOOLS and not open_tool(title, self.view.window()):

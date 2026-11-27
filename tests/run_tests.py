@@ -24,6 +24,7 @@ PY27_DIR = Path(os.environ.get("FREELAB_PY27_DIR") or Path(os.environ.get("LOCAL
 PY27 = PY27_DIR / "tools" / "python.exe"
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 PY27_FILES = (
+    "README.md",  # (its Status line: the version every tool's log names, kern_tests' AboutLineTests)
     "darkmode/freelab_dark_mode.py", "darkmode/freelab_dark_mode_settings.py", "tests/qtfakes.py",
     "tests/darkmode_tests.py", "kerning/freelab_auto_kerning.py", "kerning/freelab_kerning_check.py", "kerning/common_pairs.txt", "kerning/script_pairs.txt",
     "tests/kern_tests.py", "spacing/freelab_auto_spacing.py", "tests/spacing_tests.py",
