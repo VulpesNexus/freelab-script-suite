@@ -2,7 +2,7 @@
 
 *Scripts > FreeLab > Family Audit* compares the fonts of a family with one another, before they become masters of one font: the glyphs each lacks and the code points that differ, each glyph's structure across them, their font info side by side, their kerning, and their feature code. It changes nothing in any of them. Its one action, *Assemble as masters*, makes a new font with a master per source, and leaves the sources as they were.
 
-A survey of 4,986 fonts (the owner's and the corpus's) found that only about 7% of static Regular and Bold pairs are compatible for interpolation as shipped, that within families of several files the glyph sets differ in 39%, the versions in 13%, and the feature code in 16%, and that the owner's own FontLab projects mostly hold one master each. So the audit comes first: it says what differs and where, which is what tidying a family takes; assembling the masters is a second step, which reports compatibility and never promises interpolation.
+A survey of 4,986 fonts (those on the computer and the corpus's) found that only about 7% of static Regular and Bold pairs are compatible for interpolation as shipped, that within families of several files the glyph sets differ in 39%, the versions in 13%, and the feature code in 16%, and that the FontLab projects on the computer mostly hold one master each. So the audit comes first: it says what differs and where, which is what tidying a family takes; assembling the masters is a second step, which reports compatibility and never promises interpolation.
 
 ## The window
 

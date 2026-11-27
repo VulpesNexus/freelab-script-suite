@@ -250,7 +250,7 @@ def same_code(a, b):
     """Whether two pieces of feature code say the same: the same tokens, comments (FreeLab's markers among them)
     and quoted strings included, whatever the spaces and line breaks around them and inside comments. FontLab may
     hand code back spaced otherwise than it was written; compared as raw text, a write offered "Update the code"
-    at once, and the next one wrote the features again unchanged (owner's images 341, 363, and 365). A quoted
+    at once, and the next one wrote the features again unchanged (images 341, 363, and 365). A quoted
     string is compared as it is: its spaces are its text (a stylistic set's name, "Alternate  A", is not
     "Alternate A": adversarial review 11)."""
     def tokens(text):
@@ -1390,7 +1390,7 @@ def own_languages(text):
     """{(script, language)} a feature's own code sets with its script and language statements (outside
     FreeLab's block, and outside FontLab's automatic code, which FreeLab's block replaces). A feature
     sets a language once: the feature compiler stops at a second "language CAT;" under the same script
-    (owner's report 153: Bellefair's own locl sets CAT, MOL, and ROM, and FreeLab's block beside it set
+    (report 153: Bellefair's own locl sets CAT, MOL, and ROM, and FreeLab's block beside it set
     CAT again, "language-specific behavior already specified")."""
     # (FreeLab's block and FontLab's automatic code found as comments wherever they stand: own_code)
     kept = [own_code(text, BEGIN % FORMS, END % FORMS)]
@@ -2951,7 +2951,7 @@ def suggested_words(why):
 
 def build_label(count):
     """The build button's words for this many ticked figure forms (named for its section: it sits in the
-    window's bottom row, owner's images 258 and 260)."""
+    window's bottom row, images 258 and 260)."""
     return u"Build %s" % counted(count, u"ticked figure form") if count else u"Build ticked figure forms"
 
 
@@ -3080,7 +3080,7 @@ FEA_TOKEN = re.compile(u"#.*|\"[^\"]*\"?|\\[[^\\]]*\\]?|@[A-Za-z0-9_.\\-]+|[{};]
 FEA_KINDS = ("keyword", "tag", "class", "list", "comment", "number", "string")
 # (r, g, b) on a dark background, on a light one: each kind plain to read on either (as LOG_COLORS)
 # (a glyph list on a dark background: a paler yellow than the (225, 200, 140) it was, whose words showed a pink
-# and blue hue at their edges, owner's image 26 of November 23. Windows smooths text with the screen's color
+# and blue hue at their edges, image 26 of November 23. Windows smooths text with the screen's color
 # stripes, and a color with little blue in it shows that most; smoothing in grays instead is no way out, GDI
 # then smooths nothing at this size, as drawn off screen in FontLab: two colors, jagged)
 FEA_COLORS = {"keyword": ((110, 170, 240), (20, 70, 190)), "tag": ((90, 205, 185), (0, 120, 130)),
@@ -3285,7 +3285,7 @@ def set_enabled(widget, on):
 
 def say(label, text):
     """A note's text, the note hidden while it says nothing: an empty label still took a line, a gap
-    between a heading and what it heads (owner's images 197 and 198)."""
+    between a heading and what it heads (images 197 and 198)."""
     try:
         label.setText(text)
         label.setVisible(bool((u"%s" % (text or u"")).strip()))
@@ -3324,7 +3324,7 @@ def describe_handles(splitter, text):
 def place_cell_widgets(view):
     """The widgets a list shows in its cells (setItemWidget: the ligatures' feature boxes) put where
     their cells are now, at once: Qt places one where its cell is when it is set, and moves it after a
-    column's width changes only once it lays the list out again, later (owner's image 221: the boxes
+    column's width changes only once it lays the list out again, later (image 221: the boxes
     stood over the next column while the font was read). True when the list was laid out."""
     for name in ("doItemsLayout", "updateGeometries"):
         try:
@@ -3336,7 +3336,7 @@ def place_cell_widgets(view):
 
 
 def fit_combo(QtGui, combo):
-    """A dropdown as wide as its widest item, never stretched across its row (owner's image 239); the
+    """A dropdown as wide as its widest item, never stretched across its row (image 239); the
     combo."""
     try:
         combo.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)
@@ -3450,10 +3450,10 @@ Click this help's button, then anything in the window, for what it does (or righ
 
 TABS = (u"Ligatures and alternates", u"Forms", u"Stylistic alternates")
 ALTERNATES_TAB = 2  # the third tab's index (its page is the tab's own module: freelab_alternates.py)
-# The part under the tabs: "Code preview", not "Code" (owner's image 299: people must see that the code
+# The part under the tabs: "Code preview", not "Code" (image 299: people must see that the code
 # shown is not in the font yet, and that Write the code writes it)
 CODE_HEADING = u"Code preview"
-# The heading over code too long to be colored, so that plain code is not taken for a fault (the owner,
+# The heading over code too long to be colored, so that plain code is not taken for a fault (the review of
 # 2026-11-24, on a font of 2,043 ligatures: "isn't code supposed to be color-coded?")
 CODE_HEADING_PLAIN = u"Code preview (shown plain: more than %s lines)"
 # The buttons that tick the glyphs taking turns, in the window's bottom row while the first tab is shown, in
@@ -3701,7 +3701,7 @@ class FeatureCodeDialog(object):
         dialog.setWhatsThis(HELP)
         self.ak.size_dialog(dialog)
         layout = QtGui.QVBoxLayout(dialog)
-        # The header, as every tool's (owner's images 217, 222, 223): the top line (the font, or the no-font
+        # The header, as every tool's (images 217, 222, 223): the top line (the font, or the no-font
         # line) first, where the tools button and the busy bar join it (add_tools_button takes the layout's
         # first row), then the status lines under it, then the header's separator, then the tabs. The tab
         # bar stood first: the busy bar ran into it.
@@ -3766,7 +3766,7 @@ class FeatureCodeDialog(object):
                  u"and '') come first; where the font has more glyphs with alternates than rules by glyph can serve, "
                  u"only those start ticked. <i>Tick all</i>, <i>Untick all</i>, and <i>Tick often doubled</i>, in the "
                  u"bottom row, tick them at once.")
-        # (a line over the heading: it read as a caption of the list above, owner's image 234)
+        # (a line over the heading: it read as a caption of the list above, image 234)
         part.addWidget(self.ak.separator())
         part.addWidget(describe(self.heading(QtGui, u"Alternates that take turns"), turns))
         row = QtGui.QHBoxLayout()
@@ -3883,10 +3883,10 @@ class FeatureCodeDialog(object):
                 u"of each feature as it is; the prefix's language systems first where locl needs some. Keywords, "
                 u"tags, glyph classes (@name), glyph lists ([...]), numbers, and comments (#...) are in colors of "
                 u"their own; code of more than %s lines is shown plain." % grouped(HIGHLIGHT_LINES))
-        # (a line over the heading: it follows a list or the previews of whichever tab is shown, owner's
+        # (a line over the heading: it follows a list or the previews of whichever tab is shown,
         # images 234 and 269)
         part.addWidget(self.ak.separator())
-        # "Code preview" (owner's image 299: "Code" read as if it were the font's own), the same in every tool
+        # "Code preview" (image 299: "Code" read as if it were the font's own), the same in every tool
         # that writes feature code
         self.code_heading = self.heading(QtGui, CODE_HEADING)
         part.addWidget(describe(self.code_heading, what))
@@ -3901,7 +3901,7 @@ class FeatureCodeDialog(object):
             self.highlighting = None
         splitters = [self.splitter, self.lists, self.forms_parts]
         if self.alternates is not None and getattr(self.alternates, "parts", None) is not None:
-            splitters.append(self.alternates.parts)  # (the third tab's: owner's image 259, it had none)
+            splitters.append(self.alternates.parts)  # (the third tab's: image 259, it had none)
         for splitter in splitters:  # (once their parts are in)
             describe_handles(splitter, u"Drag the space between two parts up or down to give one more room.")
 
@@ -3965,10 +3965,10 @@ class FeatureCodeDialog(object):
             self.check_watcher = None
 
     def bottom_row(self, QtGui):
-        """The window's bottom row, as every tool's (owner's images 258, 260, 264): at the left the buttons
+        """The window's bottom row, as every tool's (images 258, 260, 264): at the left the buttons
         that tick the shown tab's list (the turns' Tick all, Untick all, and Tick often doubled; the third
         tab's Tick all and Untick all), then Restore suggestions; at the right Compile after writing, Write
-        the code (or Update the code) right beside it (the tick is about that button: owner's image 298),
+        the code (or Update the code) right beside it (the tick is about that button: image 298),
         then the shown tab's builds (Build ticked figure forms; Make copies to redraw and Build N variants),
         then Cancel and Close. Every tab's buttons are in it, those of the tab shown visible (show_tab_buttons): no
         button is left between a list and its splitter handle."""
@@ -4001,7 +4001,7 @@ class FeatureCodeDialog(object):
 
     def show_tab_buttons(self, index):
         """The bottom row's buttons of the tab shown (by its index), the other tabs' hidden first (the row
-        never holds two tabs' buttons at once: owner's image 284, the window grew to fit both)."""
+        never holds two tabs' buttons at once: image 284, the window grew to fit both)."""
         left, right = self.tab_buttons()
         groups = [list(buttons) + list(right[number]) for number, buttons in enumerate(left)]
         show_only = getattr(self.ak, "show_only", None)
@@ -4109,7 +4109,7 @@ class FeatureCodeDialog(object):
 
     def set_busy(self, on, what=u"", stoppable=True):
         """Long work under way (or over), in the window's top row (ak.busy_start: what, the step's name, and
-        a bar; owner's image 180): while it runs, no click or key reaches the window or FontLab but the tools
+        a bar; image 180): while it runs, no click or key reaches the window or FontLab but the tools
         menu's, the arrows', Close's, and Esc, which stop it at its next step when stoppable (a read), and are
         done once it is over (a write: never stopped half way). The lists take no clicks meanwhile, the
         buttons under them do nothing (each action checks busy), and ak.watch_history waits on busy too."""
@@ -4165,7 +4165,7 @@ class FeatureCodeDialog(object):
         self.package = None
         try:
             self.empty_views()
-            self.show_font_line(read)  # (the top line still names the font: owner's image 224)
+            self.show_font_line(read)  # (the top line still names the font: image 224)
             self.status.setText(u"Reading the font was stopped: nothing is listed. <a href=\"read:\">Read it</a>")
             self.log.add(u"Reading the font was stopped: nothing is listed.", "warning")
         except Exception:
@@ -4214,7 +4214,7 @@ class FeatureCodeDialog(object):
             self.status.setText(u"")
             self.empty_views()
             return
-        self.show_font_line()  # (the font named from the start, whatever happens next: owner's image 224)
+        self.show_font_line()  # (the font named from the start, whatever happens next: image 224)
         glyphs = list(package.fgPackage.glyphs)
         self.names = [g.name for g in glyphs]
         codes = dict((g.name, self.ak.main_code(g)) for g in glyphs)  # (not a radical it is encoded at too)
@@ -4239,7 +4239,7 @@ class FeatureCodeDialog(object):
         bold = QtGui.QFont(self.ligature_tree.font)
         bold.setBold(True)
         self.ligature_tree.blockSignals(True)
-        # Owner's image 221: while the rest of the font was read, the Feature column's boxes stood over the
+        # Image 221: while the rest of the font was read, the Feature column's boxes stood over the
         # Replaces column. Each box is placed where its cell is when it is set, and the first two columns
         # were sized to their contents after the boxes were in: the boxes kept their old place until Qt laid
         # the list out again, after the read. So the rows come first, the columns are sized to them, and
@@ -4598,13 +4598,13 @@ class FeatureCodeDialog(object):
                                    u"and moved (its strokes kept as <i>Strokes</i> says), or of a drawn small figure "
                                    u"where the font has a whole set of them.")
         part.addWidget(self.small_label)
-        self.small_label.setVisible(False)  # (an empty line under the heading, owner's image 197: say)
+        self.small_label.setVisible(False)  # (an empty line under the heading, image 197: say)
         # One row for every setting. Scale, Baseline at, and Width are the picked set's; Strokes is one value
         # for every set (it stood alone under the list, which said so by its place only: its What's This says
         # it now); Suggested, last, puts the four back.
         row = QtGui.QHBoxLayout()
         what = u"The set whose settings the boxes beside show and change (clicking a row picks its set)."
-        # (label form, the same in every tool: a noun naming the setting, a colon, the control; owner's image 271)
+        # (label form, the same in every tool: a noun naming the setting, a colon, the control; image 271)
         row.addWidget(label_of(QtGui, u"Set:", what))
         self.small_set = QtGui.QComboBox()
         for key in SMALL_SETS:
@@ -4650,7 +4650,7 @@ class FeatureCodeDialog(object):
         row.addWidget(self.stroke_box)
         # (planned again: the open sections' pictures show the strokes, and the build's count follows)
         self.stroke_box.connect("valueChanged(int)", lambda value: self.replan())
-        # Suggested last: it puts back every setting before it, Strokes too (owner's report 158: changing
+        # Suggested last: it puts back every setting before it, Strokes too (report 158: changing
         # Strokes did not make it clickable, as it stood before Strokes and left it as it was)
         self.small_reset = QtGui.QPushButton(u"Suggested")
         describe(self.small_reset, suggested_words(None), True)  # (where the suggestion comes from: small_set_picked)
@@ -4667,7 +4667,7 @@ class FeatureCodeDialog(object):
         self.ak.table_layout(self.small_tree)
         part.addWidget(self.small_tree, 1)  # (the last of its part: the splitter's handle right under its frame)
         # The build goes in the window's bottom row (bottom_row), shown with the Forms tab: under the list,
-        # it stood between the list and the splitter's handle (owner's image 258)
+        # it stood between the list and the splitter's handle (image 258)
         self.build_button = QtGui.QPushButton(build_label(0))
         describe(self.build_button, build_words(0, 0), True)  # (why it is grayed out: update_small_buttons)
         self.build_button.setEnabled(False)
@@ -4719,7 +4719,7 @@ class FeatureCodeDialog(object):
         except Exception:
             upm = 1000.0
         # The forms this window built and nobody changed since are listed again, as if the font lacked
-        # them: a build replaces them (the owner: the button grayed out after a build, where it should
+        # them: a build replaces them (the review: the button grayed out after a build, where it should
         # stay and replace what it made once a value changes)
         self.stems = {}  # (the figures' strokes measured again: the font may have changed)
         self.small_ours = self.own_built(self.package) if self.package is not None else {}
@@ -4764,7 +4764,7 @@ class FeatureCodeDialog(object):
                 item.setCheckState(0, QtCore.Qt.Checked if any(form.on for form in forms) else QtCore.Qt.Unchecked)
                 tree.addTopLevelItem(item)
                 # (not spanned: its count and note stand in the other columns, as every other list's groups'
-                # do; spanned, a folded group showed nothing there, owner's report 159. Its title is whole:
+                # do; spanned, a folded group showed nothing there, report 159. Its title is whole:
                 # the first column is sized to it below.)
                 for form in forms:
                     child = QtGui.QTreeWidgetItem([form.name, u"", u""])
@@ -5043,7 +5043,7 @@ class FeatureCodeDialog(object):
         was done, as counts: [contours, nodes, on-curve nodes, nodes given a new place, those of them
         found there afterwards, shapes FontLab draws as they were before the offset].
 
-        The owner saw no difference at 130% while the log said the strokes were thickened, and the nodes
+        No difference was seen at 130% while the log said the strokes were thickened, and the nodes
         read back were where they had been put. Seen live (2026-11-13): a node's x and y set from a
         script are kept, and its contour's path follows, but the shape's own outline, what FontLab draws
         (its bounding box), does not; that is why the forms looked as scaled. So the outline is no
@@ -5081,7 +5081,7 @@ class FeatureCodeDialog(object):
                 counts[3] += moved
                 counts[4] += found
                 if moved and found == moved and drawn_box_kept(shape_box(again), (wanted, own)) is False:
-                    counts[5] += 1  # (its nodes read as put, and FontLab draws it as it was: what the owner saw)
+                    counts[5] += 1  # (its nodes read as put, and FontLab draws it as it was: what was seen)
         layer.advanceWidth = float(width)
         update_layer(layer)
         return counts
@@ -5205,7 +5205,7 @@ class FeatureCodeDialog(object):
     def sync_small_settings(self):
         """The settings as the boxes show them, read at the click that builds: a value typed and not yet
         entered is taken (interpretText, as Enter does), and the picked set's settings and the plans follow
-        the boxes where a change did not reach them (owner's report: 100 typed in Strokes over 130, then
+        the boxes where a change did not reach them (report: 100 typed in Strokes over 130, then
         Build without Enter, built at 130). Strokes itself is read from its box as the build starts."""
         boxes = (("scale", "small_scale"), ("baseline", "small_baseline"), ("width", "small_width"))
         for _, name in boxes + ((None, "stroke_box"),):
@@ -5256,7 +5256,7 @@ class FeatureCodeDialog(object):
         self.build_button.setText(build_label(count))
         # (set_enabled, not Auto Kerning's enable: this runs while the font is read after a build or an
         # undo, the lists' part disabled meanwhile, and the button stayed clickable with nothing to build.)
-        # Only with something a build would make or change (owner's report 160: it stayed clickable when
+        # Only with something a build would make or change (report 160: it stayed clickable when
         # every checked glyph was as built here, and a click only said "Nothing changed since the last
         # build"); its tooltip and What's This then say why it is grayed out.
         set_enabled(self.build_button, count > 0)
@@ -5424,7 +5424,7 @@ class FeatureCodeDialog(object):
                         copies = self.stroke_copies(package, master, plan, weight)
                         if copies is None:
                             outlines = {}
-                            # (said, not left to "Scaling thins strokes": owner's report 156 saw no
+                            # (said, not left to "Scaling thins strokes": report 156 saw no
                             # difference between 100% and 130%, and the log never said why)
                             unstroked.append((form.name, self.stroke_trouble or u"FontLab did not say why"))
                             break
@@ -5792,7 +5792,7 @@ class FeatureCodeDialog(object):
             return base not in self.taken and (key == "all" or (key == "often" and base in self.often))
 
         tree.blockSignals(True)
-        try:  # (the log told how many it checked and unchecked, hidden ones said: owner's report 118)
+        try:  # (the log told how many it checked and unchecked, hidden ones said: report 118)
             self.ak.check_rows([tree.topLevelItem(row) for row in range(tree.topLevelItemCount)], wanted,
                                log=self.log, command=dict((k, label) for k, label, _ in TURN_CHECKS)[key],
                                noun=u"glyph")
@@ -5841,7 +5841,7 @@ class FeatureCodeDialog(object):
             text = u""
         elif self.sets:
             text = u"No glyph is ticked to take turns."
-        else:  # (the section said nothing, and the owner looked for a minute for where they are made)
+        else:  # (the section said nothing, and where they are made took a minute to find)
             text = NO_TURNS
         say(self.turn_label, text)
         set_enabled(self.look_back, bool(self.sets))  # (no glyph with alternates: no look back to set)
@@ -5961,7 +5961,7 @@ class FeatureCodeDialog(object):
         checked = [feature.tag for feature in self.forms if feature.on and feature.checked()]
         self.show_font_line()
         # (under the top line, which names the font: the status lines, results first, then what stops a write)
-        if not self.forms:  # (never "0 of 0 form features": owner's wording rule)
+        if not self.forms:  # (never "0 of 0 form features": the wording rule)
             forms = u"none"
         elif not checked:
             forms = u"%s, none ticked" % b(counted(len(self.forms), u"form feature"))
@@ -5969,7 +5969,7 @@ class FeatureCodeDialog(object):
             forms = u"%s ticked (%s)" % (b(u"%s of %s" % (grouped(len(checked)), counted(len(self.forms), u"form feature"))),
                                          self.ak.html(u", ".join(checked)))
         # (a count bold with its noun; a number inside the parentheses, whose noun is outside, bold alone:
-        # owner's images 297 and 301)
+        # images 297 and 301)
         self.status.setText(u"%s (%s standard, %s discretionary, %s off); %s with alternates taking turns. "
                             u"Forms: %s.%s%s%s%s" % (
                                 b(counted(len(self.found), u"ligature")), b(grouped(counts["liga"])),
@@ -6038,7 +6038,7 @@ class FeatureCodeDialog(object):
             return
         # The feature code is the font's own state, but the step records the whole font, its glyphs too, which
         # have no state of their own in a font opened afresh: undone, FontLab printed a problem with each
-        # glyph built from components (owner's image 336, a kerning write's)
+        # glyph built from components (image 336, a kerning write's)
         if not self.ak.begin_write(self.fontlab, self.package, u"FreeLab Feature Code", self.log):
             return
         written, error, skipped, changed = [], None, None, False

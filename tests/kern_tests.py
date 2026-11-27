@@ -667,7 +667,7 @@ class KerningUpgradeTests(unittest.TestCase):
         self.assertEqual([(c.kind, c.checked) for c in tiny], [("tiny", False)])
         self.assertEqual(tiny[0].reason, u"smaller than 5 units")
         self.assertFalse([c.reason for c in found + tiny if c.reason.endswith(u".")], "a cell's note: no period")
-        # (owner's images 338 and 339: -4 for A and lacute, an exception to the class pair's -32, was listed as
+        # (images 338 and 339: -4 for A and lacute, an exception to the class pair's -32, was listed as
         # tiny; removed, the pair collided again, and its fix was a tiny value again)
         exception = kc.find_cleanup(fake_font({"L": (["l", "lacute"], "KernRight")},
                                               {(("A", False), ("L", True)): -32, (("A", False), ("lacute", False)): -4,
@@ -779,7 +779,7 @@ class KerningUpgradeTests(unittest.TestCase):
         self.assertEqual(kc.glyph_names(None), [])
 
     def test_buttons_count_their_checked_rows(self):
-        # (Tick, not Check, for check boxes: owner's image 261)
+        # (Tick, not Check, for check boxes: image 261)
         self.assertEqual(kc.action_text("cleanup", 0), u"Clean up ticked entries")
         self.assertEqual(kc.action_text("cleanup", 1), u"Clean up 1 ticked entry")
         self.assertEqual(kc.action_text("cleanup", 3), u"Clean up 3 ticked entries")
@@ -1004,7 +1004,7 @@ class BeforeChangesTests(unittest.TestCase):
         """Each tool that writes records the font first. Kerning, feature code, and font info are the font's
         own state (recorded when FontLab opens a font: live, they went on Undo), but the step records the
         whole font, its glyphs too, which have none in a font opened afresh: undone, FontLab printed "We have
-        a problem with the component 'P' in glyph 'Rho:Regular'" (owner's image 336, Kerning Check's)."""
+        a problem with the component 'P' in glyph 'Rho:Regular'" (image 336, Kerning Check's)."""
         root = os.path.join(HERE, os.pardir)
         expected = {"spacing/freelab_auto_spacing.py": 1, "cjk/freelab_cjk_spacing.py": 1,
                     "compose/freelab_glyph_compose.py": 1,
@@ -1262,7 +1262,7 @@ class WindowTests(unittest.TestCase):
     def test_a_window_keeps_the_font_it_was_opened_for(self):
         proof = self.open("Proof")
         self.assertEqual(proof.dialog.windowTitle, u"FreeLab Proof (One)")
-        self.workspace.currentPackage = self.two  # the owner looks at the other font in FontLab
+        self.workspace.currentPackage = self.two  # the other font looked at in FontLab
         self.assertIs(proof.current_font(), self.one)
         self.assertEqual(proof.dialog.windowTitle, u"FreeLab Proof (One)")
 
@@ -1296,7 +1296,7 @@ class WindowTests(unittest.TestCase):
         self.assertIsNone(sys._freelab_windows.get("size"), "nothing resized by hand: nothing kept")
 
     def test_a_wider_tool_grows_on_both_sides_and_stays_on_screen(self):
-        # The owner: "it always enlarges from the left side of the window instead of keeping it centered"
+        # The review: "it always enlarges from the left side of the window instead of keeping it centered"
         self.assertEqual(ak.centered_place((300, 100), (1000, 800), (1400, 800)), (100, 100), "200 pixels each side")
         self.assertEqual(ak.centered_place((100, 100), (1400, 800), (1000, 800)), (300, 100), "and back")
         area = (0, 0, 1920, 1040)
@@ -1308,13 +1308,13 @@ class WindowTests(unittest.TestCase):
                          "a taller one, above the taskbar")
 
     def test_a_size_given_by_hand_is_every_windows_size_for_this_session_only(self):
-        # The owner: "it should survive within a single session across fonts and such, but maybe not between
+        # The review: "it should survive within a single session across fonts and such, but maybe not between
         # sessions, else there's no way to ever go back to default size"
         with open(os.path.join(self.state, "windows.json"), "w") as handle:
             handle.write('{"size": [900, 700]}')  # an earlier version's
         first = self.open("Proof")
         self.assertEqual((first.dialog.width, first.dialog.height), (400, 300), "an earlier session's size is not read")
-        first.dialog.resize(1200, 900)  # the owner drags its corner
+        first.dialog.resize(1200, 900)  # its corner dragged
         second = self.open("Glyph Compose")
         self.assertEqual((second.dialog.width, second.dialog.height), (1200, 900))
         self.workspace.currentPackage = self.two
@@ -1427,7 +1427,7 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(sorted(sys._freelab_windows["fonts"], key=str), sorted([self.one.id, self.two.id, None], key=str))
 
     def test_a_window_without_a_font_never_makes_a_second_window_on_a_font(self):
-        # The owner: no FreeLab window may land on a font that has a window of its own. A window opened with no
+        # The review: no FreeLab window may land on a font that has a window of its own. A window opened with no
         # font, still waiting while FontLab shows a font with its own window: its tools button and arrows
         # open the tool on that font in that font's window (brought forward), and it goes on waiting
         self.workspace.currentPackage = self.two
@@ -1657,7 +1657,7 @@ class WindowTests(unittest.TestCase):
         self.assertIsNotNone(self.open("Proof"), "closed: opened anew")
 
     def test_a_window_closes_with_its_font_while_others_stay_open(self):
-        # The owner: "In such a case, I'd suggest closing the script window along with the font it belongs to"
+        # The review: "In such a case, I'd suggest closing the script window along with the font it belongs to"
         # (it moved to the font FontLab showed, which could leave two windows on one font)
         proof = self.open("Proof")
         self.workspace.currentPackage = self.two
@@ -1736,7 +1736,7 @@ class WindowTests(unittest.TestCase):
         second.dialog.close()
         self.assertIsNone(sys._freelab_windows.get("size"), "the grip's doing")
         third = self.open("Proof")
-        third.dialog.resize(700, 300)  # the owner drags its edge
+        third.dialog.resize(700, 300)  # its edge dragged
         third.dialog.close()
         self.assertEqual(sys._freelab_windows.get("size"), (700, 300))
 
@@ -1783,7 +1783,7 @@ class WindowTests(unittest.TestCase):
             self.accepted = True
 
     def test_undo_keys_are_taken_before_any_shortcut_and_run_fontlabs_command(self):
-        # The owner (2026-11-16): undo and redo pressed while a FreeLab window is in front never reach
+        # The review of 2026-11-16: undo and redo pressed while a FreeLab window is in front never reach
         # FontLab. Taken at Qt's ShortcutOverride, before any shortcut is looked up, no shortcut of the
         # window or of FontLab (whatever its context) can make the key ambiguous or take it.
         proof = self.open("Proof")
@@ -1899,7 +1899,7 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(self.triggered, [])
 
     def test_an_undo_from_a_window_redraws_fontlabs_views(self):
-        # The owner: "The log does mention the history changed, but it doesn't appear to actually reach FontLab"
+        # The review: "The log does mention the history changed, but it doesn't appear to actually reach FontLab"
         proof = self.open("Proof")
         told = []
 
@@ -1921,7 +1921,7 @@ class WindowTests(unittest.TestCase):
 
     def test_a_window_closes_with_the_last_font_too(self):
         # (a window is its font's for good: one left open without a font, waiting for the next, was the font's
-        # window no more, and "navigating again opens a new window", the owner)
+        # window no more, and "navigating again opens a new window", the review)
         spacing = self.open("Auto Spacing")
         window, changes = spacing.dialog, []
         spacing.font_changed = lambda: changes.append(("spacing", spacing.font_id))
@@ -1934,7 +1934,7 @@ class WindowTests(unittest.TestCase):
         self.assertIsNotNone(self.open("Auto Spacing"), "opened anew, without a font")
 
     def test_a_window_opened_with_no_font_is_reused_then_takes_the_next_font(self):
-        # The owner: "can't it also detect when a font then gets open after its launch to hook into that one?"
+        # The review: "can't it also detect when a font then gets open after its launch to hook into that one?"
         self.workspace.fonts, self.workspace.currentPackage = [], self.Font(1, u"")  # (FontLab's placeholder)
         spacing = self.open("Auto Spacing")
         window, changes = spacing.dialog, []
@@ -2374,7 +2374,7 @@ class ThemeFakes(object):
 
 
 class ThemeTests(unittest.TestCase):
-    """FreeLab's windows follow a dark mode switch at once, both ways, repeatedly (owner's screenshots 76
+    """FreeLab's windows follow a dark mode switch at once, both ways, repeatedly (screenshots 76
     and 77: stale cells, labels, pictures, and buttons until the window was opened again)."""
 
     def setUp(self):
@@ -2687,7 +2687,7 @@ class ThemeTests(unittest.TestCase):
 
 
 class TableLayoutTests(unittest.TestCase):
-    """FreeLab's one table layout (owner, 2026-11-15: Auto Spacing's list left half its window empty, with
+    """FreeLab's one table layout (the review of 2026-11-15: Auto Spacing's list left half its window empty, with
     gray ticks; Kerning Classes' and Font Compare's headers had stray separators, their rows no room;
     the grids were to be faint, at 50 % opacity)."""
 
@@ -2824,7 +2824,7 @@ class TableLayoutTests(unittest.TestCase):
                          "no stretch column named: the columns share the width (share_columns), not Qt's last one")
 
     def test_no_focus_rectangle_in_a_clicked_cell(self):
-        # (owner's report 114: a faint rectangle in the cell clicked, in every list: the style's focus frame
+        # (report 114: a faint rectangle in the cell clicked, in every list: the style's focus frame
         # around the current column's cell, which serves nothing where whole rows are selected)
         for kind in ("QTreeView", "QTableView", "QListView"):
             view = self.View(self.light, kind=kind)
@@ -2834,7 +2834,7 @@ class TableLayoutTests(unittest.TestCase):
             self.assertEqual(view.styleSheet.count(u"outline: 0;"), 1)
 
     def test_headers_are_centered(self):
-        # (owner's report 141: the numbers' headers sat at the right, the names' at the left)
+        # (report 141: the numbers' headers sat at the right, the names' at the left)
         centered = 0x4 | 0x80
         view = self.View(self.light)
         ak.table_layout(view, stretch=1, numbers=(2, 3))
@@ -2887,7 +2887,7 @@ class TableLayoutTests(unittest.TestCase):
         view.port.width = 200  # a narrow window
         ak.stretch_column(view)
         self.assertEqual(view.widths[1], 120, "its spare room taken first, then never narrower than its contents")
-        self.assertEqual(sum(view.widths), 200, "the others give way (owner, 2026-11-16): no sideways scrolling")
+        self.assertEqual(sum(view.widths), 200, "the others give way (the review of 2026-11-16): no sideways scrolling")
         view.port.width = 800
         ak.stretch_column(view)
         self.assertEqual(view.widths, [40, 650, 50, 60], "the others whole again first, then the rest to it")
@@ -3256,7 +3256,7 @@ class TableLayoutTests(unittest.TestCase):
 
 
 class ColumnShareTests(unittest.TestCase):
-    """How a list's columns share its width (owner, 2026-11-16, report 142: a column dragged narrower left
+    """How a list's columns share its width (the review of 2026-11-16, report 142: a column dragged narrower left
     a gap in the list's frame; shrinking takes from the columns with spare room first, growing gives to
     the columns cut short first, then in proportion)."""
 
@@ -3305,7 +3305,7 @@ class ColumnShareTests(unittest.TestCase):
     def test_a_wider_list_shows_its_cut_columns_whole_first(self):
         self.assertEqual(self.share([100, 60, 80], [100, 70, 300], 260, leasts=[24] * 3), [100, 70, 90],
                          "the one lacking least made whole first, the rest to the one still cut")
-        # (the owner's "under 5 % still clipped" worry: a column nearly whole is never left short for a long note)
+        # (the "under 5 % still clipped" worry: a column nearly whole is never left short for a long note)
         self.assertEqual(self.share([190, 300], [200, 1000], 520, leasts=[24, 24]), [200, 320])
         self.assertEqual(self.share([100, 100, 100], [100, 100, 100], 360, leasts=[24] * 3, stretch=1), [100, 160, 100],
                          "nothing cut: the rest to the stretch column (the pair pictures, the names)")
@@ -3390,7 +3390,7 @@ class ColumnShareTests(unittest.TestCase):
         view = self.view([100, 100, 100, 100], [100, 100, 100, 100], 400)
         self.assertEqual(len(view.head.slots["sectionResized(int,int,int)"]), 1, "the header's drags heard")
         watch = self.made[0]
-        view.setColumnWidth(1, 60)  # the owner drags the second column narrower
+        view.setColumnWidth(1, 60)  # the second column dragged narrower
         self.assertEqual(view.widths, [100, 60, 100, 100], "nothing changed inside Qt's resizing")
         self.assertEqual(watch.started, 1)
         watch.fire()
@@ -3511,7 +3511,7 @@ class ColumnShareTests(unittest.TestCase):
         view.port.width = 150
         ak.note_wants(view, {0: 900})
         self.assertEqual(ak.widen_window(view), 1000 - 40 - 16 - 550, "at most to the screen's free area")
-        window.width = 700  # the owner drags its edge
+        window.width = 700  # its edge dragged
         self.assertEqual(ak.widen_window(view), 0, "a size given by hand stays")
         owner.opened_size = (700, 400)
         ak._windows = lambda: {"size": (700, 400)}
@@ -3643,7 +3643,7 @@ class ColumnShareTests(unittest.TestCase):
 
 
 class CheckRowsTests(unittest.TestCase):
-    """Check all, Check none, and the like say what they did, rows out of sight included (owner, report 118)."""
+    """Check all, Check none, and the like say what they did, rows out of sight included (report 118)."""
 
     class Item(object):
         def __init__(self, checked=False, parent=None, open_=True, hidden=False, tree=True):
@@ -3950,7 +3950,7 @@ class FontLabWidgetTests(unittest.TestCase):
 
     def test_a_clean_compile_says_fontlab_reported_no_errors(self):
         # The log said "FontLab's Output panel showed nothing from the compiler: see the Features panel for any
-        # error" after a write with vrt2. FontLab clears the panel at each compile (the owner), so an empty
+        # error" after a write with vrt2. FontLab clears the panel at each compile (as observed), so an empty
         # panel after one means no message at all
         timers, logged = [], []
 
@@ -4137,7 +4137,7 @@ class LogGlyphTests(unittest.TestCase):
                  u"frag#1", u"what?", u"pct%41", u"e\N{COMBINING ACUTE ACCENT}.ss01", u"\N{HIRAGANA LETTER A}", u"a/b:c"]
 
     def test_a_glyph_named_in_a_line_is_an_italic_link_to_it(self):
-        # The owner's request of 2026-11-24, on Glyph Compose's "Made dotlessi from i without its dot"
+        # The request of 2026-11-24, on Glyph Compose's "Made dotlessi from i without its dot"
         self.assertEqual(ak.glyph_name_link(u"dotlessi"), u'<a href="glyphname:dotlessi"><i>dotlessi</i></a>')
         self.assertEqual(ak.glyph_name_link(u"f_f_i.alt1-2"), u'<a href="glyphname:f_f_i.alt1-2"><i>f_f_i.alt1-2</i></a>',
                          "a name's usual characters kept readable in the target")
@@ -4301,7 +4301,7 @@ class SingleChoiceTests(unittest.TestCase):
         self.assertTrue(combo.property(ak.LEAVE_ALONE_PROP))
 
     def test_every_dropdown_opens_below_its_box(self):
-        # The owner: "Some open upwards still even when there's room below" (Glyph Compose's Character set on
+        # The review: "Some open upwards still even when there's room below" (Glyph Compose's Character set on
         # All, its last row, opened upward over the box)
         class Qt(object):
             WA_TransparentForMouseEvents = NoFocus = StrongFocus = 0
@@ -4329,7 +4329,7 @@ class SingleChoiceTests(unittest.TestCase):
         self.assertEqual(own.styleSheet, u"QComboBox { color: red; }", "a sheet of its own is left as it is")
 
     def test_a_long_dropdown_has_a_flat_scroll_bar(self):
-        # (owner's image 163: Font Builder's 300 sets scrolled with no bar; Qt had turned the list's bar off
+        # (image 163: Font Builder's 300 sets scrolled with no bar; Qt had turned the list's bar off
         # for Fusion's menu-like dropdowns when the list was made, before the sheet)
         class Qt(object):
             WA_TransparentForMouseEvents = NoFocus = StrongFocus = 0
@@ -4383,13 +4383,13 @@ class SingleChoiceTests(unittest.TestCase):
             self.assertEqual(view.bar.styleSheet, ak.SCROLL_SHEET, "the bar every FreeLab list has")
 
     def test_the_no_font_sentences_share_a_line_and_no_others(self):
-        # (owner's image 191: "the only two sentences that I'll allow on a single line across the suite")
+        # (image 191: "the only two sentences that I'll allow on a single line across the suite")
         text = ak.sentences(ak.NO_FONT_LINE + u" A template can still be made.")
         self.assertEqual(text, ak.NO_FONT_LINE + u"<br>A template can still be made.")
         self.assertEqual(ak.sentences(u"Done. Next one."), u"Done.<br>Next one.")
 
     def test_a_tools_own_no_font_line_shares_a_line_once_registered(self):
-        # (owner's images 278 and 280: Proof's and Font Builder's no-font lines on one line too)
+        # (images 278 and 280: Proof's and Font Builder's no-font lines on one line too)
         line = u"No font is open. Open one: its proof is laid out at once."
         self.assertEqual(ak.sentences(line), u"No font is open.<br>Open one: its proof is laid out at once.")
         try:
@@ -4399,21 +4399,21 @@ class SingleChoiceTests(unittest.TestCase):
             ak.ONE_LINE.remove(line)
 
     def test_counts_group_their_thousands(self):
-        # (owner's image 231: "13932 glyphs")
+        # (image 231: "13932 glyphs")
         self.assertEqual(ak.counted(13932, u"glyph"), u"13,932 glyphs")
         self.assertEqual(ak.counted(1, u"glyph"), u"1 glyph")
         self.assertEqual(ak.counted(0, u"pair"), u"0 pairs")
         self.assertEqual(ak.grouped(1234567), u"1,234,567")
 
     def test_the_font_line_names_the_masters_only_when_there_are_several(self):
-        # (owner's images 223 and 238: "(1 master)" here, nothing there)
+        # (images 223 and 238: "(1 master)" here, nothing there)
         self.assertEqual(ak.font_named(u"Cardo", u"Regular"), u"<b>Cardo</b>, master <b>Regular</b>")
         self.assertEqual(ak.font_named(u"Cardo", u"Bold", 3),
                          u"<b>Cardo</b>, master <b>Bold</b> (of <b>3 masters</b>)")
         self.assertEqual(ak.font_named(u"A & B"), u"<b>A &amp; B</b>")
 
     def test_a_tool_named_in_a_log_line_becomes_its_link(self):
-        # (owner's image 220: "Write palt with CJK Spacing first")
+        # (image 220: "Write palt with CJK Spacing first")
         line = ak.with_tool_links(ak.html(u"Write palt with CJK Spacing first, then analyze the kana again."))
         self.assertIn(u'<a href="freelab-tool:CJK%20Spacing"><i>CJK Spacing</i></a> first', line)
         linked = u'<a href="x"><i>Font Check</i></a> and Kerning Check'
@@ -4422,7 +4422,7 @@ class SingleChoiceTests(unittest.TestCase):
                          "a name inside a link already is left alone")
 
     def test_a_column_dragged_stops_where_the_others_keep_their_least(self):
-        # (owner's image 214: dragged past the frame, every other column went out of sight)
+        # (image 214: dragged past the frame, every other column went out of sight)
         widths, leasts = [100, 100, 100, 100], [40, 40, 40, 40]
         self.assertEqual(ak.drag_limit(widths, leasts, 1, 400), 400 - 100 - 40 - 40,
                          "the columns before as they are, those after at their least")
@@ -4432,13 +4432,13 @@ class SingleChoiceTests(unittest.TestCase):
                          "a column narrower than its least counts at MIN_SECTION at least")
 
     def test_the_header_line_stays_and_the_others_go_without_a_font(self):
-        # (owner's images 275, 276: the line under the top text vanished in every window)
+        # (images 275, 276: the line under the top text vanished in every window)
         self.assertNotEqual(ak.HEADER_SEPARATOR_PROP, ak.SEPARATOR_PROP)
         source = io.open(ak.__file__.replace(".pyc", ".py"), encoding="utf-8").read()
         body = source[source.index(u"def no_font_states("):source.index(u"def checks_of(")]
         self.assertIn(u"line.property(SEPARATOR_PROP)", body)
         self.assertNotIn(u"HEADER_SEPARATOR_PROP", body, "the header's line is never hidden")
-        # (owner's image 283: "Now" and "Suggested" over previews of nothing; hidden, and only those it hid
+        # (image 283: "Now" and "Suggested" over previews of nothing; hidden, and only those it hid
         # shown again with a font)
         self.assertIn(u"label.property(PREVIEW_CAPTION_PROP)", body)
         self.assertIn(u"label.setProperty(NO_FONT_HIDDEN_PROP, True)", body)
@@ -4473,7 +4473,7 @@ class SingleChoiceTests(unittest.TestCase):
         self.assertIs(ak._next_widget(Layout(Item(spin)), label), ak._NOT_FOUND)
 
     def test_a_caption_grays_and_explains_with_its_control(self):
-        # (owner's images 216 and 281: a right-click on a caption showed the window's help; captions of
+        # (images 216 and 281: a right-click on a caption showed the window's help; captions of
         # grayed dropdowns stayed bright)
         class Widget(object):
             def __init__(self, enabled=True, tip=u"", what=u""):
@@ -4514,7 +4514,7 @@ class SingleChoiceTests(unittest.TestCase):
         self.assertEqual(own.toolTip, u"Its own.", "a caption's own help is kept")
 
     def test_a_sentences_period_grays_with_the_control_before_it(self):
-        # (owner's images 319 to 323: "List changes of at least [6 units] ." with its period bright, no font open)
+        # (images 319 to 323: "List changes of at least [6 units] ." with its period bright, no font open)
         class Item(object):
             def __init__(self, widget=None, layout=None):
                 self._widget, self._layout = widget, layout
@@ -4570,7 +4570,7 @@ class SingleChoiceTests(unittest.TestCase):
         self.assertTrue(period.property(ak.CAPTION_PROP), "grayed and explained with it (caption_states)")
 
     def test_a_blank_line_under_the_font_line(self):
-        # (owner's image 346: Font Check's results stood a blank line under the font's line; every window now)
+        # (image 346: Font Check's results stood a blank line under the font's line; every window now)
         class Widget(object):
             def __init__(self, label=True):
                 self.label, self.props, self.margins = label, {}, None
@@ -4627,7 +4627,7 @@ class SingleChoiceTests(unittest.TestCase):
         self.assertIsNone(first.margins)
 
     def test_an_empty_output_panel_is_read_longer(self):
-        # (owner's image 342: "FontLab reported no errors" while the code named a class the font lacks; FontLab
+        # (image 342: "FontLab reported no errors" while the code named a class the font lacks; FontLab
         # clears the panel as it compiles, so an empty panel may be a compile still under way)
         self.assertTrue(ak.read_again(8, u"", u"", u""), "empty: still read")
         self.assertFalse(ak.read_again(ak.COMPILE_EMPTY_READS_MAX, u"", u"", u""), "then a clean compile")
@@ -4635,7 +4635,7 @@ class SingleChoiceTests(unittest.TestCase):
         self.assertFalse(ak.read_again(3, u"", u"[F] x", u"[F] x"), "stopped growing: read")
 
     def test_the_log_yields_room_first(self):
-        # (owner's image 340: the log kept its dragged height while the lists above it showed a row each)
+        # (image 340: the log kept its dragged height while the lists above it showed a row each)
         self.assertEqual(ak.log_height(180, 180, 40, 100, 0), 80, "the lists lack 100 pixels: the log gives them")
         self.assertEqual(ak.log_height(180, 180, 40, 500, 0), 40, "never under two lines")
         self.assertEqual(ak.log_height(40, 180, 40, 30, 0), 40)
@@ -4644,7 +4644,7 @@ class SingleChoiceTests(unittest.TestCase):
         self.assertEqual(ak.log_height(180, 180, 40, 0, -50), 180, "shorter, the lists still with room: as it is")
 
     def test_a_tabs_help_is_its_own(self):
-        # (owner's image 329: a right-click on a tab showed the window's whole help, in its middle)
+        # (image 329: a right-click on a tab showed the window's whole help, in its middle)
         help_text = (u"<b>Audit</b><br><br><i>Glyph sets</i>: the glyphs each source lacks. <i>Compatibility</i>: each\n"
                      u"glyph's contours across the sources. <i>Features</i>: features some sources lack.<br><br>More.")
         self.assertEqual(ak.help_section(help_text, u"Compatibility"), u"Each glyph's contours across the sources.")
@@ -4720,7 +4720,7 @@ class SingleChoiceTests(unittest.TestCase):
         ak.empty_bars(view)
         self.assertEqual(view.verticalScrollBarPolicy, 0, "back with rows")
         self.assertEqual(view.horizontalScrollBarPolicy, 1, "the horizontal one as the columns are shared (fitted_bar)")
-        # (owner's image 295: the horizontal bar flashed as the window was resized, the columns shared on the
+        # (image 295: the horizontal bar flashed as the window was resized, the columns shared on the
         # next turn of the event loop passing the new width meanwhile)
         ak.fitted_bar(view, [100, None, 199], 300)
         self.assertEqual(view.horizontalScrollBarPolicy, 1, "off while the columns fit")
@@ -4734,7 +4734,7 @@ class SingleChoiceTests(unittest.TestCase):
         self.assertEqual(view.horizontalScrollBarPolicy, 0, "an empty list is empty_bars' alone")
 
     def test_a_line_over_a_sections_heading_stays_without_a_font(self):
-        # (owner's image 318: "missing on all windows where it should be present", Feature Code with no font)
+        # (image 318: "missing on all windows where it should be present", Feature Code with no font)
         class Widget(object):
             def __init__(self, kind, props=None):
                 self.kind, self.props = kind, props or {}
@@ -4780,7 +4780,7 @@ class SingleChoiceTests(unittest.TestCase):
         self.assertEqual(ak.shares_of(10, []), [])
 
     def test_a_tab_switch_hides_the_others_before_showing_its_own(self):
-        # (owner's image 284, live: the bottom row held both tabs' buttons a moment and the window grew)
+        # (image 284, live: the bottom row held both tabs' buttons a moment and the window grew)
         calls = []
 
         class Widget(object):
@@ -4804,7 +4804,7 @@ class SingleChoiceTests(unittest.TestCase):
         ak.show_only([[b1], []], 5)  # (no such group: all hidden, no error)
 
     def test_a_window_taking_anothers_place_is_centered_at_the_size_it_shows_at(self):
-        # (owner's image 311: Qt grew each new window to its least width to the right; the arrows walked the
+        # (image 311: Qt grew each new window to its least width to the right; the arrows walked the
         # windows off to the right of the screen)
         moved = []
 
@@ -4831,7 +4831,7 @@ class SingleChoiceTests(unittest.TestCase):
         ak.keep_center(object())  # (a window that took no place: nothing, no error)
 
     def test_a_tools_font_is_shown_before_fontlabs_commands_act(self):
-        # (owner's image 314: a Glyph window asked for while FontLab showed another font was refused)
+        # (image 314: a Glyph window asked for while FontLab showed another font was refused)
         class Package(object):
             def __init__(self, name):
                 self.tfn = name
@@ -4957,7 +4957,7 @@ class SingleChoiceTests(unittest.TestCase):
             self.assertIn(u"hold_module(held)", handle.read(), "load_sibling holds the copy it replaces")
 
     def test_every_dropdowns_popup_list_is_left_alone_by_dark_mode(self):
-        # (owner's image 162: the popup list, a window of its own, recolored by dark mode as one of FontLab's
+        # (image 162: the popup list, a window of its own, recolored by dark mode as one of FontLab's
         # lists, its light text with colored fringes)
         class Qt(object):
             WA_TransparentForMouseEvents = NoFocus = StrongFocus = 0
@@ -5154,7 +5154,7 @@ class WindowFilterTests(unittest.TestCase):
         self.addCleanup(restore)
 
     def test_a_right_click_on_a_grayed_out_control_shows_its_help(self):
-        # The owner: "greyed out buttons do not give access to their tooltips through right-clicking"
+        # The review: "greyed out buttons do not give access to their tooltips through right-clicking"
         window = self.Widget()
         window.whatsThis = u"The window's help."
         button = self.Widget(("QAbstractButton",), window, enabled=False, whatsThis=u"Writes the checked pairs.")
@@ -5174,7 +5174,7 @@ class WindowFilterTests(unittest.TestCase):
         self.assertEqual(ak.disabled_help(button), u"The window's help.", "else its container's help")
 
     def test_a_value_typed_without_enter_is_taken_before_a_button_acts(self):
-        # The owner (2026-11-16): 100 typed in Feature Code's Strokes over 130, Build clicked without Enter:
+        # The review of 2026-11-16: 100 typed in Feature Code's Strokes over 130, Build clicked without Enter:
         # it built at 130. A press on any button of the window first commits the field with the focus.
         window = self.Widget()
         spin = self.Widget(("QAbstractSpinBox",), window, value=130, text=u"100")
@@ -5214,7 +5214,7 @@ class WindowFilterTests(unittest.TestCase):
         self.assertEqual(heard, [("valueChanged", 120), "box left"], "the box focused itself: the same")
 
     def test_tooltips_are_as_wide_as_their_window_allows(self):
-        # The owner: tooltips "stupidly compacted when there's ample space"
+        # The review: tooltips "stupidly compacted when there's ample space"
         measure = lambda text: 7 * len(text)
         short = u"Drag the space between two parts up or down to give one more room."
         laid_out = ak.tip_html(short, ak.tip_width(1000), measure)
@@ -5228,7 +5228,7 @@ class WindowFilterTests(unittest.TestCase):
         self.assertIn(u"a &lt; b", ak.tip_html(u"a < b", 500, measure), "plain text stays plain")
 
     def test_paragraphs_of_a_tooltip_are_a_blank_line_apart(self):
-        # The owner: "line jumps between paragraphs of tooltips so it reads better"
+        # The review: "line jumps between paragraphs of tooltips so it reads better"
         measure = lambda text: 7 * len(text)
         self.assertIn(u"It is checked.<br><br>Click to write it.",
                       ak.tip_html(u"It is checked.\nClick to write it.", 500, measure))
@@ -5237,7 +5237,7 @@ class WindowFilterTests(unittest.TestCase):
         self.assertNotIn(u"<br><br><br>", ak.tip_html(u"One.<br><br>Two.", 500, measure))
 
     def test_a_click_beside_the_lists_clears_their_selection(self):
-        # The owner: "It's never possible to unselect a row even by clicking outside any table"
+        # The review: "It's never possible to unselect a row even by clicking outside any table"
         window = self.Widget()
         view = self.View(window)
         label = self.Widget(("QLabel",), window)
@@ -5424,7 +5424,7 @@ class KerningCheckPreviewRuleTests(unittest.TestCase):
 
 
 class KerningCheckTableTests(unittest.TestCase):
-    """The owner: Kerning Check's tables "aligned in terms of layout with the other ones"."""
+    """The review: Kerning Check's tables "aligned in terms of layout with the other ones"."""
 
     def test_the_pair_its_glyphs_then_its_numbers(self):
         self.assertEqual(kc.COLLISION_COLUMNS, (u"Pair", u"Glyphs", u"Kerning", u"Distance", u"Fix", u"Set by",
@@ -5459,7 +5459,7 @@ class KerningCheckTableTests(unittest.TestCase):
         self.assertEqual(dialog.stale, set(kc.TABS), "each list checked again as it is shown")
 
     def test_the_pictures_room_shows_nothing_until_a_pair_is_selected(self):
-        # (owner's image 337: "Select a pair to see it here..." in this window's previews alone; no other
+        # (image 337: "Select a pair to see it here..." in this window's previews alone; no other
         # tool's empty previews say anything)
         class Label(object):
             def __init__(self):
@@ -5496,7 +5496,7 @@ class KerningCheckTableTests(unittest.TestCase):
         self.assertNotIn(u"resizeColumnToContents", source, "Qt measures only the rows it shows")
 
     def test_its_buttons_sit_at_the_bottom_as_every_tools(self):
-        # (owner's report 152: they sat under each list, above the previews and the log)
+        # (report 152: they sat under each list, above the previews and the log)
         class Button(object):
             def __init__(self, name):
                 self.name, self.visible = name, True
@@ -5576,7 +5576,7 @@ class KerningCheckTableTests(unittest.TestCase):
         ak._qt = lambda: (type("Core", (), {"Qt": type("Qt", (), {"Checked": 2, "Unchecked": 0})}), None)
         self.addCleanup(lambda: setattr(ak, "_qt", old))
         dialog.check_every(dialog.collisions, True)
-        # (Tick, not Check, for check boxes: owner's image 261)
+        # (Tick, not Check, for check boxes: image 261)
         self.assertEqual(logged[-1], u"<i>Tick all</i> ticked <b>3 pairs</b> (<b>2</b> of them in closed groups).")
         dialog.check_every(dialog.cleanup, False)
         self.assertEqual(logged[-1], u"<i>Untick all</i> unticked <b>3 entries</b> (<b>2</b> of them in closed groups).")
@@ -5593,7 +5593,7 @@ class KerningCheckTableTests(unittest.TestCase):
 
 
 class KerningCheckReviewTests(unittest.TestCase):
-    """The owner's review of 2026-11-17: Kerning Check's long steps in the window's top row (ak.busy_*), its
+    """The review of 2026-11-17: Kerning Check's long steps in the window's top row (ak.busy_*), its
     Cleanup line with nothing listed, its separators with no font."""
 
     def fake_busy(self, stop_after=None):
@@ -5612,7 +5612,7 @@ class KerningCheckReviewTests(unittest.TestCase):
         return calls
 
     def test_the_cleanup_line_with_nothing_listed(self):
-        # (owner's image 190: "0 of 0 entries listed: none.")
+        # (image 190: "0 of 0 entries listed: none.")
         self.assertEqual(kc.cleanup_status(0, 0, {}), u"No entries listed.")
         self.assertEqual(kc.cleanup_status(0, 120, {}), u"No entries listed.")
         self.assertEqual(kc.cleanup_status(3, 120, {"redundant": 2, "tiny": 1}),
@@ -5621,10 +5621,10 @@ class KerningCheckReviewTests(unittest.TestCase):
                          u"1 of 1 entry with this glyph listed: 1 entry naming what is gone.")
 
     def test_its_separators_are_the_shared_ones(self):
-        # (owner's images 202 and 210: hidden with no font, which only ak.separator's are)
+        # (images 202 and 210: hidden with no font, which only ak.separator's are)
         with io.open(kc.__file__, encoding="utf-8") as handle:
             source = handle.read()
-        # (owner's image 229: the line between a list's settings and its status separated nothing once the
+        # (image 229: the line between a list's settings and its status separated nothing once the
         # status moved to the header; the header's line and those between the previews are the shared ones)
         self.assertEqual(source.count(u"self.ak.separator)"), 0, "no line between a list's settings and its table")
         self.assertEqual(source.count(u"self.ak.header_separator()"), 1)
@@ -5634,7 +5634,7 @@ class KerningCheckReviewTests(unittest.TestCase):
         self.assertNotIn(u"processEvents", source, "the top row's progress lets events through")
 
     def test_the_header_holds_the_font_the_status_then_its_line(self):
-        # (owner's images 222 vs 223: a separator between the top text and the tabs; image 229: the result line
+        # (images 222 vs 223: a separator between the top text and the tabs; image 229: the result line
         # under the font's, not under the settings row)
         with io.open(kc.__file__, encoding="utf-8") as handle:
             source = handle.read()
@@ -5647,7 +5647,7 @@ class KerningCheckReviewTests(unittest.TestCase):
         self.assertNotIn(u"self.layout.addWidget(self.status)", source, "no status under a list's settings")
 
     def test_the_font_line_counts_masters_only_beyond_one(self):
-        # (owner's images 223 and 238: "(1 master)" here, nothing elsewhere)
+        # (images 223 and 238: "(1 master)" here, nothing elsewhere)
         with io.open(kc.__file__, encoding="utf-8") as handle:
             source = handle.read()
         self.assertIn(u"self.ak.font_named(self.package.tfn, self.master, count)", source)
@@ -5681,7 +5681,7 @@ class KerningCheckReviewTests(unittest.TestCase):
         self.assertEqual(line.text, u"Collisions' line.")
 
     def test_the_collisions_row_reads_as_a_sentence(self):
-        # (owner's image 243: a period after the last dropdown, "(e.g., Tcaron o vs. To)"; brief: Check inline after it)
+        # (image 243: a period after the last dropdown, "(e.g., Tcaron o vs. To)"; brief: Check inline after it)
         self.assertEqual(kc.COLLISION_MODES[0][1], u"and that many units closer than without the accent (e.g., "
                                                    u"\N{LATIN CAPITAL LETTER T WITH CARON}o vs. To)")
         with io.open(kc.__file__, encoding="utf-8") as handle:
@@ -5694,7 +5694,7 @@ class KerningCheckReviewTests(unittest.TestCase):
         self.assertEqual((kc.TICK_ALL, kc.TICK_NONE), (u"Tick all", u"Untick all"))
 
     def test_the_collisions_line_is_right_at_zero_one_and_two(self):
-        # (owner's image 229: "None of the 0 pairs kerned tighter comes within 41 units")
+        # (image 229: "None of the 0 pairs kerned tighter comes within 41 units")
         status = lambda found, tight, relative=True: kc.collision_status(found, tight, 41, relative)
         self.assertEqual(status(0, 0), u"No pair is kerned tighter: nothing to check.")
         self.assertEqual(kc.collision_status(0, 0, 41, common=True, limited=u" with this glyph"),
@@ -5774,11 +5774,11 @@ class KerningCheckReviewTests(unittest.TestCase):
 
 
 class KerningCheckRoundThreeTests(unittest.TestCase):
-    """The owner's round of images 283 to 318: the tabs' settings rows as tall as one another (285, 286), and
+    """The round of images 283 to 318: the tabs' settings rows as tall as one another (285, 286), and
     every count bold with its noun (297, 301)."""
 
     def test_the_settings_rows_are_as_tall_as_one_another(self):
-        # (owner's images 285 and 286: Masters' row, a button alone, was shorter than Cleanup's spin box row,
+        # (images 285 and 286: Masters' row, a button alone, was shorter than Cleanup's spin box row,
         # and its table moved up a few pixels as the tab was shown)
         class Hint(object):
             def __init__(self, height):
@@ -5839,7 +5839,7 @@ class KerningCheckRoundThreeTests(unittest.TestCase):
                         source.index(u"def current_font"), "levelled as the window is made")
 
     def test_counts_are_bold_with_their_nouns(self):
-        # (owner's images 297 and 301: "**3** of **120 entries**" and "between **3** masters" bolded the number alone)
+        # (images 297 and 301: "**3** of **120 entries**" and "between **3** masters" bolded the number alone)
         self.assertEqual(kc.cleanup_status(3, 120, {"redundant": 2, "tiny": 1}, bold=ak.b),
                          u"<b>3 of 120 entries</b> listed: <b>2 entries</b> changing nothing, <b>1 tiny value</b>.")
         self.assertEqual(kc.cleanup_status(1, 1, {"missing": 1}, u" with this glyph", ak.b),
@@ -5862,7 +5862,7 @@ class KerningCheckRoundThreeTests(unittest.TestCase):
 
 class ChoiceSheetTests(unittest.TestCase):
     def test_the_chosen_suggestion_has_a_light_tint_of_the_highlight(self):
-        # The owner: "the selected suggestions should probably get a light blue background to stand out from
+        # The review: "the selected suggestions should probably get a light blue background to stand out from
         # the unavailable buttons"
         class Color(object):
             def red(self):
@@ -5892,7 +5892,7 @@ class ChoiceSheetTests(unittest.TestCase):
 
 
 class AutoKerningListTests(unittest.TestCase):
-    """The owner, on Auto Kerning's table in dark mode: "The table headers look bad in dark mode here;
+    """The review, on Auto Kerning's table in dark mode: "The table headers look bad in dark mode here;
     probably yet another argument in favor of making this table adopt the same layout as other tables"."""
 
     class Stub(object):
@@ -6099,7 +6099,7 @@ class AutoKerningListTests(unittest.TestCase):
         return d
 
     def test_writing_again_writes_nothing_and_says_so(self):
-        # (owner's report 151: Write checked pairs, clicked again, logged "Wrote 0 entries for 0 pairs" each time)
+        # (report 151: Write checked pairs, clicked again, logged "Wrote 0 entries for 0 pairs" each time)
         av = self.suggestion(u"A", u"V", u"A", u"V", 0, halfkern=-80, contour=-60)
         to = self.suggestion(u"T", u"o", u"T", u"o", 0, halfkern=-90, contour=-70)
         d = self.window([av, to])
@@ -6165,7 +6165,7 @@ class AutoKerningListTests(unittest.TestCase):
         right = int(self.Qt.AlignRight | self.Qt.AlignVCenter)
         self.assertEqual(rows[0].aligned, dict((column, right) for column in range(1, 8)), "numbers right-aligned")
         self.assertEqual(d.tree.header_aligned, dict((column, 0x4 | 0x80) for column in range(8)),
-                         "every header centered (owner's report 141)")
+                         "every header centered (report 141)")
         self.assertEqual(self.drawn, [((u"A", u"V"), u"#000000", -70), ((u"T", u"o"), u"#000000", -80),
                                       ((u"bet", u"alef"), u"#000000", -15)],
                          "each pair drawn as on screen, at the value it takes, in the window's text color")
@@ -6305,7 +6305,7 @@ class AutoKerningListTests(unittest.TestCase):
 
 class PairLinkTests(unittest.TestCase):
     def test_the_pairs_written_are_named_drawn_and_clickable(self):
-        # The owner: "Auto kerning seems to never be in a situation where it'd display the list of characters"
+        # The review: "Auto kerning seems to never be in a situation where it'd display the list of characters"
         text = ak.pair_links([(u"A", u"V"), (u"T", u"o")])
         self.assertEqual(text, u'<a href="glyphname:A">A</a><a href="glyphname:V">V</a>, '
                                u'<a href="glyphname:T">T</a><a href="glyphname:o">o</a>')
@@ -6382,7 +6382,7 @@ class CountedTextTests(unittest.TestCase):
         self.assertEqual(plan.describe(), u"New class kern1_e: e E (may need pairs of their own: %s)" % plan.describe_differs())
 
     def test_no_dash_or_dot_between_data_and_no_period_on_a_label(self):
-        # The owner's rules: data beside data in parentheses (no interpunct, no em dash); short labels and
+        # The rules: data beside data in parentheses (no interpunct, no em dash); short labels and
         # cell notes without a period; a spin box's word through counted_suffix
         import re
         escaped = [u" \\" + code + u" " for code in (u"N{EM DASH}", u"N{MIDDLE DOT}", u"u2014", u"u00b7", u"xb7")]
@@ -6391,7 +6391,7 @@ class CountedTextTests(unittest.TestCase):
                 source = handle.read()
             for mark in escaped + [u" \N{EM DASH} ", u" \N{MIDDLE DOT} "]:
                 self.assertNotIn(mark, source)
-            # (a tick's caption that is a sentence ends with a period: owner's image 324)
+            # (a tick's caption that is a sentence ends with a period: image 324)
             self.assertEqual(re.findall(u"QCheckBox\\(u?\"[^\"]*[^.]\"\\)", source), [])
             self.assertNotIn(u"setSuffix(\"", source)
             self.assertNotIn(u"%d units ", source)
@@ -6769,7 +6769,7 @@ class LearnedGateTests(unittest.TestCase):
 
     def test_beating_no_kerning_is_a_switch_left_off(self):
         # Devanagari as scored on 2026-11-14: closer than the default, but not than leaving the pairs alone
-        self.assertFalse(self.gate.BEAT_NO_KERNING, "the owner's decision, pending: the suggestion stays in Devanagari")
+        self.assertFalse(self.gate.BEAT_NO_KERNING, "the decision, pending: the suggestion stays in Devanagari")
         devanagari = self.summary((4.0, 25.7), (12.2, 36.9), (4.8, 26.0))
         self.assertEqual(self.gate.reasons("devanagari", devanagari, 11), [])
         self.assertEqual(self.gate.reasons("devanagari", devanagari, 11, beat_no_kerning=True),
@@ -6902,7 +6902,7 @@ class ScriptPairCountTests(unittest.TestCase):
 
 
 class ReviewOfNov19Tests(unittest.TestCase):
-    """The owner's review of Nov 19 (images 350 to 392): the shared module's part."""
+    """The review of Nov 19 (images 350 to 392): the shared module's part."""
 
     def test_head_join_puts_a_blank_line_after_the_font(self):
         self.assertEqual(ak.head_join(u"<b>Sans</b>, master <b>Regular</b>.", u"Nothing to trim."),
@@ -6919,7 +6919,7 @@ class ReviewOfNov19Tests(unittest.TestCase):
         self.assertNotIn(u"aalt", line)
 
     def test_tabs_take_the_texts_color_on_either_window(self):
-        """Owner's image 352 (a light window), then the review of November 23, image 5 (a dark one): a tab not
+        """Image 352 (a light window), then the review of November 23, image 5 (a dark one): a tab not
         chosen read as grayed out in a mid gray. Every tab takes the text's color; only a disabled one is gray."""
         first = ak.TAB_SHEET.split(u"}")[0]
         self.assertIn(u"color: palette(window-text);", first)
@@ -6932,7 +6932,7 @@ class ReviewOfNov19Tests(unittest.TestCase):
         self.assertIn(ak.PALETTE_CHANGE, ak.WATCHED_EVENTS, "dark mode switched: the sheets follow")
 
     def test_an_open_list_is_as_wide_as_its_longest_choice(self):
-        """Live 2026-11-19 (owner's image 357 again): popup_width called view.fontMetrics(), which PythonQt does not
+        """Live 2026-11-19 (image 357 again): popup_width called view.fontMetrics(), which PythonQt does not
         have; the failure was swallowed after the choices were marked measured, and every list stayed as wide
         as its box ("Korean (no... the font)"). Measured with a QFontMetrics of the list's font."""
         class Metrics(object):
@@ -6991,7 +6991,7 @@ class ReviewOfNov19Tests(unittest.TestCase):
             ak._qt = real
 
     def test_grayed_fields_show_on_a_light_window(self):
-        """Live 2026-11-19 (owner's image 366): on a light window, Windows' style filled a grayed field with the
+        """Live 2026-11-19 (image 366): on a light window, Windows' style filled a grayed field with the
         window's color, its frame a faint line, and Feature Code's empty field beside Glyphs vanished. Light
         windows' fields take a darker gray while grayed. The review of November 23 (images 2 and 4): the usable
         background was kept from the field's palette of the theme before, so every group is set from the
@@ -7090,7 +7090,7 @@ class ReviewOfNov19Tests(unittest.TestCase):
 
 
 class ReviewOfNov23Tests(unittest.TestCase):
-    """The owner's review of November 23 (thirteen images): the shared module's part."""
+    """The review of November 23 (thirteen images): the shared module's part."""
 
     def test_the_help_menu_is_fontlabs_main_windows(self):
         """Image 25: "What's This?" came out without a standard menu's margin and padding. A menu takes its
@@ -7571,7 +7571,7 @@ class McpConventionTests(unittest.TestCase):
 
 
 class SaveFileNameTests(unittest.TestCase):
-    """Windows' own "Confirm Save As" box stays light in dark mode (owner's report, 2026-11-24): the save dialog
+    """Windows' own "Confirm Save As" box stays light in dark mode (report, 2026-11-24): the save dialog
     is asked not to confirm replacing a file, so the tool asks in its own box; where this PythonQt takes no
     options, the plain call as before, and Windows' box asked of the name typed."""
 
@@ -7726,7 +7726,7 @@ DOCS = os.path.join(HERE, os.pardir, "docs")
 
 
 class CancelButtonTests(unittest.TestCase):
-    """A window's Cancel button (the owner, 2026-11-24: "a 'Cancel' button left of 'Close' could be useful,
+    """A window's Cancel button (the review of 2026-11-24: "a 'Cancel' button left of 'Close' could be useful,
     especially when exporting very big character sets; greyed out when nothing is being exported"): right before
     Close, grayed but while work that can stop runs, and a click on it stops the work as Esc does."""
 
@@ -7945,7 +7945,7 @@ class CancelButtonTests(unittest.TestCase):
 
 
 class CancelInEachWindowTests(unittest.TestCase):
-    """The owner, 2026-11-24 ("a 'Cancel' button left of 'Close' could be useful ... greyed out ... when nothing
+    """The review of 2026-11-24 ("a 'Cancel' button left of 'Close' could be useful ... greyed out ... when nothing
     is currently being exported"), asked for every window: Auto Kerning's and Kerning Check's here, right before
     Close, usable only while their work can stop, their help saying what a stop leaves."""
 
@@ -8069,7 +8069,7 @@ class DocsClaimTests(unittest.TestCase):
             "SPACING.md": (u"the script never changes them", u"; they are never changed",
                            u"covers every glyph with a character"),
             "KERNING.md": (u"Auto Kerning reads and writes through them, and never makes",
-                           u"analyzes the font that is current then", u"owner's test font), closest first"),
+                           u"analyzes the font that is current then", u"the test font), closest first"),
             "CJK.md": (u"*Hangul:*", u"*Write* once more", u"more Hangul than kana or hanzi",
                        u"the code *Write the code* would write"),
             "FONT-BUILDER.md": (u"**Glyphs a sheet**", u"*Save template...*", u"*Add sheets...*"),
@@ -8091,7 +8091,7 @@ class DocsClaimTests(unittest.TestCase):
 
 
 class NumberRangeTests(unittest.TestCase):
-    """The owner, 2026-11-27 (image 241): number fields say what they take, from their own bounds, in their
+    """The review of 2026-11-27 (image 241): number fields say what they take, from their own bounds, in their
     tooltip and their help, their caption's too."""
 
     class Field(object):

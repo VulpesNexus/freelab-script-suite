@@ -168,7 +168,7 @@ class SampleTests(unittest.TestCase):
         self.assertEqual(picked(codes_of("zh-hant")), "zh-hant")
 
     def test_the_sample_in_the_fonts_own_writing(self):
-        """The owner: IBM Plex Sans JP was shown the Traditional Chinese sample (it covers it as fully as the
+        """The review: IBM Plex Sans JP was shown the Traditional Chinese sample (it covers it as fully as the
         Iroha, and has more kanji than kana). The font's own writing wins; coverage decides only between
         the two Chinese samples, or where nothing else says."""
         def codes_of(*keys):
@@ -401,7 +401,7 @@ class LineTests(unittest.TestCase):
 
 
 class NoFontTests(unittest.TestCase):
-    """The owner: audit "what currently remains clickable or visible when there's nothing loaded"."""
+    """The review: audit "what currently remains clickable or visible when there's nothing loaded"."""
 
     class Widget(object):
         def __init__(self):
@@ -608,13 +608,13 @@ class StaleCodeTests(unittest.TestCase):
         self.assertEqual(sorted(features.written), ["halt", "palt"])
         self.assertIn(u"pos uni3042 <-10 0 -20 0>;", features.texts["palt"], "the font's own rule kept")
         self.assertEqual(self.history, ["before", "notify"])
-        # (owner's image 183: under the top row's progress, never stoppable, always ended)
+        # (image 183: under the top row's progress, never stoppable, always ended)
         self.assertEqual((self.busy[0][0], self.busy[-1][0]), ("start", "end"))
         self.assertFalse(any(stoppable for kind, stoppable in self.busy if kind != "end"), self.busy)
         self.assertFalse(dialog.busy)
 
     def test_compile_after_writing_is_grayed_with_the_write_button(self):
-        # (owner's image 195: checked and clickable beside a grayed Write the code)
+        # (image 195: checked and clickable beside a grayed Write the code)
         self.assertFalse(cj.compile_on(False, True))
         self.assertFalse(cj.compile_on(True, False), "Hangul widths alone: no code to compile")
         self.assertTrue(cj.compile_on(True, True))
@@ -639,7 +639,7 @@ class StaleCodeTests(unittest.TestCase):
         self.assertEqual([kind for kind, _ in self.busy], ["start", "end"])
         self.assertEqual(dialog.trims, [])
         self.assertIn(u"Listing was stopped", dialog.status.text)
-        self.assertTrue(dialog.status.text.startswith(u", master None."), "the font line kept (owner's image 224)")
+        self.assertTrue(dialog.status.text.startswith(u", master None."), "the font line kept (image 224)")
         self.assertEqual(dialog.seen_history, "mark", "not read again for the History seen before")
         self.assertFalse(dialog.busy)
 
@@ -742,12 +742,12 @@ class StaleCodeTests(unittest.TestCase):
         self.assertIn(u"are positioned by the font's own palt code already: they keep theirs, not FreeLab's trim", palt[0])
         self.assertNotIn(u"keep palt", palt[0])
         self.assertEqual(features.written, ["halt"], "palt has nothing left to write")
-        # Each glyph named by its name, in italics, a link that opens it (owner's request of 2026-11-24)
+        # Each glyph named by its name, in italics, a link that opens it (the request of 2026-11-24)
         self.assertTrue(palt[0].endswith(u"compile): %s %s." % (ak.glyph_name_link(u"a-hira"),
                                                                  ak.glyph_name_link(u"ideographiccomma"))), palt[0])
 
     def test_cancel_sits_before_close_usable_while_it_lists(self):
-        """The owner, 2026-11-24: a Cancel left of Close, grayed but while work that can stop runs (ak.cancel_button),
+        """The review of 2026-11-24: a Cancel left of Close, grayed but while work that can stop runs (ak.cancel_button),
         as Esc stops it; its help says what a stop leaves."""
         with io.open(cj.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
             init = handle.read().split(u"class CJKSpacingDialog")[1].split(u"\n    def bottom_right")[0]
@@ -811,7 +811,7 @@ class CheckRow(object):
 
 def check_all_logged(test, module, dialog_class, noun):
     """Tick all and Untick all of a CJK tool (module's dialog_class) over two groups, one closed: what
-    the log says (owner's report 118: these buttons left no line; image 261: Tick, not Check)."""
+    the log says (report 118: these buttons left no line; image 261: Tick, not Check)."""
     sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
     import freelab_auto_kerning as ak
     saved = sys.modules.get("PythonQt")
@@ -911,7 +911,7 @@ class ReaderLoadingTests(unittest.TestCase):
                 dialog = self.window(logged)
                 dialog.update_buttons()
                 self.assertFalse(dialog.ak.enabled[dialog.write_button], "the write grayed out")
-                self.assertFalse(dialog.ak.enabled["compile_box"], "and its compile with it (owner's image 195)")
+                self.assertFalse(dialog.ak.enabled["compile_box"], "and its compile with it (image 195)")
                 dialog.update_buttons()
                 self.assertEqual([kind for kind, _ in logged], ["error"], "said once")
                 self.assertIn(u"freelab_feature_code.py", logged[0][1])
@@ -1010,7 +1010,7 @@ class CheckAllTests(unittest.TestCase):
 
 
 class WordingTests(unittest.TestCase):
-    """The owner's rules for interface texts: a text with a number follows it, and data beside data
+    """The rules for interface texts: a text with a number follows it, and data beside data
     goes in parentheses."""
 
     def test_the_hangul_sentence_follows_its_count(self):
@@ -1037,7 +1037,7 @@ class WordingTests(unittest.TestCase):
 
 
 class UIRoundTests(unittest.TestCase):
-    """The owner's UI round (images 212 to 282): one header for every window, Tick for check boxes, every preview
+    """The UI round (images 212 to 282): one header for every window, Tick for check boxes, every preview
     caption the shared one, counts right at 0, 1, and 2."""
 
     def source(self):
@@ -1058,12 +1058,12 @@ class UIRoundTests(unittest.TestCase):
                                          lambda text: u"<b>%s</b>" % text, lambda text: u"<i>%s</i>" % text),
                          u"<b>2 of the 1,200 full-width kana and punctuation</b> get a trim (palt: <b>2</b>, halt: "
                          u"<b>1</b>). Nothing is written until you click <i>Write the code</i>. Its 3 Hangul syllables.")
-        # (owner's images 297 and 301: a count bold with its noun, never the number alone before it)
+        # (images 297 and 301: a count bold with its noun, never the number alone before it)
         self.assertEqual(cj.trims_status(0, 2, 0, 0, u"Write the code", u"", lambda text: u"<b>%s</b>" % text),
                          u"None of the <b>2 full-width kana and punctuation</b> needs a trim.")
 
     def test_the_top_line_names_the_font_its_way(self):
-        # (owner's images 223 and 238: the masters counted only beyond one; image 224: the font line kept on a failure)
+        # (images 223 and 238: the masters counted only beyond one; image 224: the font line kept on a failure)
         sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
         import freelab_auto_kerning as ak
         one = type("Package", (), {"tfn": u"BIZ UDGothic", "master": u"Regular", "mastersCount": 1})()
@@ -1082,7 +1082,7 @@ class UIRoundTests(unittest.TestCase):
         self.assertNotIn(u"setPointSizeF", source)
         for old in (u'"Check all"', u'"Check none"', u"Checks restored", u"Checked glyphs", u"checked glyphs"):
             self.assertNotIn(old, source)
-        # (a tool named in the log is a link that opens it: owner's image 220)
+        # (a tool named in the log is a link that opens it: image 220)
         self.assertIn(u'self.ak.tool_link(u"Feature Check")', source)
         self.assertNotIn(u"<i>Feature Check</i> lists", source)
 
@@ -1113,7 +1113,7 @@ class FakeBox(object):
 
 
 class UIRound3Tests(unittest.TestCase):
-    """The owner's UI round 3 (images 283 to 318): the sample in three lines (303), the Hangul setting and the
+    """The UI round 3 (images 283 to 318): the sample in three lines (303), the Hangul setting and the
     samples grayed for a font without their writing (304), a Code preview (305), the bottom row's order (298),
     splitter handles (310, 318)."""
 
@@ -1130,11 +1130,11 @@ class UIRound3Tests(unittest.TestCase):
         self.assertIn(u"label.setMinimumHeight(PREVIEW_LEAST_HEIGHT)", self.source())
 
     def test_the_iroha_fits_three_lines_at_the_windows_usual_width(self):
-        # (owner's image 303: at 44 pixels to the em the Iroha took four lines, the last a lone character)
+        # (image 303: at 44 pixels to the em the Iroha took four lines, the last a lone character)
         chars = [ch for ch in cj.SAMPLE]
         ems = [1.0] * len(chars)  # (full-width kana and punctuation, as they are set Now)
         room = 18 * 44  # (the preview's width there: 18 glyphs to a line at 44 pixels)
-        self.assertGreater(len(cj.break_lines(chars, [44.0] * len(chars), room)), 3, "the owner's four lines")
+        self.assertGreater(len(cj.break_lines(chars, [44.0] * len(chars), room)), 3, "the four lines of the review")
         em = cj.preview_em(chars, ems, room)
         self.assertLess(em, cj.PREVIEW_EM)
         self.assertLessEqual(len(cj.break_lines(chars, [em * 1.0] * len(chars), room)), 3, "three lines")
@@ -1157,7 +1157,7 @@ class UIRound3Tests(unittest.TestCase):
         self.assertNotIn(u"PREVIEW_EM / upm", draw)
 
     def test_a_preview_stays_whole_while_the_window_is_resized(self):
-        """Owner's image 356: a drag of the window's edge restarted the previews' redraw wait at each step, and the
+        """Image 356: a drag of the window's edge restarted the previews' redraw wait at each step, and the
         labels cut the centered lines' ends off meanwhile. Each label's last picture is shown scaled down to it."""
         class Pixmap(object):
             def __init__(self, w, h):
@@ -1197,7 +1197,7 @@ class UIRound3Tests(unittest.TestCase):
 
     def test_a_latin_font_is_no_cjk_font(self):
         """Live 2026-11-19 (Bellefair): its curly quotes, a palt kind where they are full width, kept the ticks and
-        the sample usable, and its comma and period picked the Korean sample (owner's images 359, 379, 380)."""
+        the sample usable, and its comma and period picked the Korean sample (images 359, 379, 380)."""
         latin = set(range(0x20, 0x7F)) | set([0x2018, 0x2019, 0x201C, 0x201D, 0xE9])
         self.assertFalse(cj.has_cjk(latin))
         self.assertEqual(cj.best_sample(latin), 0, "the first sample, grayed with the rest")
@@ -1212,7 +1212,7 @@ class UIRound3Tests(unittest.TestCase):
         self.assertIn(u"self.cjk_states(", buttons, "grayed again after no_font_states gives them back")
 
     def test_a_sample_in_a_writing_the_font_lacks_is_grayed(self):
-        # (owner's image 304: the Korean sample showed its corner bracket, comma, and period alone in a Japanese font with no Hangul)
+        # (image 304: the Korean sample showed its corner bracket, comma, and period alone in a Japanese font with no Hangul)
         japanese = set(ord(ch) for ch in cj.SAMPLE) | set(range(0x4E00, 0x9FFF))
         offered = cj.offered_samples(cj.SAMPLES, japanese)
         self.assertEqual(dict(zip([key for key, _, _ in cj.SAMPLES], offered)),
@@ -1242,7 +1242,7 @@ class UIRound3Tests(unittest.TestCase):
         return dialog
 
     def test_the_hangul_setting_is_grayed_without_hangul(self):
-        # (owner's image 304: clickable over a Japanese font with none: the shared no_font_states gave it back
+        # (image 304: clickable over a Japanese font with none: the shared no_font_states gave it back
         # with the font, and update_buttons, which it calls then, did not set it)
         dialog = self.window([])
         dialog.hangul_shown()
@@ -1273,7 +1273,7 @@ class UIRound3Tests(unittest.TestCase):
         same = cj.preview_code(new, dict(new), ("palt", "halt"))
         self.assertEqual(same, cj.NO_CODE, "the font has it already: nothing to write")
         self.assertEqual(cj.preview_code({}, {}, ("palt", "halt"), [u"Widths."]), cj.NO_CODE + u"\n# Widths.")
-        # (an empty list has nothing ticked: owner's image 29)
+        # (an empty list has nothing ticked: image 29)
         self.assertEqual(cj.preview_code({}, {}, ("palt", "halt"), empty=True), cj.NO_CODE_EMPTY)
         self.assertNotIn(u"ticked", cj.NO_CODE_EMPTY)
         self.assertEqual(cj.CODE_PREVIEW_HEADING, u"Code preview", "not Code: it is not written yet (image 299)")
@@ -1327,7 +1327,7 @@ class UIRound3Tests(unittest.TestCase):
     def test_the_layout_splitter_code_preview_and_bottom_row(self):
         source = self.source()
         init = source.split(u"class CJKSpacingDialog")[1].split(u"\n    def watch_previews")[0]
-        # (owner's image 310: a handle between the list and the previews; 305: a Code preview pane under them;
+        # (image 310: a handle between the list and the previews; 305: a Code preview pane under them;
         # 318: its separator first, under the handle, then its heading)
         self.assertIn(u"self.splitter = QtGui.QSplitter(QtCore.Qt.Vertical)", init)
         self.assertIn(u"list_part.addWidget(self.tree, 1)", init)
@@ -1338,7 +1338,7 @@ class UIRound3Tests(unittest.TestCase):
         self.assertLess(part.index(u"part.addWidget(ak.separator())"), part.index(u"part.addWidget(self.heading)"))
         self.assertIn(u"self.code.setReadOnly(True)", part)
         self.assertIn(u"fc.make_highlighter(self.code)", part, "Feature Code's colors, not a copy")
-        # (owner's image 298: the compile tick, the write it is about, then Close)
+        # (image 298: the compile tick, the write it is about, then Close)
         dialog = cj.CJKSpacingDialog.__new__(cj.CJKSpacingDialog)
         dialog.compile_box, dialog.write_button, dialog.close_button = "compile", "write", "close"
         self.assertEqual(dialog.bottom_right(), ["compile", "write", "close"])
@@ -1346,7 +1346,7 @@ class UIRound3Tests(unittest.TestCase):
 
 
 class LacksNoteTests(unittest.TestCase):
-    """The owner, of both CJK windows: "Shouldn't we have this line in the log instead?" What the font lacks of
+    """The review, of both CJK windows: "Shouldn't we have this line in the log instead?" What the font lacks of
     the sample (preview_note) was a quiet line between the previews and the Code preview while the log stayed
     empty: it is said in the log now, once per font and words, and after a pause while the sample is typed."""
 

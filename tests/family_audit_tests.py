@@ -60,7 +60,7 @@ class WordTests(unittest.TestCase):
         self.assertEqual(fa.counted(2, u"entry", u"entries"), u"2 entries")
         self.assertEqual(fa.tab_text(u"Compatibility"), u"Compatibility", "no count before an audit")
         self.assertEqual(fa.tab_text(u"Compatibility", 1240), u"Compatibility (1,240)")
-        # (owner's images 327 and 328: "Metrics and info (0)" over 20 fields alike read as nothing compared)
+        # (images 327 and 328: "Metrics and info (0)" over 20 fields alike read as nothing compared)
         self.assertEqual(fa.tab_text(u"Metrics and info", 0), u"Metrics and info (alike)")
         self.assertEqual(fa.sentence(u"two fields differ"), u"Two fields differ.")
         self.assertEqual(fa.sentence(u"<b>2 fields</b> differ"), u"<b>2 fields</b> differ.", "a tag left as it is")
@@ -91,7 +91,7 @@ class WordTests(unittest.TestCase):
 
 class StatusHeightTests(unittest.TestCase):
     def test_the_status_line_keeps_the_tallest_tabs_height(self):
-        """Owner's images 370 and 371: a tab whose status took a line more than another's moved the lists below
+        """Images 370 and 371: a tab whose status took a line more than another's moved the lists below
         as the tabs switched. The line is as tall as the tallest tab's at its width."""
         class Label(object):
             text, width, minimum = u"", 400, None
@@ -759,7 +759,7 @@ class BuildTests(unittest.TestCase):
             self.assertGreater(events.index(("contours", u"Aacute", master)), made, "its own outlines after")
         self.assertEqual(package.glyphs[u"Aacute"].layers[u"Bold"].parts, [u"A", u"acute"])
         self.assertLess(events.index(("shown",)), events.index(("contours", u"A", u"Regular")))
-        # (the owner, 2026-11-24: the new font's tab read "Unnamed". Named before its window opens)
+        # (the review of 2026-11-24: the new font's tab read "Unnamed". Named before its window opens)
         named = [event for event in events if event[0] == "named"]
         # (live 2026-11-27: each master has its own style, full, and PostScript names; the second master kept
         # "Unnamed Regular": each is named with it current, by its source's style)
@@ -1310,7 +1310,7 @@ class DialogTests(unittest.TestCase):
         return dialog
 
     def test_a_window_opened_again_shows_the_last_audit_while_no_source_changed(self):
-        # (owner's image 330: Family Audit opened again showed nothing of the comparison made before)
+        # (image 330: Family Audit opened again showed nothing of the comparison made before)
         first = self.compared()
         fonts = list(self.workspace.packages())
         own = self.workspace.currentPackage
@@ -1355,7 +1355,7 @@ class DialogTests(unittest.TestCase):
         self.assertIn(("info", u"Axes: Weight (Regular 400, Bold 700)."), self.said)
 
     def test_cancel_is_usable_while_it_compares_not_while_it_assembles(self):
-        """The owner, 2026-11-24: a Cancel left of Close (test_the_rows_in_order), grayed but while work that can
+        """The review of 2026-11-24: a Cancel left of Close (test_the_rows_in_order), grayed but while work that can
         stop runs (ak.cancel_button), as Esc stops it; its help says what a stop leaves."""
         import qtfakes
         dialog = self.compared()
@@ -1403,7 +1403,7 @@ class DialogTests(unittest.TestCase):
         fonts.append(FakeFont(9, u"Serif", u"Bold", weight=700, path=u"\\f\\Serif-Bold.otf"))
         dialog.open_tick()
         self.assertEqual(dialog.pending, [])
-        # (owner's image 344: a font of another family was ticked with the window's family's)
+        # (image 344: a font of another family was ticked with the window's family's)
         self.assertNotIn((9, u"Bold"), dialog.ticked, "another family: left unticked, and said")
         self.assertEqual(self.said[-1][0], "warning")
         self.assertIn(u"of another family (Serif): left unticked", self.said[-1][1])

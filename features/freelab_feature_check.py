@@ -108,7 +108,7 @@ def step(progress, what, done=0, total=1):
 
 
 def grouped(number):
-    """A whole number with its thousands set apart by commas: 13,932 (owner's image 231)."""
+    """A whole number with its thousands set apart by commas: 13,932 (image 231)."""
     return "{:,}".format(int(number))
 
 
@@ -1943,7 +1943,7 @@ STEPS = {"Reading the code": (0.0, 0.3), "Looking through the code": (0.3, 0.05)
          "Proving the fixes": (0.5, 0.45), "Proving the fixes together": (0.95, 0.05)}
 TITLE = "FreeLab Feature Check"
 APPLY_TEXT = "Apply ticked fixes"  # (with a count once some are ticked: "Apply 3 ticked fixes")
-COMPILE_STEP = "Compiling in FontLab"  # the top row's step while FontLab compiles (owner's image 212)
+COMPILE_STEP = "Compiling in FontLab"  # the top row's step while FontLab compiles (image 212)
 READ_STEP = "Reading what FontLab's compiler said"
 # The Cancel button's own line (ak.cancel_button): what a stop leaves (a check's fixes applied automatically are
 # whole writes made before the stop; a compile never stops)
@@ -2071,7 +2071,7 @@ def _escaped(text):
 
 
 def summary_line(report, rich=False):
-    """The status line under the font line (owner's images 231 and 237). rich: as rich text, the counts
+    """The status line under the font line (images 231 and 237). rich: as rich text, the counts
     and their nouns in bold (the rest escaped)."""
     escape = _escaped if rich else _text
     strong = (lambda text: "<b>%s</b>" % _escaped(text)) if rich else _text
@@ -2088,14 +2088,14 @@ def summary_line(report, rich=False):
         if totals[severity]:
             parts.append(strong(counted(totals[severity], one, many)))
     # (one sentence, so one line: the top line puts each sentence on a line of its own, and "1 error." over
-    # "It does not compile." took two, owner's image 343)
+    # "It does not compile." took two, image 343)
     state = "It compiles" if report.built else ("It does not compile" if totals[ERROR] else "")
     return "%s: %s." % (state, ", ".join(parts)) if state else "%s." % ", ".join(parts)
 
 
 def font_line(ak, name, glyphs):
     """The window's top line: the font's name in bold (its subject is the whole font: no master), and its
-    glyphs counted, thousands grouped: "<b>BIZ UDGothic</b> (<b>13,932 glyphs</b>)." (owner's image 231)."""
+    glyphs counted, thousands grouped: "<b>BIZ UDGothic</b> (<b>13,932 glyphs</b>)." (image 231)."""
     named = ak.font_named(name) if hasattr(ak, "font_named") else ak.b(name)
     return "%s (%s)." % (named, ak.b(counted(glyphs, "glyph")))
 
@@ -2122,7 +2122,7 @@ class FeatureCheckDialog(object):
         dialog.setWhatsThis(HELP)
         ak.size_dialog(dialog)
         layout = ak.window_layout(dialog)  # (its content scrolls on a small screen)
-        # The header, as in every window (owner's images 231 and 237): the font line (the busy bar in its place
+        # The header, as in every window (images 231 and 237): the font line (the busy bar in its place
         # while a check or a compile runs), the check's result under it, then the header's line
         self.font_label = ak.status_label()
         self.font_label.setWordWrap(True)
@@ -2179,7 +2179,7 @@ class FeatureCheckDialog(object):
         self.log = ak.Log()
         layout.addWidget(self.log.widget)
 
-        # The bottom row, as in every window (owner's image 255): the list's tick buttons at the left; at the
+        # The bottom row, as in every window (image 255): the list's tick buttons at the left; at the
         # right the compile, then the committing action, then Cancel and Close
         buttons = QtGui.QHBoxLayout()
         self.check_all = QtGui.QPushButton("Tick all")
@@ -2420,7 +2420,7 @@ class FeatureCheckDialog(object):
         fixes = [f for f in self.items if f.fix is not None]
         checked = len(self.checked_findings()) if fixes else 0
         self.ak.enable(self.check_button, not self.busy and (has_font or self.ak.fonts_open(self.fontlab)))
-        # (grayed with nothing to do: no font, or a font without feature code; owner's image 255)
+        # (grayed with nothing to do: no font, or a font without feature code; image 255)
         self.ak.enable(self.compile_button, not self.busy and has_font and self.code_there)
         self.ak.enable(self.apply_button, not self.busy and has_font and checked > 0)
         self.ak.enable(self.check_all, not self.busy and checked < len(fixes))
@@ -2445,7 +2445,7 @@ class FeatureCheckDialog(object):
             cursor = QtGui.QTextCursor(block)
             cursor.select(QtGui.QTextCursor.LineUnderCursor)
             try:  # (marked as strongly with the focus on the list as in the box: in light mode the box's unfocused
-                # selection was a faint gray, owner's image 367; copied from the palette now, dark or light)
+                # selection was a faint gray, image 367; copied from the palette now, dark or light)
                 palette = self.code.palette
                 for role in (QtGui.QPalette.Highlight, QtGui.QPalette.HighlightedText):
                     palette.setColor(QtGui.QPalette.Inactive, role, palette.color(QtGui.QPalette.Active, role))
@@ -2513,7 +2513,7 @@ class FeatureCheckDialog(object):
 
     def compile_in_fontlab(self):
         """The font's features compiled by FontLab (ak.compiled_note), the window's top row showing it until
-        what FontLab's compiler said is in the log (owner's image 212: no feedback before). A compile cannot
+        what FontLab's compiler said is in the log (image 212: no feedback before). A compile cannot
         be stopped halfway: the tools menu, the arrows, and Close wait for it."""
         QtCore, QtGui = _qt()
         if self.busy or self.package is None:

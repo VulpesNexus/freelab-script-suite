@@ -134,7 +134,7 @@ def settings_of(data, saved=None):
     return found
 
 
-# -- Squared words and abbreviations (owner's report 177: "even a Japanese font doesn't offer the characters
+# -- Squared words and abbreviations (report 177: "even a Japanese font doesn't offer the characters
 # built from several kana into a square composition") -------------------------------------------------------
 # The characters of Unicode's CJK Compatibility blocks whose decomposition is <square>: the katakana words
 # (U+3300 to U+3357), the era names and the corporation sign (U+337B to U+337F, U+32FF), and the Latin units and
@@ -250,7 +250,7 @@ def with_squares(data):
     return with_compat(data)
 
 
-# -- Compatibility characters built as Unicode decomposes them (owner's question of 2026-11-18, image 315: "whether
+# -- Compatibility characters built as Unicode decomposes them (the question of 2026-11-18, image 315: "whether
 # our glyph generator can cover more glyphs"). Made from Unicode's own data as the table is read (every one is in
 # FontLab's Unicode 5.2), each group with what Japanese and Latin fonts were measured to do (2026-11-18, the fonts
 # of Windows 11 and Noto):
@@ -397,7 +397,7 @@ def square_layout(cells, em, upm, bottom, kind, rows=None):
     Kana and ideographs ("cjk"): rows (square_rows) of cells as tall as the square over their count, each
     component's own em box scaled into its cell (narrower in a row of more). A component alone on its row
     under a row of several (ス of ㌉ オン over ス) keeps a cell of that row's width, at the left, as Japanese
-    fonts set it (owner's image 315: stretched across the whole row, it was twice as wide as its neighbors;
+    fonts set it (image 315: stretched across the whole row, it was twice as wide as its neighbors;
     the ten Japanese fonts measured on 2026-11-18 all draw it half the em wide, under the first of the row
     above). Latin ("latin"): one row at the components' own advances, scaled to fit SQUARE_ROOM of the width
     (at most LATIN_MOST, narrowed rather than made shorter than LATIN_LEAST_HEIGHT), centered across and on
@@ -817,7 +817,7 @@ class Layout(object):
         self.words = None  # (its Recipe cell, where the way says it with its figures: the next scope's)
 
 
-# -- Vary turned and mirrored glyphs (the owner's request of 2026-11-16) ---------------------------------------
+# -- Vary turned and mirrored glyphs (the request of 2026-11-16) ---------------------------------------
 # A turned or mirrored glyph is its source's carbon copy; in a hand-drawn or quirky font that shows. Feature
 # Code's Stylistic alternates builder makes its variants by a few smooth changes of the whole glyph from a
 # seed (freelab_alternates: variant_params, variant_matrix: a slight rotation, uneven scaling, a slant, a
@@ -828,7 +828,7 @@ class Layout(object):
 # transforms, so it still follows its source. The same seed gives the same glyph; another seed, another.
 VARY_OPS = ("turn", "mirror")
 VARY_LABEL = u"Vary turned and mirrored glyphs."
-FIND_A_GLYPH = u"Find a glyph…"  # (a placeholder ends with an ellipsis: owner's image 309)
+FIND_A_GLYPH = u"Find a glyph…"  # (a placeholder ends with an ellipsis: image 309)
 VARY_SEED_REACH = (1, 9999)
 VARY_SETTINGS = ("vary", "vary_seed", "vary_strength")  # (in Glyph Compose's settings file, under generation)
 
@@ -907,7 +907,7 @@ class Row(object):
         """What the Confidence cell says: the row's own (own_sureness), or that of a glyph of this list it is
         made of, where that is less sure (inherited: ǝ copies ə, an accepted recipe, but ə is e turned, a
         starting point; ǝ was offered checked as accepted, and its build stopped as ə was unchecked: the
-        owner's report of 2026-11-16)."""
+        report of 2026-11-16)."""
         inherited = getattr(self, "inherited", None)
         return inherited[0] if inherited else self.own_sureness
 
@@ -1148,7 +1148,7 @@ class Planner(object):
     def draw_notes(self):
         """The source to draw named as such: a row that cannot be built, which two rows or more need, and
         whose own ways need only rows that cannot be built either, says "draw it: ⇐ ⇑ ⇓ are built from it"
-        rather than naming one of them it would be built from (the owner's report of 2026-11-16: three
+        rather than naming one of them it would be built from (report of 2026-11-16: three
         double arrows needed ⇒, which was not listed; with the reverse ways, it would have said "needs ⇐",
         and ⇐ "needs ⇒")."""
         missing = dict((row.hex, row) for row in self.rows if row.layout is None)
@@ -1160,7 +1160,7 @@ class Planner(object):
 
     def draft_needs(self, rows):
         """{id(row)} of the starting points these rows are built of, through others too: listed with them
-        (unchecked, as every starting point is), so that a draft is built only once the owner checks it, as
+        (unchecked, as every starting point is), so that a draft is built only once it is checked, as
         in the whole table (Codex's review: ǝ handed over alone built a turned e, a draft, unasked)."""
         found, seen = set(), set()
 
@@ -1180,7 +1180,7 @@ class Planner(object):
     def prerequisites(self, chosen):
         """The rows the chosen ones are built of that the list does not show (Font Check's hand-over lists
         only the characters handed over): built with them, before them; exact or accepted recipes only (a
-        starting point is listed: draft_needs). A listed one is the owner's to check, as before (unchecked,
+        starting point is listed: draft_needs). A listed one is left to be checked, as before (unchecked,
         the row that needs it is not built, and the log says so)."""
         picked = set(row.name for row in chosen)
         listed = set(id(row) for row in self.rows)
@@ -2129,7 +2129,7 @@ def note_text(row, needs_built=()):
 def corpus_text(families, deriving, bold=None):
     """How many of the corpus's families have the character, and how many of those build it of other
     glyphs (a sentence; bold: the shared module's b, the families bold with their noun and the number of
-    those that build it bold alone, owner's images 297 and 301)."""
+    those that build it bold alone, images 297 and 301)."""
     bold = bold or (lambda text: text)
     return u"%s of the corpus %s it; %s of them %s it of other glyphs." % (
         bold(counted(families, u"family", u"families")), u"has" if families == 1 else u"have", bold(u"%d" % deriving),
@@ -2149,9 +2149,9 @@ def confidence_text(row):
 
 
 def status_text(buildable, sureness, lacking, bold=None, italic=None, build=u"Build ticked glyphs"):
-    """The tab's status lines, under the window's top line (which names the font and master, owner's image
+    """The tab's status lines, under the window's top line (which names the font and master, image
     265): how many glyphs can be built (sureness: "19 exact" and the like), how many need a glyph the font
-    lacks, and which button builds them. Every count right at 0, 1, and 2 (owner's image 247)."""
+    lacks, and which button builds them. Every count right at 0, 1, and 2 (image 247)."""
     bold = bold or (lambda text: text)
     italic = italic or (lambda text: text)
     needs = lambda n: u"%s %s a glyph the font lacks" % (bold(counted(n, u"glyph")), u"needs" if n == 1 else u"need")
@@ -2826,7 +2826,7 @@ class GenerationPage(object):
         self.status.setWordWrap(True)
         self.status.setWhatsThis(u"What the list holds for this font and master: how many glyphs can be built, how "
                                  u"sure their recipes are, and how many need a glyph the font lacks.")
-        add_status = getattr(owner, "add_status", None)  # (under the window's top line: owner's image 265)
+        add_status = getattr(owner, "add_status", None)  # (under the window's top line: image 265)
         if add_status is not None:
             add_status(self.status, "generation")
         else:
@@ -2847,7 +2847,7 @@ class GenerationPage(object):
             fit = getattr(cm, "fit_to_contents", None)
             if fit is not None:
                 fit(self.list_box)
-            row.addWidget(self.list_box)  # (the row's own spacing after it: owner's image 307 found the gaps wide)
+            row.addWidget(self.list_box)  # (the row's own spacing after it: image 307 found the gaps wide)
         self.existing_box = QtGui.QCheckBox(u"Also list existing glyphs.")
         self.existing_box.setWhatsThis(u"Also lists the characters of these groups the font has already, in a section "
                                        u"of their own, unticked: those you tick are built again from their recipe, "
@@ -2862,15 +2862,15 @@ class GenerationPage(object):
         self.value_only_box.setWhatsThis(cm.VALUE_ONLY_HELP)
         row.addWidget(self.value_only_box)
         # The four widths in a row of their own: beside the List chooser and the search field, the search
-        # field was squeezed to two letters (live, 2026-11-16); the owner asked whether Also list existing
+        # field was squeezed to two letters (live, 2026-11-16); it was asked whether Also list existing
         # glyphs and the search field could join them (2026-11-16): with List only high-value glyphs beside them, a
         # line of all of them needs about 1,100 pixels (1,300 with the List chooser), so they stay apart. The
         # row's own spacing between the settings, no wider gap: with 12 pixels more after each and Vary turned
         # and mirrored glyphs at its end, this row alone made the tab 1,047 pixels wide at the least, wider
-        # than the window opens (the lead's measure of 2026-11-18, owner's images 307 and 308)
+        # than the window opens (the lead's measure of 2026-11-18, images 307 and 308)
         settings_row = self.settings_row = QtGui.QHBoxLayout()
         self.spins = {}
-        # (label form, "Thin space: [1/6 em]": a noun, a colon, then the control, the "1/" in the spin box; owner's
+        # (label form, "Thin space: [1/6 em]": a noun, a colon, then the control, the "1/" in the spin box;
         # image 271 asked for one form of caption)
         for key, label, help_text in (
                 ("thin", u"Thin space:", u"The thin space's width, and the narrow no-break space's: this share of the "
@@ -2905,8 +2905,8 @@ class GenerationPage(object):
             settings_row.addWidget(spin)
             self.spins[key] = spin
         # Vary turned and mirrored glyphs, under the preview it changes (vary_row, laid out with it below), as
-        # the Diacritics tab's Compact diacritics to fit the line (the owner's report of 2026-11-15): at the
-        # end of the widths' line, it made the tab wider than the window (owner's images 307 and 308). Feature
+        # the Diacritics tab's Compact diacritics to fit the line (report of 2026-11-15): at the
+        # end of the widths' line, it made the tab wider than the window (images 307 and 308). Feature
         # Code's variant changes (freelab_alternates, loaded beside it), off at first
         vary_row = QtGui.QHBoxLayout()
         try:
@@ -2935,7 +2935,7 @@ class GenerationPage(object):
         fit = getattr(cm, "fit_to_contents", None)
         if fit is not None:
             fit(self.vary_strength)
-        self.vary_labels = [cm.helped(QtGui.QLabel(u"Strength:"), vary_help),  # (label form: owner's image 271)
+        self.vary_labels = [cm.helped(QtGui.QLabel(u"Strength:"), vary_help),  # (label form: image 271)
                             cm.helped(QtGui.QLabel(u"Seed:"), vary_help)]
         vary_row.addWidget(self.vary_labels[0])
         vary_row.addWidget(self.vary_strength)
@@ -2973,10 +2973,10 @@ class GenerationPage(object):
                              u"this text, whose character it is, whose Unicode value it is (<i>U+2013</i>, <i>2013</i>), "
                              u"or whose Unicode name holds it (<i>dash</i>). Rows not shown keep their ticks; <i>Tick "
                              u"all</i>, <i>Untick all</i>, and <i>Tick high-value glyphs</i> act on the rows shown.")
-        row.addWidget(self.search_label)  # (left of the field: the field ends at the rows' right edge, owner's image 185)
+        row.addWidget(self.search_label)  # (left of the field: the field ends at the rows' right edge, image 185)
         row.addWidget(self.search)
         # The settings of how the glyphs are drawn first, then what is listed and the search, right over the list
-        # (owner's image 249: "the top line should be below the second one")
+        # (image 249: "the top line should be below the second one")
         settings_row.addStretch(1)
         layout.addLayout(settings_row)
         layout.addLayout(row)
@@ -2995,7 +2995,7 @@ class GenerationPage(object):
         self.lower_line = cm.heading_line(ak) if hasattr(cm, "heading_line") else ak.separator()
         layout.addWidget(self.lower_line)
         lower = QtGui.QHBoxLayout()
-        # The selected row's character in the reference font: the Diacritics tab's very section (owner's images
+        # The selected row's character in the reference font: the Diacritics tab's very section (images
         # 250 and 251: this tab had no Reference heading and no chooser), one choice for both tabs, and a line
         # between it and the preview at its right
         reference_help = u"The selected row's character in the reference font, to compare."
@@ -3181,7 +3181,7 @@ class GenerationPage(object):
         owner = self.owner
         work = getattr(owner, "work_begin", None)
         stopped = owner.stopped_error() if work is not None else NotStopped
-        try:  # (in the window's top row, stoppable: owner's image 176)
+        try:  # (in the window's top row, stoppable: image 176)
             if work is not None:
                 work(u"Reading the font")
             self.read_rows(package, kept)
@@ -3240,7 +3240,7 @@ class GenerationPage(object):
         self.tree.clear()
         bold = QtGui.QFont(self.tree.font)
         bold.setBold(True)
-        try:  # (the rows that cannot be built: dimmed, as on the Diacritics tab; the owner's report of 2026-11-16)
+        try:  # (the rows that cannot be built: dimmed, as on the Diacritics tab; report of 2026-11-16)
             dimmed = QtGui.QBrush(self.owner.dialog.palette.color(QtGui.QPalette.Disabled, QtGui.QPalette.Text))
         except Exception:
             dimmed = None
@@ -3263,7 +3263,7 @@ class GenerationPage(object):
         """The row selected before the list was made again (by its character: run's reselect) selected again,
         and the preview drawn from the rows as planned now. The list is cleared with its signals blocked, so
         the preview kept the glyph as it was before: ticking Vary turned and mirrored glyphs, or another
-        strength or seed, left the old glyph in the preview (owner's image 252)."""
+        strength or seed, left the old glyph in the preview (image 252)."""
         QtCore = _qt()[0]
         wanted = getattr(self, "reselect", None)
         found = None
@@ -3308,7 +3308,7 @@ class GenerationPage(object):
                                               r.name, recipe_text(r, self.settings, self.data.get("rules")),
                                               confidence_text(r), note_text(r)])
                 item.setData(0, QtCore.Qt.UserRole, index)
-                chars = getattr(self.owner, "char_font", None)  # (in FreeLang: owner's images 316 and 317)
+                chars = getattr(self.owner, "char_font", None)  # (in FreeLang: images 316 and 317)
                 item.setFont(0, chars(bold, r.char) if chars is not None else bold)
                 if r.layout is not None:
                     item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
@@ -3386,7 +3386,7 @@ class GenerationPage(object):
         checked = [i for i, r in enumerate(self.rows) if r.checked and r.layout is not None]
         ak.enable(self.build_button, bool(checked))
         self.build_button.setText(self.cm.build_text(len(checked), 0))
-        # (the ticked rows a search hides, which Build builds too: said beside the search, owner's images 331 and 332)
+        # (the ticked rows a search hides, which Build builds too: said beside the search, images 331 and 332)
         args = getattr(self, "count_args", None)
         if args is not None and getattr(self, "search_label", None) is not None:
             try:
@@ -3486,7 +3486,7 @@ class GenerationPage(object):
             section.setHidden(not any_shown)
         self.count_args = (shown, total, query, wanted is not None)  # (update_buttons adds the ticks hidden)
         text = self.cm.search_count(shown, total, query, filtered=wanted is not None)
-        show = getattr(self.cm, "show_count", None)  # (hidden while empty: owner's image 185)
+        show = getattr(self.cm, "show_count", None)  # (hidden while empty: image 185)
         show(self.search_label, text) if show is not None else self.search_label.setText(text)
         self.update_buttons()
 
@@ -3551,7 +3551,7 @@ class GenerationPage(object):
             self.reference_note.setText(u"No reference font has %s." % r.char)
             return
         self.reference.setPixmap(cm.reference_picture(r.char, family, self.owner.dialog.palette))
-        html = getattr(self.owner, "char_html", None)  # (its character in FreeLang: owner's images 316 and 317)
+        html = getattr(self.owner, "char_html", None)  # (its character in FreeLang: images 316 and 317)
         self.reference_note.setText(cm.reference_note(html(r.char) if html is not None else r.char, family, chosen,
                                                       names=getattr(self.owner, "font_names", None)))
 
@@ -3703,7 +3703,7 @@ class GenerationPage(object):
             if found is not None:
                 path.addPath(found)
         # The preview (frame) of a varied glyph outlines it unchanged under it: a change of a degree or two is
-        # what the strengths make, and alone it did not show (owner's image 252)
+        # what the strengths make, and alone it did not show (image 252)
         plain = QtGui.QPainterPath()
         plain.setFillRule(QtCore.Qt.WindingFill)
         if frame and getattr(r.layout, "plain", None) is not None:
@@ -3833,7 +3833,7 @@ class GenerationPage(object):
                 touched[:] = [g for g in touched if u"%s" % getattr(g, "name", u"") != r.name]
 
     def build(self):
-        """Build checked glyphs, in the window's top row (owner's image 176): the other masters planned first,
+        """Build checked glyphs, in the window's top row (image 176): the other masters planned first,
         which can be stopped (nothing is built then); the write never is (one step of FontLab's History)."""
         owner = self.owner
         work = getattr(owner, "work_begin", None)

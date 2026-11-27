@@ -5,7 +5,7 @@ A tool that adds glyphs or code points (Glyph Compose and its Glyph generation t
 Feature Code's forms) changes what the font covers, and the font info declares that coverage: the OS/2
 Unicode ranges and code pages. FontLab 7's export writes them as the font info holds them, never
 recalculated (live 2026-11-18: Bellefair's ranges set to Basic Latin alone were exported so). So the
-tool updates them, along the rule the owner chose: a field changes only where the write itself changed
+tool updates them, along the rule that was chosen: a field changes only where the write itself changed
 what it follows. A bit is set when the write brought its range or code page into the font, cleared when
 the write took the last of it out, and every other bit is left as declared, hand-set ones included.
 The Win ascent and descent are where Windows clips the glyphs: a glyph the write drew above or below

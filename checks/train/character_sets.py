@@ -155,7 +155,7 @@ OPTIONAL_ABOUT = ("optional: {set id: its optional characters, as hexadecimal co
 #   one, so that normalized text never holds it: the CJK compatibility ideographs (duplicates of unified
 #   ones kept for round trips with older standards) and a few others (the Kelvin, Ohm, and angstrom
 #   signs, two angle brackets, two spaces, two combining tone marks), but the Greek ones, which stay
-#   required: the owner, "Let's include all Greek polytonic letters (oxia)": polytonic text keeps the
+#   required: as asked, "Let's include all Greek polytonic letters (oxia)": polytonic text keeps the
 #   letters with oxia, the standalone oxia and varia, prosgegrammeni, the koronis, and the numeral sign
 #   (each a character whose Unicode name says GREEK). The Ohm sign, a duplicate of capital omega whose
 #   name does not, stays optional.

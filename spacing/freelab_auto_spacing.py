@@ -48,7 +48,7 @@ FIXED = u"HOlno08"  # the references and tuning glyphs of the methods: never cha
 TOLERANCE_UNITS = 6  # a side whose suggestion is closer than this to its sidebearing is left out
 GROUPS = (("letters", "Letters"), ("figures", "Letters and figures"), ("all", "Letters, figures, and punctuation"),
           ("everything", "Everything"))  # (other scripts and symbols too, by case)
-DEFAULT_GROUP = "everything"  # the dropdown's choice as the window opens (owner's report 143)
+DEFAULT_GROUP = "everything"  # the dropdown's choice as the window opens (report 143)
 # (Everything takes the categories L, N, P, and S only, and nothing past sys.maxunicode: characters)
 GROUP_HELP = (u"Which glyphs to space. Figures are often tabular (one width for all): leave them out unless they are "
               u"proportional. <i>Everything</i>: every glyph whose character is a letter, a number, punctuation, or a "
@@ -56,7 +56,7 @@ GROUP_HELP = (u"Which glyphs to space. Figures are often tabular (one width for 
               u"U+FFFF are left out.")
 PREVIEW_SIZE = 80  # pixels per em in the previews
 PREVIEW_HEIGHT, PREVIEW_BASELINE = 1.35, 1.05  # a preview's height and its baseline's depth, in ems (its caption over it)
-APPLY_BUTTON = u"Space ticked glyphs"  # (Tick, not Check, for check boxes: owner's image 261)
+APPLY_BUTTON = u"Space ticked glyphs"  # (Tick, not Check, for check boxes: image 261)
 SETTLE_PASSES = 6  # an analysis measures each change again, with it made, at most this many times
 SETTLE_SHARE = 0.002  # a side has settled when measuring it again asks less than this share of the em more
 KERNING_BUTTON = u"Check kerning of these glyphs\N{HORIZONTAL ELLIPSIS}"  # Kerning Check on the glyphs just spaced
@@ -115,13 +115,13 @@ def spacing_status(listed, drawn, tolerance, passes=1, bold=lambda text: u"%s" %
 
 class CannotSpace(ValueError):
     """The font itself stops the analysis (its references missing, or set so that nothing can be measured
-    from them): Analyze would fail the same way until the font changes (owner's image 253: its buttons
+    from them): Analyze would fail the same way until the font changes (image 253: its buttons
     grayed meanwhile)."""
 
 
 def references_failed_text(tuning, reason):
     """The log's words when the font's l, n, and o (tuning: their characters) give nothing to measure
-    by (owner's image 218: "No halo makes ll, nn, oo agree", which said nothing to the user): what Auto
+    by (image 218: "No halo makes ll, nn, oo agree", which said nothing to the user): what Auto
     Spacing tried, why it failed for this font, and what to do (Analyze is grayed meanwhile: the window
     measures again by itself as the font changes). reason: the measuring's own message."""
     letters = list(tuning)
@@ -352,7 +352,7 @@ UNSPACED_SHARE = 0.005  # a reference side closer to its ink than this share of 
 # Each script's straight references (looked at for unspaced sides) and all its references (spaced
 # from the corpus when a straight one looks unspaced): Latin's, Armenian's, Georgian's. Latin's l with
 # them: every glyph is measured against l, n, and o (ll, nn, oo), and n and o spaced without l left ll
-# far from them, so nothing could be spaced after (owner's image 335).
+# far from them, so nothing could be spaced after (image 335).
 REFERENCE_GROUPS = ((u"Hn", u"HOlno0"),
                     (u"Ոո",
                      u"ՈՕո"
@@ -444,7 +444,7 @@ def unspaced_line(references, families, bold=lambda text: u"%s" % text, italic=l
 def composites_text(following, left_out, bold=lambda text: u"%s" % text):
     """The note under the list: how many glyphs built from components follow the listed glyphs, and
     how many built on two of them are left as they are; empty (the note hidden) when neither: "0 glyphs
-    built from components follow the listed glyphs" said nothing worth a line (owner's image 188).
+    built from components follow the listed glyphs" said nothing worth a line (image 188).
     bold: the status line's (ak.b): the count bold with its noun, a number with no noun bold alone
     (round 3's rule: "**3 glyphs** built from components follow ...; **2** built on two of them")."""
     if not following and not left_out:
@@ -565,7 +565,7 @@ class AutoSpacingDialog(object):
         self.ak.size_dialog(dialog)
         layout = self.ak.window_layout(dialog)  # (its content scrolls on a small screen)
         # The header, as every window's: the font line and the status (one label, a line per sentence), the
-        # note on the glyphs built from components (owner: no text under the controls), then the header's line
+        # note on the glyphs built from components (as asked: no text under the controls), then the header's line
         self.status = self.ak.status_label()
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
@@ -580,13 +580,13 @@ class AutoSpacingDialog(object):
         self.log.link_handler = self.log_link  # (a glyph clicked: opened between its references)
         self.seen_history, self.first_checks = None, {}
         # One row, left-aligned: "Show: [Everything]  List changes of at least [6 units].  [x] Glyphs built from
-        # components follow ...  [Analyze]" (owner's images 254 and 262: the tick above the list, Analyze inline)
+        # components follow ...  [Analyze]" (images 254 and 262: the tick above the list, Analyze inline)
         row = QtGui.QHBoxLayout()
         row.addWidget(QtGui.QLabel("Show:"))
         self.group = QtGui.QComboBox()
         for _, label in GROUPS:
             self.group.addItem(label)
-        self.group.setCurrentIndex(default_group())  # (Everything: owner's report 143; set before it is heard)
+        self.group.setCurrentIndex(default_group())  # (Everything: report 143; set before it is heard)
         self.group.setWhatsThis(GROUP_HELP)
         row.addWidget(self.group)
         row.addWidget(QtGui.QLabel("List changes of at least"))
@@ -757,7 +757,7 @@ class AutoSpacingDialog(object):
         return chosen
 
     def run(self):
-        """The current master measured and listed, under the window's top-row progress (owner's image 178:
+        """The current master measured and listed, under the window's top-row progress (image 178:
         "Measuring..." held the window until Windows called it Not Responding); stoppable, the list then
         left empty."""
         if self.busy:
@@ -789,8 +789,8 @@ class AutoSpacingDialog(object):
             self.stopped(u"Measuring")
             return
         except Exception as exc:
-            # The font line kept, the reason in the log (owner's image 224); where the font itself stops the
-            # analysis, Analyze and what feeds it grayed until the font changes (owner's image 253)
+            # The font line kept, the reason in the log (image 224); where the font itself stops the
+            # analysis, Analyze and what feeds it grayed until the font changes (image 253)
             message = u"%s" % exc
             self.failed = isinstance(exc, CannotSpace)
             self.status.setText(head_join(self.ak, self.font_line(), FAILED_TEXT))
@@ -844,7 +844,7 @@ class AutoSpacingDialog(object):
             try:
                 tools[script] = ak.make_bands(core, image_of, names, em, glyphs.pad, script)
             except ValueError as exc:
-                if script == "latin":  # (said in plain words: owner's image 218)
+                if script == "latin":  # (said in plain words: image 218)
                     raise CannotSpace(references_failed_text(ak.SCRIPT_TUNING["latin"], exc))
                 # (no halo makes its tuning letters agree: its letters are spaced by case against H and n)
         scripts = [script for script in scripts if script in tools]
@@ -1122,7 +1122,7 @@ class AutoSpacingDialog(object):
         self.ak.enable(self.follow, bool(items))  # nothing listed: nothing for it to act on
         # No font: nothing to pick glyphs from; nothing measured: no list for the tolerance to filter. The font
         # itself stopping the analysis (CannotSpace): Analyze and the choice that only feeds it grayed, nothing
-        # they could do, until the font changes (owner's image 253; run measures again as it does)
+        # they could do, until the font changes (image 253; run measures again as it does)
         failed = getattr(self, "failed", False)
         self.ak.enable(self.group, self.package is not None and not self.busy and not failed)
         self.ak.enable(self.tolerance, bool(self.spacings))
@@ -1365,7 +1365,7 @@ class AutoSpacingDialog(object):
                     moved = self.follow_composites(totals)
             except CannotSpace:
                 pass  # (the font can no longer be measured: the analysis after the write says so, once; it was
-                # said twice, the second time as an error, owner's image 335)
+                # said twice, the second time as an error, image 335)
             except Exception as exc:  # what was changed stays changed, and is reported
                 error = exc
             finally:
@@ -1390,7 +1390,7 @@ class AutoSpacingDialog(object):
         if totals:
             lines.append(u"The kerning was set for the old spacing: click %s to see whether pairs with these glyphs now "
                          u"collide, or run %s again with <i>Include existing kerned pairs</i>." % (
-                             ak.i(KERNING_BUTTON), ak.tool_link(u"Auto Kerning")))  # (a link: owner's image 220)
+                             ak.i(KERNING_BUTTON), ak.tool_link(u"Auto Kerning")))  # (a link: image 220)
         lines.append(status.undo(u"<i>Edit &gt; Undo</i> (or the <i>History</i> panel) takes it back."))
         self.log.add(u" ".join(line for line in lines if line), "done" if totals else "info")
         status.report(self.log)
@@ -1574,7 +1574,7 @@ def shape_span(shape, component_box=None):
     glyph's own box (component_box(name), in that glyph's units) placed by the component's transform.
     A zero-width mark is drawn left of its origin (circumflexbelowcomb at about -300 to -100), so its
     box in its own units read as the layer's put it far before the composite's start: ucircumflexbelow
-    was named as sticking out though its mark sat well inside its 451 units (owner's images 144/146).
+    was named as sticking out though its mark sat well inside its 451 units (images 144/146).
     Else, or when that cannot be read, the shape's own box."""
     name = component_glyph(shape) if component_box is not None else None
     if name:

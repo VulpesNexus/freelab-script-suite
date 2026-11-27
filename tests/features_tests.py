@@ -287,7 +287,7 @@ class LoclTests(unittest.TestCase):
         self.assertIsNone(parse(full, names))
 
     def test_a_language_the_fonts_code_sets_is_never_set_again(self):
-        # Owner's report 153 (Bellefair): the font's own locl sets CAT, MOL, and ROM; checked, FreeLab's block
+        # Report 153 (Bellefair): the font's own locl sets CAT, MOL, and ROM; checked, FreeLab's block
         # beside it set "language CAT;" again, and FontLab's compiler stopped ("language-specific behavior
         # already specified"), at every write after
         own = (u"feature locl {\n  script latn;\n  language CAT;\n  lookup locl_cat {\n    sub l periodcentered' l by ldot;\n"
@@ -301,7 +301,7 @@ class LoclTests(unittest.TestCase):
         self.assertEqual(locl.kind, "hand")
         left = [rule for rule in locl.rules if rule.data["language"] in ("CAT", "MOL", "ROM")]
         self.assertTrue(left and all(rule.warning and not rule.on for rule in left), "shown, never written")
-        locl.on = True  # (checked, as the owner did)
+        locl.on = True  # (checked, as in the review)
         for rule in locl.rules:
             rule.on = True  # (even so)
         code = lines_of(locl)
@@ -1769,7 +1769,7 @@ class CheckBoxTests(unittest.TestCase):
 
 
 class HighlightTests(unittest.TestCase):
-    """The Code box's colors (the owner, 2026-11-14: "syntax highlighting would be neat")."""
+    """The Code box's colors (the review of 2026-11-14: "syntax highlighting would be neat")."""
 
     def kinds(self, line, in_list=False):
         spans, still_open = fc.fea_spans(line, in_list)
@@ -1826,7 +1826,7 @@ class HighlightTests(unittest.TestCase):
 
 
 class DrawnBoxTests(unittest.TestCase):
-    """What tells a thickened form FontLab draws as it was (the owner saw no difference at 130%)."""
+    """What tells a thickened form FontLab draws as it was (no difference was seen at 130%)."""
 
     def test_the_drawn_box_against_the_nodes(self):
         square = [[(0.0, 0.0, True, True), (10.0, 0.0, True, True), (10.0, 10.0, True, True), (0.0, 10.0, True, True)]]
@@ -2010,7 +2010,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.build_button.text, u"Build 30 ticked figure forms")
         self.assertEqual(self.small_section(dialog, "subscript").child(0).checkState(0), UNCHECKED)
         sups = self.small_section(dialog, "sups")
-        # Owner's report 159: a folded group showed nothing in the other columns (its first column spanned them)
+        # Report 159: a folded group showed nothing in the other columns (its first column spanned them)
         self.assertEqual(sups.text(1), u"10 of 10 glyphs ticked")
         self.assertEqual(sups.text(2), u"10 scaled from their figures", "a short note of what its rows say")
         self.assertEqual(self.small_section(dialog, "superscript").text(2),
@@ -2060,7 +2060,7 @@ class DialogTests(unittest.TestCase):
         self.assertIn("sups", tags)
         self.assertIn("subs", tags)
         # What was built stays listed (a build replaces it once its settings change), checked as built; the
-        # button grays out, nothing checked would change (owner's report 160), and says why
+        # button grays out, nothing checked would change (report 160), and says why
         self.assertEqual([item.data(0, USER_ROLE) for item in dialog.small_tree.items],
                          ["sups", "superscript", "subs", "subscript"])
         self.assertEqual(sorted(dialog.small_ours), sorted(t.split(u'">')[0] for t in
@@ -2179,7 +2179,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(states, {"often": False, "all": True, "none": True})
         dialog.check_turns("all")
         self.assertEqual(len(dialog.cycling()), len(letters))
-        # Owner's report 118: these buttons left no line in the log
+        # Report 118: these buttons left no line in the log
         self.assertEqual(self.logged[-1], ("info", u"<i>Tick all</i> ticked <b>%d glyphs</b>." % (len(letters) - 60)))
         self.assertIn(u"<b>by position</b>", dialog.turn_label.text)
         texts = dialog.new_texts()
@@ -2261,7 +2261,7 @@ class DialogTests(unittest.TestCase):
         dialog.check_turns("often")
         self.assertEqual(set(dialog.cycling()), dialog.often, "the button checks the figures and marks often doubled too")
         self.assertEqual([label for _, label, _ in fc.TURN_CHECKS], [u"Tick all", u"Untick all", u"Tick often doubled"],
-                         "the suite's order (owner's images 260, 261): Tick, not Check, all and none first")
+                         "the suite's order (images 260, 261): Tick, not Check, all and none first")
         self.assertEqual(dialog.kind(u"9"), fc.FIGURES)
         self.assertTrue(dialog.doubled(u".") and dialog.doubled(u"0") and not dialog.doubled(u"/"))
 
@@ -2350,7 +2350,7 @@ class DialogTests(unittest.TestCase):
 
     def test_progress_in_the_top_row_reads_stop_writes_do_not(self):
         """progress() processed every event during writes and builds, so a click or a key acted on the font
-        while it was being changed; it is the window's top row now (ak.busy_*: owner's image 180), which holds
+        while it was being changed; it is the window's top row now (ak.busy_*: image 180), which holds
         them but the tools menu, the arrows, Close, and Esc: those stop a read, and wait for a write."""
         features = FakeFeatures({})
         package, letters = self.big_font(features)
@@ -2397,7 +2397,7 @@ class DialogTests(unittest.TestCase):
         self.assertTrue(dialog.sets)
 
     def test_cancel_is_usable_while_the_font_is_read_not_while_it_is_written(self):
-        """The owner, 2026-11-24: a Cancel left of Close (test_the_bottom_row_holds_the_shown_tabs_buttons), grayed
+        """The review of 2026-11-24: a Cancel left of Close (test_the_bottom_row_holds_the_shown_tabs_buttons), grayed
         but while work that can stop runs (ak.cancel_button), as Esc stops it; its help says what a stop leaves."""
         import qtfakes
         features = FakeFeatures({})
@@ -2423,7 +2423,7 @@ class DialogTests(unittest.TestCase):
                          "grayed while it writes, usable as the font is read again")
 
     def test_set_enabled_keeps_the_no_font_gate(self):
-        """Owner's images 201 to 210: a control the shared module grayed for want of a font (ak.NO_FONT_PROP)
+        """Images 201 to 210: a control the shared module grayed for want of a font (ak.NO_FONT_PROP)
         stays grayed whatever the tool asks; ak.no_font_states gives it back with a font."""
         button = FakeButton()
         button.property = lambda name: True if name == self.ak.NO_FONT_PROP else None
@@ -2436,7 +2436,7 @@ class DialogTests(unittest.TestCase):
         self.assertTrue(button.enabled)
 
     def test_empty_notes_take_no_line(self):
-        """Owner's images 197 and 198: empty labels under "Figure forms to build" and "Suggested alternates"
+        """Images 197 and 198: empty labels under "Figure forms to build" and "Suggested alternates"
         left blank lines: a note is hidden while it says nothing."""
         label = FakeEdit()
         shown = []
@@ -2464,7 +2464,7 @@ class DialogTests(unittest.TestCase):
         dialog.history_moved()
         self.assertEqual(sorted(dialog.cycling()), [u"H", u"l"], "an undo in FontLab: the checks kept")
 
-    # -- the owner's round of 2026-11-13 ------------------------------------------------
+    # -- the round of 2026-11-13 ------------------------------------------------
 
     def test_every_row_of_the_forms_list_is_as_high_as_a_row_with_a_picture(self):
         """The Forms list looked crammed beside the window's other lists: a feature's row and its rows
@@ -2569,7 +2569,7 @@ class DialogTests(unittest.TestCase):
         for box in (dialog.small_scale, dialog.small_baseline, dialog.small_width, dialog.small_reset, dialog.stroke_box):
             self.assertIn(box, row.widgets)
         self.assertEqual(row.widgets[-1], dialog.small_reset,
-                         "Suggested last, after Strokes, which it puts back too (owner's report 158)")
+                         "Suggested last, after Strokes, which it puts back too (report 158)")
         self.assertNotIn(dialog.build_button, row.widgets, "the build button stays under the list")
         self.assertFalse(hasattr(dialog, "small_why"), "no sentence beside the button")
         dialog.small_set_picked(fc.SMALL_SETS.index("numr"))
@@ -2578,7 +2578,7 @@ class DialogTests(unittest.TestCase):
                          u"back at 107% (for every set). This set's suggestion: as most open-licensed fonts.")
         self.assertEqual(dialog.small_reset.tip, u"<table width=\"520\" cellspacing=\"0\" cellpadding=\"0\"><tr><td>%s"
                                                  u"</td></tr></table>" % dialog.small_reset.whats)
-        dialog.small_first["sups"]["why"] = u"As the font's 5 drawn forms."  # (what the owner's font said)
+        dialog.small_first["sups"]["why"] = u"As the font's 5 drawn forms."  # (what the font reviewed said)
         dialog.small_set_picked(fc.SMALL_SETS.index("sups"))
         self.assertTrue(dialog.small_reset.whats.endswith(u"This set's suggestion: as the font's 5 drawn forms."),
                         "the picked set's own")
@@ -2595,7 +2595,7 @@ class DialogTests(unittest.TestCase):
         set while the font was read again, the lists' part disabled meanwhile, through a helper that
         leaves a widget alone when it reports the state asked for (a widget in a disabled container
         reports disabled). The same after an undo, and for the buttons that check the turns. Since the
-        owner's round of 2026-11-14 a build leaves what it built listed, and the button clickable (a
+        the round of 2026-11-14 a build leaves what it built listed, and the button clickable (a
         click with nothing changed says so): it grays out only with nothing checked."""
         ContainedButton.container_disabled = False
         dialog = self.dialog(FakeFeatures({}), classes={"QPushButton": ContainedButton, "QSplitter": BusySplitter})
@@ -2607,7 +2607,7 @@ class DialogTests(unittest.TestCase):
         self.assertFalse(ContainedButton.container_disabled, "the lists answer again")
         self.assertEqual(len(dialog.small_tree.items), 4, "what was built is listed again, to replace")
         self.assertEqual(dialog.build_button.text, u"Build ticked figure forms")
-        # Owner's report 160: it stayed clickable, and a click only said "Nothing changed since the last build"
+        # Report 160: it stayed clickable, and a click only said "Nothing changed since the last build"
         self.assertFalse(dialog.build_button.enabled, "built with these settings: nothing a build would change")
         self.assertTrue(dialog.build_button.whats.endswith(
             u"Grayed out: the 40 figure forms ticked were built here with these very settings, so a build would "
@@ -2657,7 +2657,7 @@ class DialogTests(unittest.TestCase):
         return dialog, package
 
     def test_strokes_thickens_what_is_built_by_its_share(self):
-        """The owner: whatever the value of Strokes, the built glyphs' thickness did not appear to change,
+        """The review: whatever the value of Strokes, the built glyphs' thickness did not appear to change,
         while the log said "strokes at 130% of the scaled ones". On a figure that is one stem 80 units
         wide, scaled to 59%: the stem written is 47.2 units at 100% (a component), 1.07 times that at
         107%, and 1.30 times that at 130%, measured on the nodes written."""
@@ -2700,7 +2700,7 @@ class DialogTests(unittest.TestCase):
                           u" (each side moved out 6.6 to 7.6 units)", u" (each side moved out 2 units)"])
 
     def test_settings_typed_and_not_entered_are_built(self):
-        """Owner's report: 100 typed in Strokes over 130, then Build without Enter, built at 130. The build
+        """Report: 100 typed in Strokes over 130, then Build without Enter, built at 130. The build
         reads every box as it starts: a scale typed (no valueChanged yet) and Strokes."""
         dialog = self.recorded(FakeFeatures({}))
         package = dialog.package
@@ -2716,7 +2716,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.small_setup["sups"]["scale"], 0.5, "the setting follows the box")
 
     def test_strokes_that_cannot_apply_are_said(self):
-        """Owner's report 156: Strokes at 100% and 130% built the same glyphs, and the log said only "Scaling
+        """Report 156: Strokes at 100% and 130% built the same glyphs, and the log said only "Scaling
         thins strokes": where the figures' stroke cannot be measured (or a figure is made of components),
         the forms are made of components, scaled, and the log says so, with why."""
         def unmeasured(dialog):
@@ -2747,7 +2747,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(len(warnings), 1, self.logged)
         self.assertTrue(warnings[0].startswith(u"FontLab did not keep the thicker strokes of <b>10 glyphs</b>: "
                                                u'<a href="glyphname:'), warnings[0])
-        # (each count bold with its noun; a number whose noun is outside, bold alone: owner's images 297, 301)
+        # (each count bold with its noun; a number whose noun is outside, bold alone: images 297, 301)
         self.assertTrue(warnings[0].endswith(u"Read back, their outlines were as scaled (<b>40 nodes</b> in <b>10 "
                                              u"contours</b>, <b>40</b> on-curve, <b>40</b> given a new place, <b>0</b> "
                                              u"found there): draw over them."), warnings[0])
@@ -2760,10 +2760,10 @@ class DialogTests(unittest.TestCase):
                       MARKUP.sub(u"", warnings[0]))
         self.assertNotIn(u"strokes at 130%", [t for level, t in self.logged if level == "done"][-1])
 
-    # -- the owner's round of 2026-11-14 ------------------------------------------------
+    # -- the round of 2026-11-14 ------------------------------------------------
 
     def test_strokes_are_drawn_where_their_nodes_are(self):
-        """The owner, of Strokes at 130%: "I still see no visible difference", while the log said the
+        """The review, of Strokes at 130%: "I still see no visible difference", while the log said the
         strokes were thickened and the nodes read back where they were put. FontLab keeps a node's x
         and y set from a script, but the shape it draws (its box) did not follow them (seen live). The
         fakes' shapes draw what they held when made, transformed, given contours, or updated: the
@@ -2787,7 +2787,7 @@ class DialogTests(unittest.TestCase):
         self.assertGreaterEqual(shape.updates, 1)
         self.assertAlmostEqual(shape.drawn[2] - shape.drawn[0], scaled * 1.3, delta=0.5, msg="drawn as thick")
         self.assertIn(u"strokes at 130% of the scaled ones", [t for level, t in self.logged if level == "done"][-1])
-        # A shape that draws what it drew whatever its nodes (the case the owner saw): said, not assumed
+        # A shape that draws what it drew whatever its nodes (the case seen): said, not assumed
         dialog, package = self.strokes_built(130, new_shape=no_new_shape, shape=StaleShape)
         done = [t for level, t in self.logged if level == "done"][-1]
         self.assertNotIn(u"strokes at 130%", done)
@@ -2892,7 +2892,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(replanned, [True], "Strokes plans again: the pictures and the count follow")
 
     def test_a_build_replaces_what_it_built_and_nothing_else(self):
-        """The owner: the build button "should just remain visible and simply replace the previously-created
+        """The review: the build button "should just remain visible and simply replace the previously-created
         glyphs (if values changed or new features were ticked)". What this window built stays listed while
         nobody changes it; a build with other settings makes it again in place, as one step of the
         History; with nothing changed it says so and builds nothing; a glyph drawn over since is left."""
@@ -2961,8 +2961,8 @@ class DialogTests(unittest.TestCase):
         self.assertIn(u"<i>Esc</i>", dialog.top_line.whats)
 
     def test_the_code_part_is_named_code_preview_and_colored(self):
-        """The owner: "it should just be 'Code'; also, syntax highlighting would be neat." Then (owner's
-        image 299): "Code preview", so people understand they still have to write it. The heading reads
+        """The review: "it should just be 'Code'; also, syntax highlighting would be neat." Then (image
+        299): "Code preview", so people understand they still have to write it. The heading reads
         Code preview, everywhere the part is named; the box is colored by a highlighter whose colors follow
         the palette, shown plain past HIGHLIGHT_LINES lines (each click makes the code again, and Qt colors
         every line again); where PythonQt cannot make the highlighter, the box stays plain."""
@@ -3051,7 +3051,7 @@ class DialogTests(unittest.TestCase):
         dialog.show_code(u"\n".join([u"sub a by b;"] * (fc.HIGHLIGHT_LINES + 1)))
         self.assertIsNone(highlighter.document)
         self.assertFalse(dialog.highlighting.attached)
-        # (said in the heading: the owner took plain code for a fault, 2026-11-24)
+        # (said in the heading: plain code was taken for a fault, 2026-11-24)
         self.assertEqual(dialog.code_heading.text, u"Code preview (shown plain: more than 2,000 lines)")
         dialog.show_code(u"sub a by b;")
         self.assertEqual(dialog.code_heading.text, fc.CODE_HEADING)
@@ -3068,7 +3068,7 @@ class DialogTests(unittest.TestCase):
         self.assertIn(u"feature", dialog.code_text)
 
     def test_alternates_that_take_turns_say_where_they_are_built(self):
-        """The owner: "some kind of indication in the 'Alternates that take turns' section that such
+        """The review: "some kind of indication in the 'Alternates that take turns' section that such
         alternates need to be built in 'Stylistic alternates' when there are none". The section says so,
         naming the tab as it is named, a link that opens it; the look back and the check buttons, which
         have nothing to act on, are grayed out."""
@@ -3094,7 +3094,7 @@ class DialogTests(unittest.TestCase):
         self.assertTrue(dialog.look_back.enabled)
 
     def test_with_no_font_nothing_acts_and_the_window_follows_the_fonts(self):
-        """The owner: audit "what currently remains clickable or visible when there's nothing loaded".
+        """The review: audit "what currently remains clickable or visible when there's nothing loaded".
         With no font, no control that acts on a font takes a click on any of the three tabs, and nothing
         of the font closed stays shown (its code, its lists); the window takes the next font opened
         (the shared module calls font_changed), read as at the window's opening."""
@@ -3107,7 +3107,7 @@ class DialogTests(unittest.TestCase):
         self.assertTrue(dialog.small_reset.enabled)
         dialog.small_suggested()
         self.assertFalse(dialog.small_reset.enabled)
-        # Owner's report 158: changing Strokes left Suggested grayed out; it puts Strokes back now
+        # Report 158: changing Strokes left Suggested grayed out; it puts Strokes back now
         dialog.stroke_box.setValue(130)
         dialog.stroke_box.slots["valueChanged(int)"][0](130)
         self.assertTrue(dialog.small_reset.enabled, "Strokes changed: something to put back")
@@ -3152,7 +3152,7 @@ class DialogTests(unittest.TestCase):
         self.assertTrue(self.logged[-1][1].startswith(u"The font could not be read"), self.logged[-1])
 
 
-    # -- the owner's round of 2026-11-17 (images 212 to 282) --------------------------------
+    # -- the round of 2026-11-17 (images 212 to 282) --------------------------------
 
     def with_lines(self, features):
         """A recorded dialog whose separators are recorded too (each a Recorded, header and vertical kept)."""
@@ -3169,7 +3169,7 @@ class DialogTests(unittest.TestCase):
             self.ak.separator = separator
 
     def test_the_header_names_the_font_over_the_status_and_its_separator(self):
-        """Owner's images 217, 222, 223, 224: the window started with its tab bar (the busy bar ran into it),
+        """Images 217, 222, 223, 224: the window started with its tab bar (the busy bar ran into it),
         and its first line mixed the font's name with the counts. The top line names the font and its
         master (ak.font_named), the status lines under it, then the header's separator, then the tabs; a
         heading that follows a list or previews has a line over it (image 234), and the two previews a line
@@ -3184,7 +3184,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.top_line.text, self.ak.sentences(self.ak.font_named(u"Fake", u"Regular", 1)))
         self.assertNotIn(u"Fake", dialog.status.text, "the font is named once, in the top line")
         self.assertIn(u"Forms: <b>12 of 12 form features</b> ticked (", dialog.status.text)
-        # (a number inside the parentheses, its noun outside them, bold alone: owner's images 297 and 301)
+        # (a number inside the parentheses, its noun outside them, bold alone: images 297 and 301)
         self.assertIn(u"<b>1 ligature</b> (<b>1</b> standard, <b>0</b> discretionary, <b>0</b> off)", dialog.status.text)
         labels = [w for w in made if isinstance(w, RECORDED["QLabel"])]
         for heading in (u"Alternates that take turns", u"Figure forms to build", u"Code preview",
@@ -3193,27 +3193,27 @@ class DialogTests(unittest.TestCase):
             before = made[made.index(label) - 1]
             self.assertTrue(is_line(before) and not before.header, "a line over %s" % heading)
         self.assertEqual(len([line for line in lines if line.vertical]), 1, "a line between the two previews")
-        self.assertNotIn(u"Variants that take turns (handwriting)", [w.text for w in labels], "owner's image 244")
+        self.assertNotIn(u"Variants that take turns (handwriting)", [w.text for w in labels], "image 244")
         # A read stopped: the top line still names the font (image 224)
         dialog.read_stopped()
         self.assertEqual(dialog.top_line.text, self.ak.sentences(self.ak.font_named(u"Fake", u"Regular", 1)))
         self.assertIn(u"Reading the font was stopped", dialog.status.text)
 
     def test_the_bottom_row_holds_the_shown_tabs_buttons(self):
-        """Owner's images 258, 260, 264: the turns' Check buttons stood over their list, the figure forms'
+        """Images 258, 260, 264: the turns' Check buttons stood over their list, the figure forms'
         build between the list and its splitter handle, the third tab's under its list. Every tick and build
         button is in the window's bottom row, those of the tab shown visible: Tick buttons at the left, then
         Restore suggestions; Compile after writing, the builds, Update the code, and Close at the right."""
         dialog = self.recorded(FakeFeatures({}))
         page = dialog.alternates
         row = [r for r in RecordedRow.made if dialog.close_button in r.widgets][0]
-        # (owner's image 298: the write button right after Compile after writing, the tick that is about it)
+        # (image 298: the write button right after Compile after writing, the tick that is about it)
         self.assertEqual(row.widgets, list(dialog.turn_buttons) + [page.all_button, page.none_button, dialog.restore_button,
                                                                    dialog.compile_box, dialog.write_button,
                                                                    dialog.build_button, page.copy_button,
                                                                    page.build_button, dialog.cancel_button,
                                                                    dialog.close_button])
-        self.assertEqual(dialog.cancel_button.text, u"Cancel", "right before Close (owner, 2026-11-24)")
+        self.assertEqual(dialog.cancel_button.text, u"Cancel", "right before Close (the review of 2026-11-24)")
         self.assertEqual([button.text for button in dialog.turn_buttons],
                          [u"Tick all", u"Untick all", u"Tick often doubled"])
         moved = list(dialog.turn_buttons) + [dialog.build_button, page.build_button, page.copy_button, page.all_button]
@@ -3229,11 +3229,11 @@ class DialogTests(unittest.TestCase):
         shifted = [button for buttons in left + right for button in buttons]
         own = (dialog.restore_button, dialog.compile_box, dialog.write_button, dialog.cancel_button, dialog.close_button)
         self.assertEqual([w for w in own if w in shifted], [], "the window's own buttons stay whatever the tab")
-        self.assertEqual(fc.build_label(62), u"Build 62 ticked figure forms", "named for its section (owner's image 258)")
+        self.assertEqual(fc.build_label(62), u"Build 62 ticked figure forms", "named for its section (image 258)")
         self.assertIsNotNone(page.parts, "the third tab's two parts share a splitter, as the other tabs' (image 259)")
 
     def test_the_ligatures_boxes_are_set_once_their_columns_are_sized(self):
-        """Owner's image 221: while the forms were read, the Feature column's boxes stood over the Replaces
+        """Image 221: while the forms were read, the Feature column's boxes stood over the Replaces
         column. Each box is placed where its cell is when it is set, and the columns were sized after: the
         rows come first, the columns are sized, then the boxes are set and the list laid out at once, its
         rows hidden meanwhile (ak.quiet_list)."""
@@ -3923,7 +3923,7 @@ class PlaceNodeTests(unittest.TestCase):
 
 
 class SameCodeTests(unittest.TestCase):
-    """Owner's images 341, 363, and 365: code FontLab hands back spaced otherwise is the same code."""
+    """Images 341, 363, and 365: code FontLab hands back spaced otherwise is the same code."""
 
     def test_spaces_and_line_breaks_do_not_count(self):
         written = u"feature liga {\n# >>> FreeLab ligatures\n  sub f f t by f_f_t;\n# <<< FreeLab ligatures\n} liga;\n"

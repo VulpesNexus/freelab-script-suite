@@ -89,8 +89,8 @@ CUSTOM_SETS_FILE = u"font_check_sets.json"  # in FreeLab's settings folder (ak.s
 CUSTOM_GROUP = u"Your sets"  # their section in the Character sets tab
 PASTED_KEY, PASTED_NAME = u"custom-pasted", u"Pasted characters"
 TABS = ("coverage", "metrics", "masters")
-NOT_AVAILABLE = u"n/a"  # a dropdown of the font's masters with no font: grayed (owner's image 289), never empty
-# The fields' placeholders end with an ellipsis, not a period (owner's image 309); a single word stays as it is
+NOT_AVAILABLE = u"n/a"  # a dropdown of the font's masters with no font: grayed (image 289), never empty
+# The fields' placeholders end with an ellipsis, not a period (image 309); a single word stays as it is
 SEARCH_PLACEHOLDER = u"Find a language, a character set, or a family\N{HORIZONTAL ELLIPSIS}"
 PASTE_PLACEHOLDER = u"Paste text or characters to check as a set of your own\N{HORIZONTAL ELLIPSIS}"
 NAME_PLACEHOLDER = u"Name"
@@ -731,7 +731,7 @@ SPACE_WORDS = {0x00A0: u"no-break", 0x202F: u"narrow no-break"}
 def masters_status(failing, glyphs, masters, reference, unread=0, b=lambda text: text):
     """The Masters view's status line: failing glyphs of glyphs that do not interpolate, of masters compared
     with the reference master; unread: glyph layers that could not be read. Each count bold with its noun
-    ("**12 of the 2,000 glyphs**", "all **4 masters**": owner's images 297 and 301)."""
+    ("**12 of the 2,000 glyphs**", "all **4 masters**": images 297 and 301)."""
     if failing:
         text = u"%s %s interpolate, compared with %s." % (
             b(u"%s of the %s" % (u"{0:,}".format(failing), counted(glyphs, u"glyph"))),
@@ -805,7 +805,7 @@ def linked_spaces(target):
 def spaces_note(has, listed=()):
     """The line the log gives the spaces the font lacks that no row lists (u"" for none): the no-break
     spaces first, then the figure, thin, hair, en, and em spaces. Glyph Compose named in it is a link
-    that opens it with these spaces listed and ticked on its Glyph generation tab (owner's image 313: the
+    that opens it with these spaces listed and ticked on its Glyph generation tab (image 313: the
     tool's link opened it on its first tab, with nothing done)."""
     lacking = [(code, SPACE_WORDS[code]) for code in NO_BREAK_SPACES if not has(code) and code not in listed]
     lacking += [(code, word) for code, word in OTHER_SPACES if not has(code)]
@@ -872,7 +872,7 @@ def declared_note(module, differences, html):
     button that declares it (u"" when it does not differ)."""
     if not differences:
         return u""
-    # (the button, in the bottom row, rather than a link the log alone showed: owner's image 372)
+    # (the button, in the bottom row, rather than a link the log alone showed: image 372)
     return (u"The font info's coverage differs from the glyphs: %s. <i>%s</i> declares what the font covers "
             u"(<i>Edit &gt; Undo</i> takes it back)." % (html(coverage_differences(module, differences)), DECLARE_BUTTON))
 
@@ -2593,7 +2593,7 @@ def required_rows(rows, selection, wanted, most):
 
 def selection_text(selection, left, b=None):
     """The line over the selection's own tab: whose missing characters it lists, how many, and how to
-    unselect (b: how its name, and each count with its noun, are set in rich text: owner's images 297, 301)."""
+    unselect (b: how its name, and each count with its noun, are set in rich text: images 297, 301)."""
     if selection is None:
         return u""
     c = b or (lambda text: text)
@@ -2665,7 +2665,7 @@ def busy_share(done, part=0.0):
 
 def counted_sets(results):
     """The character sets the top line and the log's count count: the data's, but the scripts (counted
-    apart), the user's own, and the Legacy group's (wholly optional, always covered: the owner, "they
+    apart), the user's own, and the Legacy group's (wholly optional, always covered: as the review put it, "they
     do not count towards the stats"; their rows still say what the font lacks of them)."""
     return [r for r in results if r.language.script not in (CUSTOM_GROUP, LEGACY_GROUP)
             and not isinstance(r.language, ScriptSet)]
@@ -2705,7 +2705,7 @@ def sets_sentence(results, b=lambda text: text):
         if whole:
             text += u" %s of Unicode's %d %s covered whole." % (b(counted(whole, u"script")), len(scripts),
                                                                 u"is" if whole == 1 else u"are")
-        else:  # ("0 scripts … are" read as a plural left unmade, owner, 2026-11-16)
+        else:  # ("0 scripts … are" read as a plural left unmade, the review of 2026-11-16)
             text += u" %s of Unicode's %d is covered whole." % (b(u"No script"), len(scripts))
     return text
 
@@ -2846,7 +2846,7 @@ def gain_text(checked_count, gained, bold=None):
             scripts[group] = 0
             order.append(group)
         scripts[group] += 1
-    glyphs = counted(checked_count, u"glyph")  # (bold with its noun, as the count gained: owner's images 297, 301)
+    glyphs = counted(checked_count, u"glyph")  # (bold with its noun, as the count gained: images 297, 301)
     head = u"With %s ticked: " % (bold(glyphs) if bold else glyphs)
     if not gained:
         return head + u"no language is complete yet"
@@ -2887,7 +2887,7 @@ def html_text(text):
     return u"%s" % text.replace(u"&", u"&amp;").replace(u"<", u"&lt;").replace(u">", u"&gt;")
 
 
-# ("Tick", not "Check": owner's image 261, Check is the verb of the button that runs the check)
+# ("Tick", not "Check": image 261, Check is the verb of the button that runs the check)
 CHECK_BUTTONS = (("all", u"Tick all"), ("none", u"Untick all"), ("buildable", u"Tick only what Glyph Compose can build"))
 
 
@@ -2935,7 +2935,7 @@ def script_text(s):
 def absent_caption(count):
     """The check box under the scripts, its caption a sentence with the count of the scripts it shows
     (None: not known yet, before the first check: no count is shown as a zero). A tick's caption that is a
-    sentence ends with a period (owner's image 324); one that names a thing (a feature, a section) has none."""
+    sentence ends with a period (image 324); one that names a thing (a feature, a section) has none."""
     if count is None:
         return u"Show the scripts whose glyphs are fully missing from the font."
     return u"Show the %s whose glyphs are fully missing from the font." % counted(count, u"script")
@@ -3086,7 +3086,7 @@ def extreme_notes(extents):
     """{glyph name: its note in the diagram} for the glyph whose ink reaches highest and the one reaching
     lowest (each among extreme_glyphs' pictures: the first tallest, and the lowest, in the tallest or the
     first deepest): "highest", "lowest", "highest and lowest" for one glyph that is both, each with how
-    many other glyphs reach the same value, in whole units ("highest (and 3 others)"). The owner's image
+    many other glyphs reach the same value, in whole units ("highest (and 3 others)"). Image
     215: the diagram did not say which glyph was which, nor that others reach as far."""
     top, bottom = {}, {}
     for e in extents:
@@ -3750,7 +3750,7 @@ def elided_text(text, width, measure):
 def tab_texts(texts, current, room, measure, pad=TAB_PAD):
     """The texts a tab bar of room pixels shows (texts: its tabs' whole names; current: the tab chosen):
     all whole when they fit; else the chosen tab's whole and the others elided with an ellipsis to share
-    what it leaves, a short one kept whole when it fits in its share (the owner's report 125: the bar's
+    what it leaves, a short one kept whole when it fits in its share (report 125: the bar's
     scroll arrows hid a tab; an elided tab is whole again once chosen)."""
     texts = list(texts)
     widths = [measure(text) + pad for text in texts]
@@ -3800,7 +3800,7 @@ def column_widths(room, wanted, taker=0, giving=(), least=None, pinned=None):
         free = free or [column for column in reversed(range(count)) if column not in pinned]
         taker = free[0] if free else None
     giving = [column for column in giving if column != taker and column not in pinned]
-    # A column dragged never takes the room the others need at their least (owner's image 214: dragged
+    # A column dragged never takes the room the others need at their least (image 214: dragged
     # past the frame, it left every other column at nothing): the widest it keeps leaves the taker and
     # the giving columns their least (PINNED_FLOOR at least), the other columns as wide as they want
     # (they never give way), and a column dragged too its width (PINNED_FLOOR until it is capped itself).
@@ -4283,7 +4283,7 @@ def diagram_pixmap(width, height, lines, pictures, line, upm, win, colors, font)
                                  elided(font, p.master, int(column)))
                 lines_down = 2
             note = getattr(p, "note", u"")
-            if note:  # (which glyph reaches highest, which lowest: owner's image 215)
+            if note:  # (which glyph reaches highest, which lowest: image 215)
                 painter.setPen(faded(text, QUIET_ALPHA))
                 painter.drawText(rect.translated(0, line_height * lines_down), int(QtCore.Qt.AlignCenter),
                                  elided(font, note, int(column)))
@@ -4612,7 +4612,7 @@ class RightView(object):
 
 # Each tab's lists: every script's ("full"), the last three scripts chosen above (SCRIPT_MODES, the least
 # recently shown given to a new script), and a search's finds ("search"), each kept as it was filled. The
-# owner: "Clicking from one script to another can freeze up for a few seconds without visual feedback": one
+# review: "Clicking from one script to another can freeze up for a few seconds without visual feedback": one
 # list for both, the whole Languages list (1,800 rows on Noto Sans) was made anew at each click between a
 # script and All scripts, and back; with one script's list, Latin's 2,108 rows were made anew after a click
 # on Cyrillic (live: 0.125 s the second time)
@@ -4642,7 +4642,7 @@ RIGHT_TABS = (("languages", u"Languages"), ("sets", u"Character sets"), ("famili
 RIGHT_NOUNS = {"languages": (u"language", u"languages"), "sets": (u"character set", u"character sets"),
                "families": (u"language", u"languages")}
 # The Families tab's last node: the languages Glottolog does not classify. It read "Not classified", which,
-# among the families, read as the name of one (the owner: "Odd a family is listed as not classified since
+# among the families, read as the name of one (the review: "Odd a family is listed as not classified since
 # it's a family"): it is no family, and says what its languages are. Its one language was Minang (xrg), a
 # code Glottolog 5.4 has no languoid for, which the families' train script now places beside Nyunga: with
 # this data the node is never made (family_tree makes it for a language that lands there, and only then).
@@ -4744,7 +4744,7 @@ NOT_COVERED = u"Not yet covered"
 SCRIPTS_NOT_COVERED = u"Scripts not yet covered"
 # Scripts whose characters do not depend on the language written, so that no language's character list,
 # and no count of languages, can ever rank a font for them: notations that transcribe other scripts or
-# languages. The owner: for Braille and SignWriting, "'Not yet covered' fails at being a good description
+# languages. The review: for Braille and SignWriting, "'Not yet covered' fails at being a good description
 # ... they can never be covered according to those criteria", and they are character sets, not languages.
 # So they are not listed among the scripts not yet covered in the Languages tab: they are character sets
 # (Notation, as Unicode blocks, and Scripts (Unicode)), and a search for one there points to them. Each
@@ -5171,8 +5171,8 @@ def slow_to_shape(item):
     return any(low <= code <= high for code in code_points(item) for low, high in SLOW_SHAPING)
 
 
-# What "not yet covered" means, said where the scripts not yet covered are listed (the owner wondered how
-# they had full previews, and was surprised to see Braille, SignWriting, and Mongolian among them): the
+# What "not yet covered" means, said where the scripts not yet covered are listed (it was asked how
+# they had full previews, and Braille, SignWriting, and Mongolian among them came as a surprise): the
 # script is encoded and drawn; what is missing is a language described in it.
 NOT_COVERED_MEANS = (u"Not yet covered means that none of Font Check's sources describes a language written in the "
                      u"script, not that the script is unknown or cannot be drawn: Unicode encodes it, its glyphs are "
@@ -5327,7 +5327,7 @@ def optional_part(total, missing):
 
 
 def paragraphs_of(lines, cut=False, fonts=()):
-    """A tooltip's paragraphs, a blank line between two (the owner: line jumps between paragraphs read
+    """A tooltip's paragraphs, a blank line between two (the review: line jumps between paragraphs read
     better); fonts: the fonts to consider for what FreeLang lacks of a set (fonts_sentence); cut: a list
     of characters was cut short, and the last paragraph says where it is whole."""
     return u"\n\n".join([line for line in lines if line] + [fonts_sentence(fonts)] * bool(fonts)
@@ -5515,7 +5515,7 @@ def language_note(r):
     return u", ".join(words)
 
 
-# A tooltip's width follows the window's (the owner: tooltips were "stupidly compacted when there's ample
+# A tooltip's width follows the window's (the review: tooltips were "stupidly compacted when there's ample
 # space"): about half of it, between TIP_LEAST and TIP_MOST pixels, never wider than the window less
 # TIP_MARGIN. It was a fixed 520 pixels. TIP_WIDTH stands when the window's width cannot be read.
 TIP_SHARE, TIP_LEAST, TIP_MOST = 0.5, 360, 900
@@ -5623,7 +5623,7 @@ def hint_height(widget):
 
 def level_rows(boxes):
     """Rows of controls (each a widget whose layout holds a row) made as tall as one another, so what is
-    under them stays where it is as tabs are switched (owner's images 285 and 286, in Kerning Check: a row
+    under them stays where it is as tabs are switched (images 285 and 286, in Kerning Check: a row
     of a button alone was a few pixels shorter than one with a spin box, and the table under it moved up):
     each row's least height the tallest size hint of the controls in any of them, hidden ones too. Read
     when called (after the window's styles). The height set, or 0. Never raises."""
@@ -5648,7 +5648,7 @@ def level_rows(boxes):
 
 class Tab(object):
     """A page: its settings row, a line, then what it shows. Its status line stands in the window's
-    header, under the top line (FontCheckDialog.show_tab_parts: the shown tab's only; the owner wanted
+    header, under the top line (FontCheckDialog.show_tab_parts: the shown tab's only; asked for:
     every window's status there, never under its controls), and its buttons in the window's bottom row
     (actions: at the left; commit: at the right, before Close), shown with the tab."""
 
@@ -5815,7 +5815,7 @@ class FontCheckDialog(object):
         dialog.setWhatsThis(HELP)
         ak.size_dialog(dialog)  # (as wide as the other tools until a font comes: widen, read_font)
         layout = ak.window_layout(dialog)  # (scrolls on a small screen)
-        # The header, as every window's (owner's images 222, 223, 276): the top line, the shown tab's
+        # The header, as every window's (images 222, 223, 276): the top line, the shown tab's
         # status line under it, the header's line (shown even with no font), then the tabs
         self.font_label = ak.status_label()
         layout.addWidget(self.font_label)
@@ -5853,14 +5853,14 @@ class FontCheckDialog(object):
         for tab, label, text in zip((self.coverage, self.metrics, self.masters), ("Coverage", "Vertical metrics", "Masters"),
                                     tab_helps):
             index = self.tabs.addTab(label)
-            self.tabs.setTabWhatsThis(index, text)  # (a right-click on a tab tells of it: owner's image 329)
+            self.tabs.setTabWhatsThis(index, text)  # (a right-click on a tab tells of it: image 329)
             self.pages.addWidget(tab.widget)
             self.header_box.addWidget(tab.status)
         self.tab_names = {"window": TabNames(self.tabs, (u"Coverage", u"Vertical metrics", u"Masters")),
                           "left": TabNames(self.left_tabs, (value_title(None), selection_title(None))),
                           "right": TabNames(self.right_tabs, [label for _, label in RIGHT_TABS])}
         layout.addWidget(self.log.widget)
-        # The bottom row, as every window's (owner's images 258 to 265, 279): at the left the shown tab's
+        # The bottom row, as every window's (images 258 to 265, 279): at the left the shown tab's
         # buttons that act on its lists' ticks and rows, and Show in Glyph window; at the right the shown
         # tab's committing button, then Cancel and Close
         buttons = QtGui.QHBoxLayout()
@@ -5896,7 +5896,7 @@ class FontCheckDialog(object):
             self.check_watcher = None
         if self.read_font():
             # (two lists side by side: the shared 1000 pixels cut the right one's last column; with no font,
-            # as wide as the other tools, widened when a font comes: font_changed, owner's image 279)
+            # as wide as the other tools, widened when a font comes: font_changed, image 279)
             self.widen(dialog)
         self.history_timer = ak.watch_history(self)
         self.flagging = [ak.flag_menu(self.glyph_tree, self, self.selected_glyphs, self.row_glyph),
@@ -5925,11 +5925,11 @@ class FontCheckDialog(object):
             pass
 
     def widen_for_font(self):
-        """A font came to this window, opened without one at the other tools' size (owner's image 279: "maybe
+        """A font came to this window, opened without one at the other tools' size (image 279: "maybe
         this window can stay the same size as the others? Then if a font is opened and the window hooks to
         it, window widens according to its content"): it widens as it would have opened with the font (widen),
-        around its center, kept on the screen, as ak.widen_window does: never narrower, never once the owner
-        gave a window its size by hand (this one since it opened, or every window this session: ak.note_size),
+        around its center, kept on the screen, as ak.widen_window does: never narrower, never once a window
+        was given its size by hand (this one since it opened, or every window this session: ak.note_size),
         nor while it is maximized, minimized, or hidden. The pixels it grew by; never raises."""
         try:
             ak, dialog = self.ak, self.dialog
@@ -5941,7 +5941,7 @@ class FontCheckDialog(object):
             size = (int(_prop(dialog, "width")), int(_prop(dialog, "height")))
             opened = getattr(self, "opened_size", None)
             if opened is not None and (abs(size[0] - opened[0]) > 2 or abs(size[1] - opened[1]) > 2):
-                return 0  # (resized by hand: the owner's size stays)
+                return 0  # (resized by hand: that size stays)
             width = wide_width(self.screen_width(dialog))
             if width <= size[0]:
                 return 0
@@ -5964,7 +5964,7 @@ class FontCheckDialog(object):
             return 0
 
     def size_columns(self, tree, kind):
-        """A list at the right whose columns the user can drag (the owner's report 126: Qt's Stretch and
+        """A list at the right whose columns the user can drag (report 126: Qt's Stretch and
         ResizeToContents modes, set here before, cannot be dragged) and that shares its width itself
         (share_columns, column_widths): the names' column takes what the others leave (cut with an
         ellipsis, whole in its tooltip), the counts stay whole, the families' bar gives way to BAR_LEAST
@@ -5980,7 +5980,7 @@ class FontCheckDialog(object):
             header.setStretchLastSection(False)
             try:
                 # (a drag stops at the shared least: dragged to nothing, a column could not be found again,
-                # owner's image 214; column_widths may still close the bar's column in a narrow window)
+                # image 214; column_widths may still close the bar's column in a narrow window)
                 header.setMinimumSectionSize(int(getattr(self.ak, "MIN_SECTION", 24)))
             except Exception:
                 pass
@@ -6074,7 +6074,7 @@ class FontCheckDialog(object):
     def bar_delegate(self, tree):
         """The families' bars drawn in their cells, as wide as their column less BAR_MARGIN each side, from
         the counts each row holds (BAR_ROLE): a picture of a set width was cut by a narrower column, and
-        gone with a column of nothing (the owner's reports 127 and 131). What it uses is held here: a
+        gone with a column of nothing (reports 127 and 131). What it uses is held here: a
         dropped module's globals turn None."""
         QtCore, QtGui = _qt()
         role, margin, levels, widths_of = BAR_ROLE, BAR_MARGIN, BAR_LEVELS, bar_widths
@@ -6361,7 +6361,7 @@ class FontCheckDialog(object):
         content_layout.setContentsMargins(0, 0, 0, 0)
         self.coverage_stack.addWidget(content)
         self.coverage_stack.setCurrentIndex(1)
-        # The check's progress is the window's own, in its top row (ak.busy_start: owner's images 174 and 180),
+        # The check's progress is the window's own, in its top row (ak.busy_start: images 174 and 180),
         # determinate over the four steps (BUSY_SHARES) and, within the listing, over the rows made; the
         # tools menu, the arrows, Close, and Esc stop it (coverage_stopped). It stood over the lists before.
         tab.layout.addWidget(self.coverage_stack, 1)
@@ -6385,7 +6385,7 @@ class FontCheckDialog(object):
         content_layout.addLayout(absent)
 
         # (the lists' frames hug the splitter's handle: margins beside it set it in the middle of a gap, away
-        # from the frames it sizes, owner's image 196)
+        # from the frames it sizes, image 196)
         halves = self.coverage_halves_made
         left = QtGui.QWidget()
         box = QtGui.QVBoxLayout(left)
@@ -6418,7 +6418,7 @@ class FontCheckDialog(object):
         self.own_label.setVisible(False)
         box.addWidget(self.own_label)
         # (the buttons on the glyphs' ticks, and those that hand the ticked glyphs on, stand in the window's
-        # bottom row, the tab's own, as every window's: owner's image 279)
+        # bottom row, the tab's own, as every window's: image 279)
         row = tab.actions_row
         self.check_buttons, self.check_slots = {}, []
         tips = {"all": u"Ticks every glyph listed in the tab of glyphs shown (the ticks of rows not listed are "
@@ -6499,7 +6499,7 @@ class FontCheckDialog(object):
             self.search.setPlaceholderText(SEARCH_PLACEHOLDER)
         except Exception:
             pass
-        try:  # (a cross in the field clears it at once, as the owner asked; PythonQt may lack the call)
+        try:  # (a cross in the field clears it at once, as asked; PythonQt may lack the call)
             self.search.setClearButtonEnabled(True)
         except Exception:
             pass
@@ -6611,7 +6611,7 @@ class FontCheckDialog(object):
         self.name_field = QtGui.QLineEdit()
         try:
             self.paste_field.setPlaceholderText(PASTE_PLACEHOLDER)
-            self.name_field.setPlaceholderText(NAME_PLACEHOLDER)  # (the owner's wording for both)
+            self.name_field.setPlaceholderText(NAME_PLACEHOLDER)  # (the wording for both)
         except Exception:
             pass
         self.paste_field.setWhatsThis(u"Text or characters pasted here are checked as a character set of your own, "
@@ -6678,7 +6678,7 @@ class FontCheckDialog(object):
                 pass
         content_layout.addWidget(halves, 1)
         # Nothing to show before the first check: the scripts' list and its check box come with it (item 12
-        # of the owner's audit: what has nothing to show is hidden, what cannot act is grayed, update_buttons)
+        # of the audit: what has nothing to show is hidden, what cannot act is grayed, update_buttons)
         self.script_tree.setVisible(False)
         self.show_absent.setVisible(False)
 
@@ -6733,7 +6733,7 @@ class FontCheckDialog(object):
         """Long work under way (or over), in the window's top row (ak.busy_start: the step's name and the
         bar, the tools menu, the arrows, Close, and Esc stopping it): the lists' area gives way to a blank
         page, and the controls that would do nothing meanwhile are grayed, through ak.enable (a control
-        grayed for want of a font stays grayed: owner's image 203). busy also holds off the History's watch
+        grayed for want of a font stays grayed: image 203). busy also holds off the History's watch
         and a second check."""
         was, self.busy = self.busy, bool(on)
         try:
@@ -6744,7 +6744,7 @@ class FontCheckDialog(object):
         except Exception:
             pass
         try:  # the view's line hidden meanwhile (the top row says what runs), shown again only with something to say
-            # (shown empty, it left a blank line under the Coverage controls: owner's image 204)
+            # (shown empty, it left a blank line under the Coverage controls: image 204)
             text = u"%s" % (_prop(self.coverage.status, "text") or u"")
             self.coverage.status.setHidden(bool(on) or not text.strip() or self.current_key() != "coverage")
         except Exception:
@@ -6763,7 +6763,7 @@ class FontCheckDialog(object):
 
     def say_busy(self, message, done=None):
         """What is happening now, said once, in the top row (it was said in the top line and in the middle
-        of the lists' area too, the owner: "'Listing...' appears twice"), the bar at done steps of
+        of the lists' area too, the review: "'Listing...' appears twice"), the bar at done steps of
         BUSY_STEPS when given. Raises ak.Stopped when the user asked the check to stop."""
         self.ak.busy_progress(self, message or None, busy_share(done) if done is not None else None)
 
@@ -6790,7 +6790,7 @@ class FontCheckDialog(object):
     def run_steps(self, steps, index=0):
         """One step of long work, then the next (defer): each step does its part and returns what the
         window says while the next one runs. A step that fails ends the work, and says why; a stop asked
-        meanwhile (the tools menu, an arrow, Close, Esc: owner's image 174) is taken before the next step
+        meanwhile (the tools menu, an arrow, Close, Esc: image 174) is taken before the next step
         and at each of the listing's (coverage_stopped)."""
         try:
             self.ak.busy_progress(self)  # (asked between two steps: nothing more is done)
@@ -6846,7 +6846,7 @@ class FontCheckDialog(object):
                                          u"metrics against them. The view is also checked as its tab is first shown "
                                          u"and after an undo or an edit in FontLab.")
         self.measured_label = QtGui.QLabel(measured_text(2))  # (read_font says "the single master" for a font with one)
-        # (it says what Check does: grayed with it, as a caption is with its control, owner's image 292)
+        # (it says what Check does: grayed with it, as a caption is with its control, image 292)
         ak.caption(self.measured_label, self.metrics_button)
         tab.settings.addWidget(self.measured_label)
         tab.settings.addWidget(self.metrics_button)  # (inline after what it reads, as every run button: image 262)
@@ -6861,9 +6861,9 @@ class FontCheckDialog(object):
         tab.layout.addWidget(self.diagram, 1)
         # The values and the checks side by side, their headings on one line, the checks as tall as the
         # values (scrolled when they are more); under both, the line spacing's choice (the buttons stand in the
-        # window's bottom row, as every window's: owner's images 258 to 265). The
+        # window's bottom row, as every window's: images 258 to 265). The
         # checks stood right of all of it before, as tall as the buttons and the choice too, far from the
-        # values (the owner's report 128).
+        # values (report 128).
         body = QtGui.QGridLayout()
         self.metrics_body = body
         self.values_tree = self.tree(("Value", "Now", "Suggested"))
@@ -6914,7 +6914,7 @@ class FontCheckDialog(object):
                                     u"they are when <i>Use Typo Metrics</i> is on, or else take the old win values, which "
                                     u"Windows spaced lines by; the win values grow to the ink and <i>Use Typo Metrics</i> "
                                     u"is turned on.")
-        row.addWidget(self.mode_keep)  # (both choices on one line: owner's image 345)
+        row.addWidget(self.mode_keep)  # (both choices on one line: image 345)
         row.addStretch(1)
         body.addLayout(row, 1, 0, 1, 2)
         # (its heading is its list's own header, on the line of the values' header)
@@ -6982,7 +6982,7 @@ class FontCheckDialog(object):
         self.reference.setWhatsThis(u"The master each other master is compared with.")
         tab.settings.addWidget(self.label_for("Compare every master with", self.reference))
         tab.settings.addWidget(self.reference)
-        ak.sentence_end(tab.settings)  # (a sentence with a verb ends with a period: owner's image 271)
+        ak.sentence_end(tab.settings)  # (a sentence with a verb ends with a period: image 271)
         self.masters_button = QtGui.QPushButton("Compare masters")
         self.masters_button.setWhatsThis(u"Compares every master's glyphs with the chosen master's again, and lists "
                                          u"the glyphs that keep them from interpolating. Nothing in the font changes.")
@@ -7009,7 +7009,7 @@ class FontCheckDialog(object):
         halves = QtGui.QSplitter(QtCore.Qt.Horizontal)
         left = QtGui.QWidget()
         box = QtGui.QVBoxLayout(left)
-        box.setContentsMargins(0, 0, 0, 0)  # (the list's frame hugs the handle; the picture keeps its margin: owner's image 196)
+        box.setContentsMargins(0, 0, 0, 0)  # (the list's frame hugs the handle; the picture keeps its margin: image 196)
         self.glyph_tree = self.tree(("Glyph", "Masters", "Fix"), icon=(THUMB_SIZE, THUMB_SIZE))
         self.glyph_tree.setWhatsThis(u"The glyphs that keep the masters from interpolating, the worst first, with a "
                                      u"symbol per master in order: a ring for the master compared with, red where the "
@@ -7116,7 +7116,7 @@ class FontCheckDialog(object):
         return True
 
     def show_no_masters(self):
-        """With no font, nothing that names its masters (owner's images 289 and 291): the master compared with
+        """With no font, nothing that names its masters (images 289 and 291): the master compared with
         reads a grayed "n/a" (no_font_states grays it), not an empty box before its period; the clipped
         glyphs' Master caption and dropdown are hidden (shown again once a check lists clipped glyphs of
         several masters: fill_clip_masters, fill_clipped). Never raises."""
@@ -7235,7 +7235,7 @@ class FontCheckDialog(object):
                 self.show_fontless()
                 return
             if not had:
-                self.widen_for_font()  # (opened without a font, at the others' size: owner's image 279)
+                self.widen_for_font()  # (opened without a font, at the others' size: image 279)
             self.check(self.current_key())
         except Exception as exc:
             try:
@@ -7321,7 +7321,7 @@ class FontCheckDialog(object):
             current = self.current_key()
         except Exception:
             current = TABS[0]
-        for key in sorted(TABS, key=lambda k: k == current):  # (the others hidden first: owner's image 284)
+        for key in sorted(TABS, key=lambda k: k == current):  # (the others hidden first: image 284)
             try:
                 tab, mine = self.tab_of(key), key == current
                 tab.status.setProperty(prop, None if mine else True)
@@ -7341,7 +7341,7 @@ class FontCheckDialog(object):
 
     def switch_page(self, index):
         QtCore, QtGui = _qt()
-        self.level_settings()  # (before the page shows: owner's images 285 and 286)
+        self.level_settings()  # (before the page shows: images 285 and 286)
         self.pages.setCurrentIndex(index)
         self.show_tab_parts()
         self.update_buttons()
@@ -7374,7 +7374,7 @@ class FontCheckDialog(object):
                 else u"<i>Glyph Compose</i> can build none of the glyphs listed."}
         for key, button in self.check_buttons.items():
             # (nothing listed: all three grayed, Check none too, though glyphs of another tab or check stay
-            # checked: owner's image 206)
+            # checked: image 206)
             on = bool(listed) and targets.get(key) is not None
             if not listed:
                 idle[key] = u"No glyph is listed."
@@ -7419,7 +7419,7 @@ class FontCheckDialog(object):
         self.update_controls()
 
     def update_controls(self):
-        """The owner's audit: what cannot act yet is grayed (the buttons above say why in their
+        """The audit: what cannot act yet is grayed (the buttons above say why in their
         tooltips). Before a check has listed anything (no font open, or the first check under way),
         the search, the level, the order, the tabs of the lists, and the fields of a set of one's own
         have nothing to act on (the scripts' list and its check box are hidden until then: fill_scripts);
@@ -7753,8 +7753,8 @@ class FontCheckDialog(object):
         return BUSY_STEPS[3]
 
     def say_kerning(self):
-        """Once a window, after its first check: where the kerning is checked, a link that opens it (owner's
-        image 391: Font Check checks the glyphs and the font info, not the kerning)."""
+        """Once a window, after its first check: where the kerning is checked, a link that opens it
+        (image 391: Font Check checks the glyphs and the font info, not the kerning)."""
         if getattr(self, "kerning_said", False):
             return
         self.kerning_said = True
@@ -7837,21 +7837,21 @@ class FontCheckDialog(object):
 
     def say_spaces(self, note):
         """The line on the spaces the font lacks, logged once a font and again only when it changes,
-        not at every check (the owner saw it repeated)."""
+        not at every check (it was seen repeated)."""
         try:
             font_key = self.package.fgPackage.path  # (a new wrapper at each read: its file names the font)
         except Exception:
             font_key = None
         said = (font_key, note)
         if note and said != getattr(self, "spaces_said", None):
-            # (amber: something the font lacks, owner's image 242; Glyph Compose a link of its own, which opens
-            # it on these spaces, never tool_links' plain one: owner's image 313)
+            # (amber: something the font lacks, image 242; Glyph Compose a link of its own, which opens
+            # it on these spaces, never tool_links' plain one: image 313)
             self.log.add(note, "warning")
         self.spaces_said = said
 
     def tool_links(self, text):
         """Rich text whose FreeLab tools named in italics (<i>Glyph Compose</i>) are links the log opens
-        them by, in this window's place (ak.tool_link: owner's image 220). Never raises."""
+        them by, in this window's place (ak.tool_link: image 220). Never raises."""
         try:
             for title in getattr(self.ak, "FONT_TOOLS", ()):
                 text = text.replace(u"<i>%s</i>" % self.ak.html(title), self.ak.tool_link(title))
@@ -8096,7 +8096,7 @@ class FontCheckDialog(object):
     def listing(self, work, what):
         """work(progress) done, with the window's top-row bar (what: the step's name) while it makes many
         rows in the list at the right (LISTING_BUSY_ROWS: a few make none of it flicker), at once
-        otherwise (progress None). The bar was the Coverage view's own (owner's images 174 and 180); the
+        otherwise (progress None). The bar was the Coverage view's own (images 174 and 180); the
         tools menu, the arrows, Close, and Esc stop it now: the list keeps the rows made so far, and is made
         anew the next time it is shown (fill_right). False when stopped."""
         if self.listing_rows() < LISTING_BUSY_ROWS:
@@ -8208,7 +8208,7 @@ class FontCheckDialog(object):
         every 300 ms) when the list nearest them has no check box, and the two lists are equally near: it
         took the first, and Qt's stack raises the list it shows, which puts it last. So after a selection's
         tab was shown, the high-value tab's buttons were grayed again within 300 ms of each click that
-        enabled them, as long as the selection's list was empty (the owner's report 133)."""
+        enabled them, as long as the selection's list was empty (report 133)."""
         self.left_pages.setCurrentIndex(index)
         try:
             (self.own_tree if index == 1 else self.add_tree).lower()
@@ -8878,7 +8878,7 @@ class FontCheckDialog(object):
         signature = self.view_signature(tab, text, level, sort, shown)
         if view.signature == signature:
             # Filled from the same check, choices, and headings opened: shown as it is, where it was
-            # scrolled to (the owner: switching tabs brought each list back to its top). The selection
+            # scrolled to (the review: switching tabs brought each list back to its top). The selection
             # goes with it where it lists it, as a refill would have found it.
             found["selection"] = self.listed_selection(tab, made[tab], wanted, text, level)
             self.select_row(tab, found["selection"])
@@ -8936,7 +8936,7 @@ class FontCheckDialog(object):
                 if live or names:
                     # The closing section: the scripts Unicode has that no orthography here is written in,
                     # each checked as a script (its whole repertoire), a row that selects like any other. Its
-                    # tooltip says what "not yet covered" means (the owner wondered how they had previews)
+                    # tooltip says what "not yet covered" means (it was asked how they had previews)
                     title = u"%s (%d)" % (SCRIPTS_NOT_COVERED, len(live) + len(names))
                     heading = self.item((title, u""), u"#%s" % SCRIPTS_NOT_COVERED,
                                         u"%s\n\n%s\n\n%s" % (NOT_COVERED_MEANS, CONTRIBUTE_SCRIPTS, NOT_ENCODED), True)
@@ -9023,7 +9023,7 @@ class FontCheckDialog(object):
 
     def note_html(self, note):
         """The line under the list as rich text: "issue" in it a link to the repository's issues (opened on a
-        click), the address no longer written out after it (the owner's image of November 23: the address in
+        click), the address no longer written out after it (image of November 23: the address in
         parentheses made the line run long). A tooltip, where nothing can be clicked, keeps the address
         written out (CONTRIBUTE as it is). An address the sentence does not introduce is a link as written."""
         text = self.ak.html(note)
@@ -9141,7 +9141,7 @@ class FontCheckDialog(object):
         kind, value = entry
         if kind == "heading":
             # Used up, the double-click's second press too: handed on, Qt made the heading its current
-            # row and cleared the selection (the owner: a click on a group's arrow selected its heading),
+            # row and cleared the selection (the review: a click on a group's arrow selected its heading),
             # and turned a double-click on a row it had not seen pressed into a press of its own.
             self.pressed = None
             if not double:
@@ -9311,7 +9311,7 @@ class FontCheckDialog(object):
     def build_spaces(self, chars):
         """The spaces the font lacks (the log's spaces line, its Glyph Compose clicked) handed to Glyph Compose
         as Build with Glyph Compose hands glyphs over: it opens on its Glyph generation tab, which lists them
-        alone, ticked (owner's image 313: the plain link opened it on its first tab, with nothing done)."""
+        alone, ticked (image 313: the plain link opened it on its first tab, with nothing done)."""
         try:
             dm = self.diacritics_module()
             with self.ak.opening_from(self.dialog):  # (on this window's font, in its place)
@@ -9368,7 +9368,7 @@ class FontCheckDialog(object):
             return
         ak, b = self.ak, self.ak.b
         self.busy, stopped = True, False
-        ak.busy_start(self, u"Measuring the glyphs")  # (the window's top row: stoppable, owner's image 180)
+        ak.busy_start(self, u"Measuring the glyphs")  # (the window's top row: stoppable, image 180)
         try:
             m = read_metrics(self.package, self.line_info(self.package))
             if not m.upm:
@@ -9473,7 +9473,7 @@ class FontCheckDialog(object):
             tallest, deepest = extreme_glyphs(self.extents_found)
             several = len(self.master_names()) > 1
             pictures = [self.picture(e.name, e.master, caption_master=several) for e in tallest + deepest]
-            notes = extreme_notes(self.extents_found)  # (the highest and the lowest, said so: owner's image 215)
+            notes = extreme_notes(self.extents_found)  # (the highest and the lowest, said so: image 215)
             for p in pictures:
                 if p is not None:
                     p.note = notes.get(p.name, u"")
@@ -9515,7 +9515,7 @@ class FontCheckDialog(object):
 
     def check_selected(self):
         """A check about glyphs: those glyphs selected among the clipped ones, and named in the log, each a
-        link that opens it in a Glyph window (the owner's report 137: a glyph reaching below the line's
+        link that opens it in a Glyph window (report 137: a glyph reaching below the line's
         descender is not clipped, so the click selected nothing, and the line did not say which glyph)."""
         if self.filling:
             return
@@ -9672,7 +9672,7 @@ class FontCheckDialog(object):
         be written). The font info is the font's own state, but the step notify_changed makes records the
         whole font, its glyphs too, which have no state of their own in a font opened afresh: undoing such a
         step made FontLab print "We have a problem with the component 'P' in glyph 'Rho:Regular'" for each
-        glyph built from components (owner's image 336, a kerning write's)."""
+        glyph built from components (image 336, a kerning write's)."""
         return self.ak.begin_write(self.fontlab, package, title, self.log)
 
     def write_suggestions(self):
@@ -9849,7 +9849,7 @@ class FontCheckDialog(object):
             self.fix_basis, self.fix_unchecked = basis, set()
         order = [reference] + [m for m in masters if m != reference]
         self.busy, stopped = True, False
-        ak.busy_start(self, u"Comparing the masters")  # (the window's top row: stoppable, owner's image 180)
+        ak.busy_start(self, u"Comparing the masters")  # (the window's top row: stoppable, image 180)
         found, unread = [], []
         try:
             glyphs = self.glyphs()
@@ -9983,7 +9983,7 @@ class FontCheckDialog(object):
 
     def show_beside(self, on):
         """The choice of the master drawn beside the one compared with, shown only while a glyph is drawn:
-        "Beside it" stood under an empty frame, with no font or nothing compared (owner's image 211)."""
+        "Beside it" stood under an empty frame, with no font or nothing compared (image 211)."""
         for widget in (self.beside_label, self.compare_master):
             try:
                 widget.setVisible(bool(on))

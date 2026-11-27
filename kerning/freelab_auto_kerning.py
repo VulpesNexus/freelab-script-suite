@@ -474,7 +474,7 @@ def calibrate(core, tuning, em, max_bias=None):
         if low > high / 2:
             return Band(bias, low, high)
         bias += 1
-    # (it said "no halo makes ll, nn, oo agree", which meant nothing to the user: owner's image 218)
+    # (it said "no halo makes ll, nn, oo agree", which meant nothing to the user: image 218)
     names = [g.name for g in tuning]
     raise ValueError(u"the font's %s, each set beside itself (%s), sit too differently apart to measure the other "
                      u"glyphs by: space them by eye first" % (
@@ -1995,7 +1995,7 @@ def history_state(package):
 # compared, checked (Font Check), and proofed.
 MENU_GROUPS = (("Font Builder", "Glyph Compose", "Auto Spacing", "CJK Spacing", "CJK Vertical", "Auto Kerning", "Kerning Check",
                 "Feature Code", "Feature Check", "Font Compare", "Family Audit", "Font Check", "Proof"),
-               ("Quick Overlay",),  # (FontLab's Overlay Fonts made quick: on its own, the owner, 2026-11-26)
+               ("Quick Overlay",),  # (FontLab's Overlay Fonts made quick: on its own, the review of 2026-11-26)
                ("Dark Mode", "Toggle Dark Mode", "Dark Mode Settings", "Tab Docking", "Toggle Tab Docking",
                 "Tab Docking Settings"),
                ("Start MCP Listener", "Stop MCP Listener", "Start Listener", "Stop Listener"),  # (FreeLab MCP's, old names too)
@@ -2461,7 +2461,7 @@ def focus_font(owner, fontlab=None):
     tab of that font's Font window is made the current one (as a click on it would), the tab whose
     title names the font tried first, each checked by FontLab's current font (live, 2026-11-18: the
     current font follows the tab at once). The tab shown before is put back when none is that font's.
-    Undo, Redo, and a new Glyph tab then act on the window's font instead of refusing (owner's image
+    Undo, Redo, and a new Glyph tab then act on the window's font instead of refusing (image
     314: "can't the script suite in general refocus on the right font in such cases?")."""
     try:
         font_id = getattr(owner, "font_id", None)
@@ -2566,8 +2566,8 @@ def _xy(point):
 
 
 def note_size(owner):
-    """A window resized by hand: its size is the owner's own for the rest of the session. Every tool's
-    window opens at it, for every font. It is not kept for later sessions (the owner could never get
+    """A window resized by hand: its size is the size chosen for the rest of the session. Every tool's
+    window opens at it, for every font. It is not kept for later sessions (there was no way to get
     back to the tools' own sizes): FreeLab no longer writes windows.json, and one written by an
     earlier version is not read. A window left at the size it opened at says nothing: each tool then
     opens at its own (Font Check wider than the others, for its two lists)."""
@@ -2647,7 +2647,7 @@ def keep_center(owner):
     """A window that took another's place (register_window: owner.placed_from, the other's place and
     size), centered again on that window's center as it first shows: it was placed at the size asked for,
     and Qt then grew it to its layout's least width, all of it to the right, so going from tool to tool
-    with the arrows walked the windows off to the right of the screen (owner's image 311). Once."""
+    with the arrows walked the windows off to the right of the screen (image 311). Once."""
     try:
         place = getattr(owner, "placed_from", None)
         if place is None:
@@ -2746,7 +2746,7 @@ def hook_quit():
 
 FONTS_POLL_MS = 700  # how often FreeLab looks whether a window's font was closed, or a font opened
 NO_FONT_LINE = u"No font is open. This window hooks to the next font you open."  # a tool's top line meanwhile
-NOT_AVAILABLE = u"n/a"  # what a dropdown or a name that would be empty with no font shows (owner's images 289, 290)
+NOT_AVAILABLE = u"n/a"  # what a dropdown or a name that would be empty with no font shows (images 289, 290)
 
 
 def no_font_line(own=None, workspace=None):
@@ -2789,7 +2789,7 @@ def font_switched(owner):
 
 def fonts_tick(workspace=None):
     """Each shown FreeLab window, as fonts open and close: one whose font was closed closes with it
-    (the owner: "I'd suggest closing the script window along with the font it belongs to"; it moved
+    (the review: "I'd suggest closing the script window along with the font it belongs to"; it moved
     to the font FontLab showed, which could leave two windows on one font), and is let go
     (release_window); a window opened with no font takes the font FontLab shows (the one just opened)
     once one is open, unless that font has a window of its own shown. A busy window is looked at next
@@ -2869,7 +2869,7 @@ def watch_fonts():
 # - its widgets polished again: Qt 5 polishes a widget under a stylesheet (on it or on a parent)
 #   with the palette of that moment, and dark mode sets the style (which polishes) before the
 #   palette, so such widgets kept the theme before the switch: dark cells and pale labels in light
-#   mode, light ones in dark mode that dark mode's mapping then garbled (owner's screenshots 76 and
+#   mode, light ones in dark mode that dark mode's mapping then garbled (screenshots 76 and
 #   77; seen in Qt 5.15 offscreen, any number of switches, both ways);
 # - its pictures drawn in one palette color (inked: glyph pictures, pair previews, the tools
 #   button's lines) drawn again in that role's new color;
@@ -3383,8 +3383,8 @@ def commit_typing(window, pressed=None):
     """What is typed in the window's field with the focus taken as its value, before a button acts on
     it: a spin box's text interpreted (interpretText: its value set and valueChanged emitted, as Enter
     would), then the field's focus taken away, so it ends its editing as when a click moves the focus
-    (a line edit's editingFinished, a spin box's own). The owner typed 100 in Feature Code's Strokes over
-    130 and clicked Build without Enter: it built at 130. A button that takes no focus on a click (a tool
+    (a line edit's editingFinished, a spin box's own). 100 was typed in Feature Code's Strokes over
+    130 and Build clicked without Enter: it built at 130. A button that takes no focus on a click (a tool
     button, a button made NoFocus) left the field focused and its value as it was. pressed: the button
     pressed (a field is never its own button). The field committed, or None."""
     QtGui = _qt()[1]
@@ -3432,7 +3432,7 @@ def fontlab_undo(owner, name):
     try:
         if getattr(owner, "busy", False):
             return False  # (the History must not move under the tool's own work)
-        foreign = own_font_refusal(owner)  # (its font shown first: owner's image 314)
+        foreign = own_font_refusal(owner)  # (its font shown first: image 314)
         if foreign:
             if log is not None:
                 log.add(u"Nothing was %s: FontLab's %s works on the font it shows, not on this window's (%s). "
@@ -3475,7 +3475,7 @@ def undo_key_event(window, obj, event):
     event. Taken at Qt's ShortcutOverride, which comes before any shortcut is looked up (and goes up to
     the window from whatever widget has the focus): Qt then sends the key as a plain key press, which
     runs FontLab's command here (fontlab_undo). No shortcut of the window or of FontLab sees the key, so
-    none can make it ambiguous, whatever context FontLab gave its own (owner's report: undo pressed with
+    none can make it ambiguous, whatever context FontLab gave its own (report: undo pressed with
     a FreeLab window in front never reached FontLab). A field that can be typed in keeps the key
     (own_undo), whatever its own undo holds."""
     name = undo_key(event)
@@ -3519,7 +3519,7 @@ def refresh_views(owner, fontlab=None):
     (3,700 glyphs, live 2026-11-14), each Ctrl+Z (two checks of a clipboard another program held
     open: the time does not grow with the font). FontLab's Undo restores the glyphs itself (live: H's
     width came back on undo and went again on redo); notify_changed still calls it after a write that
-    added glyphs. What the owner saw ("the log says History changed, but it doesn't reach FontLab")
+    added glyphs. What was seen ("the log says History changed, but it doesn't reach FontLab")
     was the first write of a font opened afresh: with no state of FontLab's History before it, Undo
     moves the History back and puts nothing back (live: width 751 kept, History 1 to 0); before_changes
     records the font first."""
@@ -3934,7 +3934,7 @@ DONT_CONFIRM_OVERWRITE = 0x4  # QFileDialog::DontConfirmOverwrite, where this Py
 def save_file_name(QtGui, parent, caption, directory, filters):
     """(what the save dialog gave, whether Windows' own box asked before replacing that file): the dialog
     asked not to confirm an overwrite, so the tool asks in its own box, which follows dark mode (Windows' own
-    "Confirm Save As" box stays light in dark mode, owner's report of 2026-11-24). PythonQt's handling of the
+    "Confirm Save As" box stays light in dark mode, report of 2026-11-24). PythonQt's handling of the
     static call's options, after its selectedFilter out-parameter, is not proven: each form is tried (None,
     then "", for the filter), and where this PythonQt takes neither (TypeError, ValueError: no matching
     overload), the plain call as before, whose name typed Windows confirms itself (True). Never raises:
@@ -4797,7 +4797,7 @@ def take_window(tool, owner):
     """A tool's main() calls this before it shows its window: the window is tied to its font, made a
     window of its own, and takes the place of the tool that font's window showed, which is closed: the
     window it was opened from, when it was (the one clicked, even if it is not its font's own window).
-    Its size is its own (or the one the owner gave a tool's window by hand: note_size)."""
+    Its size is its own (or the one a tool's window was given by hand: note_size)."""
     registry = _windows()
     caller = calling_owner()  # (before the hint is used up)
     try:
@@ -5041,7 +5041,7 @@ def add_tools_button(dialog, current, log=None):
         bold.setBold(True)
         help_button.setFont(bold)
         help_button.setToolTip(u"What's this? Click it, then anything in the window, to read what it does "
-                              u"(or right-click it: What's This?).")  # (not only controls: owner's image 34)
+                              u"(or right-click it: What's This?).")  # (not only controls: image 34)
         help_button.setWhatsThis(u"Click it, then anything in this window, to read what it does (or right-click "
                                  u"it: <i>What's This?</i>).")
         whats_this = lambda *args: QtGui.QWhatsThis.enterWhatsThisMode()
@@ -5076,7 +5076,7 @@ def add_tools_button(dialog, current, log=None):
         return None
 
 
-# A window's long work, shown in its top row and stoppable (owner's images 174 to 183): the step's name
+# A window's long work, shown in its top row and stoppable (images 174 to 183): the step's name
 # and a bar between the window's left edge and its "?", the top line hidden meanwhile. While it runs, the
 # events go through (the window repaints, Windows never calls it Not Responding: a window it calls so and
 # is told to end takes FontLab with it, the scripts running inside FontLab), but no click, key, or wheel
@@ -5090,7 +5090,7 @@ BUSY_RANGE = 1000
 BUSY_HELP = (u"How far the work is. <i>Cancel</i> (where the window has it) and <i>Esc</i> stop it at its next step; "
              u"the tools menu, the arrows, and <i>Close</i> stop it too, then do what was clicked. A write to the font "
              u"is never stopped: what was clicked is done once it is over.")
-# A window's Cancel button (the owner, 2026-11-24: "a 'Cancel' button left of 'Close' could be useful, especially
+# A window's Cancel button (the review of 2026-11-24: "a 'Cancel' button left of 'Close' could be useful, especially
 # when exporting very big character sets"): right before Close, usable only while work that can stop runs
 # (grayed, never hidden, so the row never shifts), and it stops the work as Esc does (cancel_button)
 CANCEL_PROP = "freelabCancel"  # on a window's Cancel button: the input guard lets a click on it through, as Esc
@@ -5106,7 +5106,7 @@ BUSY_SHEET = (u"QProgressBar { border: 1px solid rgba(128, 128, 128, 140); borde
               u"QProgressBar::chunk { background-color: rgb(%d, %d, %d); border-radius: 2px; }")
 INPUT_EVENTS = (2, 3, 4, 6, 7, 31, 51, 63, 82, 92, 93, 117)  # presses, releases, double clicks, keys, wheel,
 # shortcut overrides, drops, context menus, a tablet's presses and releases, and shortcuts themselves (117:
-# Ctrl+Z reached FontLab's Undo during a read, owner's images 373 and 377)
+# Ctrl+Z reached FontLab's Undo during a read, images 373 and 377)
 SHORTCUT_EVENT = 117  # QEvent::Shortcut: a key sequence sent to its action (busy guard)
 GUARD_IDLE_SECONDS = 10.0  # a guard whose tool is no longer busy and whose work has not moved for this long lets go
 GUARD_LOST_SECONDS = 120.0  # and any guard, once no FreeLab work has moved for this long while events run
@@ -5127,8 +5127,8 @@ HEAD_PART_PROP = "freelabHeadPart"  # on a widget of status lines under the top 
 def window_head(layout, first):
     """The window's top line (first, taken out of layout already) and the status lines right under it in
     layout (labels, up to the header's separator) in one column, which shares the top row with the
-    buttons: the status lines started under the row, a button's height below the top line (owner's
-    image 229 asked for them under the font line; live 2026-11-17 they came a blank line lower).
+    buttons: the status lines started under the row, a button's height below the top line
+    (image 229 asked for them under the font line; live 2026-11-17 they came a blank line lower).
     Returns the column, or first alone when no label follows it or first is no label."""
     QtGui = _qt()[1]
     try:
@@ -5149,7 +5149,7 @@ def window_head(layout, first):
         column.setSpacing(0)
         column.addWidget(first)
         # A blank line between the font's line and what the tool found, in every window, as Font Check had it
-        # (owner's image 346): the first line under it set that much lower, so the gap goes with it while it is
+        # (image 346): the first line under it set that much lower, so the gap goes with it while it is
         # hidden (nothing found yet, no font)
         try:
             if lines:
@@ -5159,7 +5159,7 @@ def window_head(layout, first):
         for widget in lines:
             column.addWidget(widget)
         # The column's spare height below its lines: the font's line stays at the top of the row whether lines
-        # follow it or not (owner's images 350, 351: alone, the row's button height centered it lower)
+        # follow it or not (images 350, 351: alone, the row's button height centered it lower)
         column.addStretch(1)
         return head
     except Exception:
@@ -5281,7 +5281,7 @@ def busy_progress(owner, what=None, part=None, force=False, stoppable=True):
             _mcp_busy(owner, what)
             label.setText(u"%s\N{HORIZONTAL ELLIPSIS}" % what if what else u"")
             try:
-                row.layout().activate()  # (laid out now: painted at the last text's width, a longer one was cut by the bar, owner's image 312)
+                row.layout().activate()  # (laid out now: painted at the last text's width, a longer one was cut by the bar, image 312)
             except Exception:
                 pass
         if part is not None and bar is not None:
@@ -5603,7 +5603,7 @@ def read_again(reads, before, last, after):
     before the click; last: at the read before; after: now). FontLab clears the panel as it compiles and
     prints nothing when the code compiles, so an empty panel is either a clean compile or one still under
     way: it is read for COMPILE_EMPTY_READS_MAX reads before it counts as clean (a font of 42,000 kerned
-    pairs was said to compile with no errors while its code named a class it lacks: owner's image 342).
+    pairs was said to compile with no errors while its code named a class it lacks: image 342).
     Text is read until it stops growing, or COMPILE_READS_MAX reads."""
     if not (after or u"").strip():
         return reads < COMPILE_EMPTY_READS_MAX
@@ -5667,7 +5667,7 @@ def compiled_note(box, log=None):
 
 def compiler_said(before, after):
     """What a compile printed in FontLab's Output panel, from its text before the click and after. FontLab
-    clears the panel at each compile (the owner, 2026-11-15), so what it holds after is the compile's own,
+    clears the panel at each compile (the review of 2026-11-15), so what it holds after is the compile's own,
     an empty panel meaning no message at all (the log said "showed nothing from the compiler: see the
     Features panel for any error" after every clean compile); where the panel kept the old text and added
     to it, what was added."""
@@ -5712,7 +5712,7 @@ COMPILE_HINTS = (
     (u"use not allowed in 'aalt'", u"That is the font's own <i>aalt</i>, not the code just written: FontLab writes "
                                    u"aalt's lookups inside it when it opens some fonts, and its own compiler refuses "
                                    u"them. %s lists it and fixes it."),
-)  # (owner's image 383: CJK Vertical's write was blamed for the font's own aalt)
+)  # (image 383: CJK Vertical's write was blamed for the font's own aalt)
 
 
 def compile_hint(said):
@@ -5758,7 +5758,7 @@ def plain_buttons(dialog):
 # dropdown with one choice drawn as its text (no arrow, nothing to open).
 STATES_MS = 300
 CHECK_BUTTON_TEXTS = (u"Tick all", u"Untick all", u"Tick only", u"Tick high-value", u"Tick often",
-                      u"Check all", u"Check none", u"Check only")  # ("Check" was their verb before the owner's image 261)
+                      u"Check all", u"Check none", u"Check only")  # ("Check" was their verb before image 261)
 SINGLE_PROP = "freelab_single_choice"
 SINGLE_SHEET = (u"QComboBox { border: none; background: transparent; padding-left: 0px; } "
                 u"QComboBox::drop-down { width: 0px; border: none; } QComboBox::down-arrow { image: none; width: 0px; }")
@@ -5847,7 +5847,7 @@ POPUP_GRAY_PROP = "freelab_popup_gray"  # on a dropdown's list an earlier build 
 def leave_popup_alone(combo):
     """A dropdown's popup list: marked for dark mode to leave as drawn (LEAVE_ALONE_PROP, on the list
     and on the popup window holding it, QComboBoxPrivateContainer): dark mode recolored it as one of
-    FontLab's lists, its light text in colored smears and tinted (owner's image 162). Left alone, it
+    FontLab's lists, its light text in colored smears and tinted (image 162). Left alone, it
     shows Windows' ClearType, as every other text of the interface does (live, 2026-11-17: the same
     share of colored edge pixels in the popup, in another tool's popup, and in the window's own labels).
     An opacity effect meant to smooth it in gray changed nothing (the list paints an opaque background,
@@ -5898,7 +5898,7 @@ def popup_scroll_bar(combo):
     """A dropdown's list scrolls with a scroll bar, FreeLab's flat one (SCROLL_SHEET), when its choices
     pass LONG_CHOICES. Qt sets the list's bar off for a style that opens dropdowns as menus (Fusion's)
     when the list is first made, and leave_popup_alone makes it before LONG_SHEET is on: the Font
-    Builder's 300 sets scrolled with the wheel alone, no bar to show there were more (owner's image
+    Builder's 300 sets scrolled with the wheel alone, no bar to show there were more (image
     163)."""
     try:
         QtCore = _qt()[0]
@@ -5922,10 +5922,10 @@ POPUP_PAD = 36  # pixels a list row takes beside its text (margins, and the scro
 
 def popup_width(combo):
     """A dropdown's list as wide as its longest choice, never cut short: Qt makes the list as wide as the box,
-    and a longer choice ended in "..." (owner's image 357: "Korean (no... the font)"). Measured again only
+    and a longer choice ended in "..." (image 357: "Korean (no... the font)"). Measured again only
     when the choices change. The width is measured with a QFontMetrics of the list's font: PythonQt has no
     widget.fontMetrics(), and the call that used it failed silently, every list as wide as its box (live
-    2026-11-19, the owner's image 357 again)."""
+    2026-11-19, image 357 again)."""
     QtCore, QtGui = _qt()
     try:
         view = combo.view()
@@ -6113,7 +6113,7 @@ def clear_selections(window):
 def help_menu_sheet(base, text, highlight, highlighted):
     """The stylesheet that gives the one-entry menu of help the frame and colors of the help it leads to
     (#rrggbb names: the help's background and text, the highlight and its text): no margin for ticks and
-    icons, which a menu of one entry has no use for (the owner, November 23 and 24, images 25 and 31). The
+    icons, which a menu of one entry has no use for (the review of November 23 and 24, images 25 and 31). The
     frame is in the text's color, as Qt draws the help's own."""
     return (u"QMenu { background-color: %s; color: %s; border: 1px solid %s; padding: 0px; }\n"
             u"QMenu::item { background-color: transparent; padding: 3px 8px; }\n"
@@ -6138,7 +6138,7 @@ def help_menu_picked(window, where):
             # yellow in dark mode, read live 2026-11-24)
             tip = QtGui.QApplication.palette()
             # (dark mode maps a stylesheet's light borders to dark ones: the frame went as the menu was
-            # first highlighted, the owner, November 24. Marked before the stylesheet is set.)
+            # first highlighted, the review of November 24. Marked before the stylesheet is set.)
             menu.setProperty(LEAVE_ALONE_PROP, True)
             menu.setStyleSheet(help_menu_sheet(
                 tip.color(QtGui.QPalette.ToolTipBase).name(), tip.color(QtGui.QPalette.ToolTipText).name(),
@@ -6232,7 +6232,7 @@ def _range_unit(suffix, value):
 
 def number_range(widget):
     """What a number field takes, for its tooltip and its help: "From 0 to 500 units." (u"" for a widget that is
-    no number field). The owner, 2026-11-27 (image 241): "we should probably indicate min and max values number
+    no number field). The review of 2026-11-27 (image 241): "we should probably indicate min and max values number
     fields can accept across the suite"; read from the field's own bounds, so it never differs from them."""
     field = _number_field(widget)
     if field is None:
@@ -6314,11 +6314,11 @@ def filter_event(window, obj, event, pending):
     if kind == WHATS_THIS and show_field_help(obj, event):
         return True
     if kind in (CONTEXT_MENU, WHATS_THIS) and obj.inherits("QTabBar") and _property(obj, "enabled"):
-        # a tab's own help, where it was clicked (owner's image 329: the window's, in the middle of it)
+        # a tab's own help, where it was clicked (image 329: the window's, in the middle of it)
         return show_tab_help(obj, event, kind == CONTEXT_MENU)
     if kind == SHOW_EVENT and (obj is window or obj == window):
         # The window's states set before it first paints: set on update_states' first tick, its controls
-        # showed usable and its separators shown for a moment (owner's images 275, 276, 282)
+        # showed usable and its separators shown for a moment (images 275, 276, 282)
         try:
             owner = window_owner(window)
             module = sys.modules.get(__name__)
@@ -6459,7 +6459,7 @@ def show_tab_help(bar, event, menu):
 def show_context_help(window, event):
     """A right-click's help where the click was, for a widget of a FreeLab window that leaves its right-click
     to its window: the help of the widget under it, else of the nearest container with one, the window's
-    last (Qt's own showed it at the middle of that container: owner's image 329, the window's help in the
+    last (Qt's own showed it at the middle of that container: image 329, the window's help in the
     middle of the window, far from the click). False to leave it to Qt."""
     QtGui = _qt()[1]
     target = window.childAt(event.pos())
@@ -6624,8 +6624,8 @@ def _next_widget(layout, widget):
 
 def caption(label, control):
     """label made the caption of control (a dropdown, a field, a spin box): a right-click on it shows the
-    control's help, not the window's (owner's image 216), and it is grayed with the control (owner's
-    image 281). caption_states keeps both in step."""
+    control's help, not the window's (image 216), and it is grayed with the control
+    (image 281). caption_states keeps both in step."""
     try:
         label.setBuddy(control)
         label.setProperty(CAPTION_PROP, True)
@@ -6683,7 +6683,7 @@ GROUP_GAP_PROP = "freelabGroupGap"  # on a caption given its gap (group_gap): on
 def group_gap(label):
     """A wider gap before a caption that starts a group of its row ("Show:" after the Script dropdown), the
     caption and its control left at the row's spacing: every gap was the same, so a caption sat as near the
-    group before it as its own control and the row read unevenly (owner's images 389 and 390). Once per
+    group before it as its own control and the row read unevenly (images 389 and 390). Once per
     caption; a caption after its control (a sentence's period) or first in its row gets none."""
     QtGui = _qt()[1]
     try:
@@ -6891,7 +6891,7 @@ TOOL_LINK = u"freelab-tool:"  # a link's target that opens a FreeLab tool (tool_
 
 
 def tool_link(title):
-    """A FreeLab tool's name as an italic link a log opens it by, in the window's place (owner's image
+    """A FreeLab tool's name as an italic link a log opens it by, in the window's place (image
     220: "Write palt with CJK Spacing first")."""
     return u'<a href="%s%s"><i>%s</i></a>' % (TOOL_LINK, html(title).replace(u" ", u"%20"), html(title))
 
@@ -7016,7 +7016,7 @@ def glyph_name_links(names):
 
 
 def glyph_name_link(name):
-    """A glyph a log line names by its name (owner's request of 2026-11-24, on Glyph Compose's "Made dotlessi
+    """A glyph a log line names by its name (the request of 2026-11-24, on Glyph Compose's "Made dotlessi
     from i without its dot"): the name in italics, as a link that opens the glyph in a Glyph window of the
     window's font on a click (the glyphname: target glyph_name_links use; Log.open_linked, or a dialog's
     handler). Its text stays the name: Log.pictured draws only the links whose text is not in italics.
@@ -7185,7 +7185,7 @@ def unicode_label(code):
 
 
 def header_alignment():
-    """Every list's headers: centered (owner's report 141), over text and numbers alike."""
+    """Every list's headers: centered (report 141), over text and numbers alike."""
     Qt = _qt()[0].Qt
     return int(getattr(Qt, "AlignHCenter", 0x4) | getattr(Qt, "AlignVCenter", 0x80))
 
@@ -7467,7 +7467,7 @@ def b(value):
 
 
 def grouped(number):
-    """A whole number with its thousands set apart by commas: 13,932 (owner's image 231)."""
+    """A whole number with its thousands set apart by commas: 13,932 (image 231)."""
     try:
         return u"{:,}".format(int(number))
     except Exception:
@@ -7484,7 +7484,7 @@ KILOBYTE = 1024  # a log's file sizes count as Windows' Explorer counts them, so
 
 
 def file_size_text(size):
-    """A file's size as a log words it (the owner, 2026-11-24): whole KB under 1 MB (1 KB at the least, 0 KB
+    """A file's size as a log words it (the review of 2026-11-24): whole KB under 1 MB (1 KB at the least, 0 KB
     for an empty file), MB with one decimal under 1 GB, GB with one decimal past it: u"840 KB", u"12.3 MB",
     u"1.6 GB". A value that rounds up to the next unit is said in it (1,023.96 MB is u"1.0 GB")."""
     size = max(0, int(size or 0))
@@ -7498,7 +7498,7 @@ def file_size_text(size):
 
 
 def font_named(name, master=None, masters=1):
-    """The start of a window's top line, the same in every tool (owner's images 223 and 238 asked what
+    """The start of a window's top line, the same in every tool (images 223 and 238 asked what
     decided "(1 master)"): the font's name in bold, then its master's, then how many masters it has only
     when it has more than one. "<b>Cardo</b>, master <b>Bold</b> (of <b>3 masters</b>)"."""
     text = b(name)
@@ -7582,7 +7582,7 @@ def rich(label):
 SENTENCE_END = re.compile(u"([.!?]|\N{HORIZONTAL ELLIPSIS})((?:</[bi]>)?)\\s+(?=[A-Z<(\u00c0-\u024f])")
 
 
-ONE_LINE = [NO_FONT_LINE]  # the only sentences kept on one line, across the suite (the owner's images 191, 278, 280)
+ONE_LINE = [NO_FONT_LINE]  # the only sentences kept on one line, across the suite (images 191, 278, 280)
 
 
 def one_line(text):
@@ -7615,7 +7615,7 @@ HEAD_BREAK = u"<br><br>"  # the blank line under the font's sentence in a one-la
 def head_join(font, rest):
     """A one-label top line: the font's sentence (font_named's, with its period), a blank line, then what the
     tool found (rest), as the windows whose top line and status lines are separate labels have it (window_head,
-    owner's images 346, 355, 358); the font's alone when rest says nothing."""
+    images 346, 355, 358); the font's alone when rest says nothing."""
     font, rest = (u"%s" % (font or u"")).strip(), (u"%s" % (rest or u"")).strip()
     if not font or not rest:
         return font or rest
@@ -7624,7 +7624,7 @@ def head_join(font, rest):
 
 def status_label(text=u"", plain=False):
     """A dialog's top line: rich text (or plain), wrapped, a line per sentence (its setText splits them).
-    Hidden while it says nothing: an empty one still took a line, a gap over the fields (owner's images
+    Hidden while it says nothing: an empty one still took a line, a gap over the fields (images
     197 to 204)."""
     QtCore, QtGui = _qt()
 
@@ -7671,8 +7671,8 @@ TAB_SHEET = (u"QTabBar::tab { background: transparent; color: palette(window-tex
 # FreeLab's tab bars: flat, every tab in the text's color, the chosen one told by its underline in the
 # highlight color alone, over either palette, and left alone by dark mode. Windows' own style drew the
 # chosen tab light whatever the palette: mapped, its text came out garbled, and the edges changed with the
-# tab chosen. The other tabs were a mid gray at first, which read as grayed out: on a light window (owner's
-# image 352), then on a dark one too (the review of November 23, image 5).
+# tab chosen. The other tabs were a mid gray at first, which read as grayed out: on a light window
+# (image 352), then on a dark one too (the review of November 23, image 5).
 TAB_SHEET_LIGHT = TAB_SHEET  # (the light window's own sheet, until both took the text's color: kept for callers)
 
 
@@ -7688,7 +7688,7 @@ LIGHT_FIELD_DARKER = 107  # percent: a grayed field's background on a light wind
 def light_field_color(window_color, QtGui):
     """The background of a grayed field on a light window: a shade darker than the window's. Windows' own style
     fills a grayed field with the window's color, its frame a faint line: Feature Code's empty field beside
-    Glyphs and its spin boxes vanished in light mode (owner's image 366, live 2026-11-19)."""
+    Glyphs and its spin boxes vanished in light mode (image 366, live 2026-11-19)."""
     return QtGui.QColor(window_color).darker(LIGHT_FIELD_DARKER)
 
 
@@ -7826,7 +7826,7 @@ def widen_window(view):
     """A tool's window made wider when a list just fitted cannot show its columns at their fitted widths
     (note_wants' fits) without scrolling sideways: by what it lacks, at most to the free area of
     FontLab's screen (screen_area, SCREEN_MARGIN kept), around its center. Never narrower, and never
-    once the owner gave a window its size by hand (this window since it opened, or every window this
+    once a window was given its size by hand (this window since it opened, or every window this
     session: note_size), nor while it is maximized, minimized, or not shown. The pixels it grew by."""
     try:
         window = view.window()
@@ -7839,7 +7839,7 @@ def widen_window(view):
             return 0
         size, opened = _size(window), getattr(owner, "opened_size", None)
         if opened is not None and (abs(size[0] - opened[0]) > 2 or abs(size[1] - opened[1]) > 2):
-            return 0  # (resized by hand: the owner's size stays)
+            return 0  # (resized by hand: that size stays)
         count = int(_property(view, "columnCount"))
         fits = _wants_of(view).get("fits") or []
         total = sum(fits[c] if c < len(fits) and fits[c] is not None else int(view.columnWidth(c))
@@ -8012,7 +8012,7 @@ class Log(object):
         return LOG_HEIGHT[0] if LOG_HEIGHT else int(self.line * LOG_LINES + 12)
 
     def yield_room(self, window):
-        """The log gives up room first (owner's image 340: its dragged height kept while the lists above it
+        """The log gives up room first (image 340: its dragged height kept while the lists above it
         were squeezed to a row): while a list of the window shows less than COMFORT_ROWS rows' room, the log
         is made shorter by what they lack, down to LOG_LEAST_LINES lines; as the window grows taller, the log
         takes its height back first. Called as the window is resized (filter_event). Never raises."""
@@ -8154,7 +8154,7 @@ class Log(object):
 
 
 # FreeLab's one table layout (table_layout), for every list of rows in every tool, trees and tables
-# alike, in either theme and across a switch: the owner's reference is Glyph Compose's and Feature Code's
+# alike, in either theme and across a switch: the reference is Glyph Compose's and Feature Code's
 # lists (2026-11-15), where a list converted later had a header dark mode had mapped (stray light
 # separators), gray ticks, rows close to their text, no grid where the theme changed, or columns that
 # left half the window empty.
@@ -8277,7 +8277,7 @@ def table_sheet(colors, kind="QTreeView", grid=True, check_size=CHECK_SIZE, mark
     """The stylesheet of a FreeLab list (table_layout) in colors (table_colors), between its marks."""
     line = _css(colors["grid"], TABLE_GRID_ALPHA)
     # (no focus rectangle: the style framed the clicked cell of the selected row, a faint box around the
-    # current column's cell, which serves nothing in lists selected by the row, owner's report 114)
+    # current column's cell, which serves nothing in lists selected by the row, report 114)
     rules = [TABLE_SHEET_MARK, u"%s { outline: 0; }" % kind]
     if kind == "QTableView":  # (a table draws its grid itself; its cells take only the padding)
         rules.append(u"QTableView { gridline-color: %s; }" % (line if grid else u"transparent"))
@@ -8361,7 +8361,7 @@ TABLE_FILL_PROP = "freelabTableFill"  # the key of the list's fill watch (sys._f
 RESIZE_EVENT = 14  # QEvent::Resize
 TABLE_FILLS_KEPT = 256  # watches held (those of windows long closed go first)
 LEAST_COLUMN = 24  # pixels: no column is narrowed below this (or its header's text) to fit a list's width
-INTERACTIVE = 0  # QHeaderView::Interactive: a column the owner can drag (a tool's other modes are its own)
+INTERACTIVE = 0  # QHeaderView::Interactive: a column that can be dragged by hand (a tool's other modes are its own)
 
 
 def _wants_of(view):
@@ -8449,7 +8449,7 @@ def _fill_up(widths, wants, columns, give):
 
 def share_widths(widths, wants, leasts, room, held=None, stretch=None):
     """New widths (pixels, None for a hidden column) for a list's columns, so that together they fill
-    room exactly: never a gap at the list's right (owner's report 142), and no sideways scrolling as
+    room exactly: never a gap at the list's right (report 142), and no sideways scrolling as
     long as no column must go below its least (leasts) for it.
     Narrower: each column's spare room first (its width past what it wants, wants), the roomiest first;
     after a column was dragged (held, kept as dragged), then its neighbor (the next column, or the one
@@ -8556,7 +8556,7 @@ def column_needs(view, widths):
 
 
 def drag_limit(widths, leasts, column, room):
-    """The widest a column being dragged may be made (owner's image 214: a column dragged past the
+    """The widest a column being dragged may be made (image 214: a column dragged past the
     list's frame pushed every column after it out of sight): the room the list shows, less the columns
     before it as they are and those after it at their least (share_columns brings them down to it once
     the drag ends). widths: the columns' widths now, None for a hidden one. Never under MIN_SECTION."""
@@ -8583,7 +8583,7 @@ def drag_limit_of(view, column):
 
 def share_columns(view, held=None, after_fit=False):
     """A FreeLab list's columns sharing its width (share_widths). What each wants is its whole content
-    (note_wants, from the last fit; or the width the owner dragged it to); the least each may be given is
+    (note_wants, from the last fit; or the width it was dragged to); the least each may be given is
     its header's text (at least LEAST_COLUMN pixels), and the stretch column's whole content (its
     pictures are never cut). Called when the list is resized (watch_table, on the next turn of the event
     loop), when a column is dragged (held: that column, kept as dragged), and after each fit of the list
@@ -8632,7 +8632,7 @@ def share_columns(view, held=None, after_fit=False):
 def fitted_bar(view, widths, room):
     """A list whose columns fit its width shows no horizontal scroll bar until they no longer do: the
     columns are shared on the next turn of the event loop after a resize, so between the two the old
-    widths passed the new width and the bar flashed on and off as the window was resized (owner's image
+    widths passed the new width and the bar flashed on and off as the window was resized (image
     295). Off while the columns fit; as needed once even their least passes the width. Not for an empty
     list (empty_bars keeps its bars off)."""
     try:
@@ -8648,7 +8648,7 @@ def fitted_bar(view, widths, room):
 
 
 MIN_SECTION = 24  # pixels: a column dragged narrower stops here (at 0 it vanished, with no way to get it back)
-TABLE_DRAG_PROP = "freelabTableDrag"  # on a list while the owner drags one of its column edges
+TABLE_DRAG_PROP = "freelabTableDrag"  # on a list while one of its column edges is dragged
 
 
 def view_rows(view):
@@ -8664,7 +8664,7 @@ def view_rows(view):
 
 def empty_bars(view):
     """A list with no row shows no scroll bar: while it was resized, its columns (shared on the next turn
-    of the event loop) passed its width for a moment, and an empty list flashed its bars (owner's image
+    of the event loop) passed its width for a moment, and an empty list flashed its bars (image
     192). Its bars come back as needed once it has rows: the vertical one here, the horizontal one when
     its columns no longer fit (fitted_bar, as they are shared out)."""
     try:
@@ -8688,7 +8688,7 @@ def stretch_column(view, measure=False):
 
 
 def watch_table(view):
-    """The list's columns shared out again as the list is resized and as the owner drags a column
+    """The list's columns shared out again as the list is resized and as a column is dragged
     (share_columns), by a watch on its viewport and its header: parented to the list (Qt deletes it with
     it, never PythonQt at whatever moment Python's collector picks) and held in sys (PythonQt drops a
     Python override or a slot no one holds). The filter and the header's signal only start the watch's
@@ -8712,7 +8712,7 @@ def watch_table(view):
                     elif kind in (2, 3) and obj is not view.viewport():  # (a press or release on the header)
                         # While a column edge is dragged, Qt keeps the last column at the list's edge; the
                         # columns are shared out once it is let go. Shared at each move, the last column
-                        # came off the edge and back (owner's image 173: "jittery")
+                        # came off the edge and back (image 173: "jittery")
                         header = _header_of(view)
                         dragging = kind == 2
                         view.setProperty(TABLE_DRAG_PROP, dragging)
@@ -8736,7 +8736,7 @@ def watch_table(view):
             try:
                 if view.property(TABLE_SHARING_PROP):
                     return  # (share_columns' own widths)
-                if view.property(TABLE_DRAG_PROP):  # (the owner's drag: kept inside the frame, MIN_SECTION at least)
+                if view.property(TABLE_DRAG_PROP):  # (a drag by hand: kept inside the frame, MIN_SECTION at least)
                     module = modules.get(name)
                     limit = (getattr(module, "drag_limit_of", None) or own_limit)(view, int(column))
                     if limit is not None and (int(new) > limit or int(new) < MIN_SECTION_NOW[0]):
@@ -8888,7 +8888,7 @@ def window_has_font(owner):
 
 
 def no_font_states(dialog):
-    """A window with no font (owner's images 193 to 210): its separators hidden (there is nothing under
+    """A window with no font (images 193 to 210): its separators hidden (there is nothing under
     them to set apart), and its controls grayed (nothing they act on), but the tools menu, the arrows,
     help, Close, and what a tool keeps usable without a font (WITHOUT_FONT_PROP). Given back as a font
     comes; meanwhile enable() keeps them grayed whatever the tool asks."""
@@ -8911,7 +8911,7 @@ def no_font_states(dialog):
                 line.setVisible(shown)
         except Exception:
             continue
-    for label in dialog.findChildren(QtGui.QLabel):  # (a preview's caption over nothing: owner's image 283)
+    for label in dialog.findChildren(QtGui.QLabel):  # (a preview's caption over nothing: image 283)
         try:
             if not label.property(PREVIEW_CAPTION_PROP) or label.window() != window:
                 continue
@@ -8963,7 +8963,7 @@ def no_font_states(dialog):
 
 def heads_section(line):
     """Whether a separator sets apart a section's heading (the label right after it in its layout): it
-    stays with no font, the list's frame above and the heading below being shown then too (owner's image
+    stays with no font, the list's frame above and the heading below being shown then too (image
     318, Feature Code's Figure forms to build: "missing on all windows where it should be present")."""
     try:
         parent = line.parentWidget()
@@ -9034,7 +9034,7 @@ def check_rows(items, wanted, log=None, command=u"Tick all", noun=u"row", many=N
     checkable row of items (QTreeWidgetItem or QListWidgetItem, column 0) set to wanted (True, False, or
     a function of the item giving either, or None to leave it), and the log told how many it checked
     and unchecked, and how many of those were out of sight (row_hidden: in a closed group, or filtered
-    out), as check_line words it (owner's report 118: these buttons left no line). Returns (checked,
+    out), as check_line words it (report 118: these buttons left no line). Returns (checked,
     unchecked, hidden). A tool calls it from its button's slot, then updates its buttons as before."""
     QtCore = _qt()[0]
     on, off = QtCore.Qt.Checked, QtCore.Qt.Unchecked
@@ -9101,7 +9101,7 @@ def watch_history(owner):
             if now != seen:
                 # Read again only once the History has stayed at one place for a tick: Undo pressed several
                 # times in a row otherwise landed inside a window's read (its events pumped), on glyphs the
-                # next Undo had put back (owner's images 373 and 377)
+                # next Undo had put back (images 373 and 377)
                 if getattr(owner, "history_settling", None) != now:
                     owner.history_settling = now
                     return
@@ -9123,7 +9123,7 @@ class ClickRegions(object):
     """Spans of a widget's picture (a label's pixmap, or a button's icon, drawn centered) that can be
     double-clicked: each (left, right, key) across the picture, in its pixels. A double-click on one calls
     on_click(key); a single click there does nothing (the widget's own click does not happen either): a
-    click meant for the button took it to another pair (owner's image 362, as Glyph Compose's previews,
+    click meant for the button took it to another pair (image 362, as Glyph Compose's previews,
     image 333). The pointer becomes a hand over one."""
 
     def __init__(self, widget, on_click, tip=u""):
@@ -9223,7 +9223,7 @@ def pair_pixmap(package, master, left, right, value, caption, color, font, room=
     line = QtGui.QFontMetrics(font).height() if caption else 0  # (no caption: no blank band under the pair)
     height = int(em * 1.35) + line
     drawn = width  # (the pair's own width; a caption wider than it widens the picture, the pair centered in it:
-    # a long font name was cut at both ends, owner's image 368)
+    # a long font name was cut at both ends, image 368)
     if caption and not room:
         try:
             width = max(width, int(QtGui.QFontMetrics(font).width(caption)) + 2 * margin)
@@ -9349,7 +9349,7 @@ def flag_segments(text, left, width):
 def separator(header=False, vertical=False):
     """A thin line between parts of a window: a mid gray at half strength, as the lists' cell lines.
     header: the line under a window's top text (its font line and status lines), shown whatever the
-    window holds (owner's images 222, 223, 275, 276: every window has one, and it stays with no font:
+    window holds (images 222, 223, 275, 276: every window has one, and it stays with no font:
     the grayed fields are still under it); any other is hidden while the window has no font
     (no_font_states: nothing under it to set apart). vertical: a line between two previews side by side."""
     QtCore, QtGui = _qt()
@@ -9367,7 +9367,7 @@ def sentence_end(row):
     """The period that ends a sentence the controls of row finish ("List changes of at least [20 units]."),
     against its last control: the row's spacing taken back before it (a spacing of its own, the period
     floated a word's width away, live 2026-11-17). The period is that control's caption (caption): grayed
-    with it, as with no font (owner's images 319 to 323: it stayed bright), and its help the control's.
+    with it, as with no font (images 319 to 323: it stayed bright), and its help the control's.
     Returns the label."""
     QtGui = _qt()[1]
     try:
@@ -9411,7 +9411,7 @@ def show_only(groups, shown):
     """Shows the widgets of groups[shown] and hides every other group's (groups: a dict or a list of
     lists of widgets), the others hidden FIRST: a tab's buttons share the window's bottom row, and a
     switch that showed the new tab's before hiding the old ones held both a moment, so Qt grew the window
-    to fit them and never gave the width back (owner's image 284, live 2026-11-18: Glyph Compose went from
+    to fit them and never gave the width back (image 284, live 2026-11-18: Glyph Compose went from
     1,084 to 1,568 pixels with no font). Never raises."""
     try:
         keys = list(groups.keys()) if hasattr(groups, "keys") else list(range(len(groups)))
@@ -9431,7 +9431,7 @@ def show_only(groups, shown):
 
 def preview_caption(text=u"", label=None):
     """A preview's caption ("Now", "Suggested", "In the font: a"), as CJK Spacing first drew them
-    (owner's image 246): a tenth smaller, in the quiet (grayed) text color. label: an existing label to
+    (image 246): a tenth smaller, in the quiet (grayed) text color. label: an existing label to
     style, else a new one. Marked so that caption_states never gives it the color of a control."""
     QtGui = _qt()[1]
     if label is None:
@@ -10548,7 +10548,7 @@ class AutoKerningDialog(object):
         # (the pairs a line names drawn as the font draws them; a glyph clicked opens in a Glyph window)
         self.log.follow(lambda: (self.fontlab, self.package, self.master))
         self.seen_history, self.first_pass, self.pinned = None, True, set()
-        # Two rows of options (owner's images 222, 262, 271, 272): what Analyze measures, ending with it
+        # Two rows of options (images 222, 262, 271, 272): what Analyze measures, ending with it
         # (a tool's run button follows the options it reads, never pushed to the window's right edge), then
         # how the list shows what was measured. Captions: "Noun: [choice]", or a sentence the controls
         # finish, with its period.
@@ -10812,7 +10812,7 @@ class AutoKerningDialog(object):
 
     def hint_shown(self):
         """The preview's hint ("Select a pair...") only while pairs are listed and none is selected: with
-        none listed, there is nothing to select (owner's image 187)."""
+        none listed, there is nothing to select (image 187)."""
         try:
             if self.selected_row() is None:
                 self.preview_note.setVisible(bool(self.suggestions))
@@ -10942,7 +10942,7 @@ class AutoKerningDialog(object):
 
     def no_font_scripts(self):
         """With no font, Script: says "n/a" (grayed with it), not the scripts of a font closed or Latin
-        (owner's images 289, 290); fill_scripts lists the next font's, its keys being others."""
+        (images 289, 290); fill_scripts lists the next font's, its keys being others."""
         try:
             self.script_box.blockSignals(True)
             self.script_box.clear()
@@ -11354,7 +11354,7 @@ class AutoKerningDialog(object):
         enable(self.all_button, any(not on and not self.suggestions[row].current for row, on in zip(rows, checked)))
         enable(self.none_button, any(checked))
         # (only while a checked pair would get a value it has not: once written, its checks stay and it
-        # grays out; clicked again and again, it logged "Wrote 0 entries for 0 pairs", owner's report 151)
+        # grays out; clicked again and again, it logged "Wrote 0 entries for 0 pairs", report 151)
         enable(self.apply_button, self.writes_pending([self.suggestions[row] for row, on in zip(rows, checked) if on]))
         enable(self.restore_button, self.edited())
         enable(self.classes_button, self.package is not None)
@@ -11776,7 +11776,7 @@ class AutoKerningDialog(object):
         written). The kerning is the font's own state, which FontLab records when it opens a font, but the
         step notify_changed makes records the whole font, its glyphs too, and they have no state of their
         own in a font opened afresh: undoing the step made FontLab print "We have a problem with the
-        component 'P' in glyph 'Rho:Regular'" for each glyph built from components (owner's image 336)."""
+        component 'P' in glyph 'Rho:Regular'" for each glyph built from components (image 336)."""
         return begin_write(self.fontlab, self.package, u"FreeLab Auto Kerning", self.log)
 
     def after_writing(self, package):
@@ -12239,7 +12239,7 @@ if not os.environ.get("FREELAB_NO_AUTOSTART") and __name__ != "freelab_auto_kern
 
 # ---------------------------------------------------------------------------
 # A file saved, shown in its folder: a log line names the folder as a link (reveal_link) whose click shows the
-# file selected in a new window of the system's file manager (owner's image 375: Font Builder's templates,
+# file selected in a new window of the system's file manager (image 375: Font Builder's templates,
 # Proof's PDFs). A dialog's log handler hands the link here (reveal_clicked).
 # ---------------------------------------------------------------------------
 

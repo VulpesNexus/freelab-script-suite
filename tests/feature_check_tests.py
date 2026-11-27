@@ -502,14 +502,14 @@ class FontTests(unittest.TestCase):
 
 class LineTests(unittest.TestCase):
     def test_counts_group_their_thousands(self):
-        # Owner's image 231: "13932 glyphs"
+        # Image 231: "13932 glyphs"
         self.assertEqual(fc.counted(13932, "glyph"), "13,932 glyphs")
         self.assertEqual(fc.counted(1, "rule"), "1 rule")
 
     def test_the_summary_line_in_bold_and_escaped(self):
         report = fc.Report(code(), [fc.Finding("unused-class", "@x is never used"),
                                     fc.Finding("empty-class", "@y is empty")], built=True)
-        # (one sentence, one line: owner's image 343)
+        # (one sentence, one line: image 343)
         self.assertEqual(fc.summary_line(report), "It compiles: 1 warning, 1 piece of advice.")
         self.assertEqual(fc.summary_line(report, rich=True),
                          "It compiles: <b>1 warning</b>, <b>1 piece of advice</b>.")
@@ -702,7 +702,7 @@ class DialogTests(unittest.TestCase):
         return dialog
 
     def test_the_header_then_the_options_then_the_bottom_row(self):
-        # Owner's images 231, 237, and 255: the result under the font line; Check at the end of its option;
+        # Images 231, 237, and 255: the result under the font line; Check at the end of its option;
         # Compile in FontLab in the bottom row, left of Apply ticked fixes
         package = FakeDialogPackage(DECLARED, [("liga", feature("liga", "  sub f i by f_i;\n"))], ORDER * 800)
         package.glyphsCount = len(ORDER) * 800
@@ -762,7 +762,7 @@ class DialogTests(unittest.TestCase):
         self.assertTrue(dialog.compile_button.enabled)
 
     def test_compiling_shows_in_the_top_row_until_fontlab_reports(self):
-        # Owner's image 212: no visual feedback while FontLab compiled
+        # Image 212: no visual feedback while FontLab compiled
         ak = self.ak
         dialog = self.dialog(FakeDialogPackage(DECLARED, [("liga", feature("liga", "  sub f i by f_i;\n"))], ORDER))
         started, moved, ended, reports = [], [], [], []
@@ -797,7 +797,7 @@ class DialogTests(unittest.TestCase):
 
 
     def test_cancel_is_usable_while_it_checks_not_while_fontlab_compiles(self):
-        """The owner, 2026-11-24: a Cancel left of Close (test_the_rows_in_order), grayed but while work that can
+        """The review of 2026-11-24: a Cancel left of Close (test_the_rows_in_order), grayed but while work that can
         stop runs (ak.cancel_button), as Esc stops it; its help says what a stop leaves."""
         import qtfakes
         ak = self.ak

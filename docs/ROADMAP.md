@@ -1,10 +1,10 @@
 # Roadmap
 
-Nothing is outstanding, and nothing else is planned. Every feature the owner asked for is done (below), and every item this page carried was closed on 2026-11-27, either done or recorded as a known limit with its reason. How each tool came to work as it does is in [HISTORY.md](HISTORY.md).
+Nothing is outstanding, and nothing else is planned. Every feature that was planned is done (below), and every item this page carried was closed on 2026-11-27, either done or recorded as a known limit with its reason. How each tool came to work as it does is in [HISTORY.md](HISTORY.md).
 
 ## Done
 
-The features the owner asked for, in the owner's order of interest:
+The features that were planned, in order of priority:
 
 1. **Dark mode** for FontLab 7's interface: [DARKMODE.md](DARKMODE.md).
 2. Automated kerning: Auto Kerning in Latin, Cyrillic, Greek, kana, Armenian, Georgian, Devanagari, Hebrew, and Thaana, suggested kerning classes, and Kerning Check, [KERNING.md](KERNING.md); Auto Spacing, a sister script, [SPACING.md](SPACING.md).
@@ -17,7 +17,7 @@ Around them: Font Builder, Feature Check, Font Compare, Family Audit, Proof, Qui
 
 ## Closed on 2026-11-27
 
-- Dark mode's display defects: every dialog FontLab's menus open was looked at, and every defect the owner's reviews found is fixed and was seen live ([HISTORY.md](HISTORY.md)), but the few recorded below. The tab titles keep ClearType, the owner's choice (image 182).
+- Dark mode's display defects: every dialog FontLab's menus open was looked at, and every defect the reviews found is fixed and was seen live ([HISTORY.md](HISTORY.md)), but the few recorded below. The tab titles keep ClearType, chosen on 2026-11-26 (image 182).
 - Every FontLab call of Family Audit and Font Compare is proven live; Font Check's vertical metrics reach an exported font; Glyph Compose's whole next scope is built.
 - Codex's review of everything changed since 2026-11-19 (24 findings), and the documentation checked against the code and data.
 

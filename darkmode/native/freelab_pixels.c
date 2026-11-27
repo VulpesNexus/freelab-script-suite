@@ -374,7 +374,7 @@ static int colored(const uint8_t *px)
 /* Each pixel made the gray of its darkest channel, its alpha kept: dark text ClearType has drawn, where each
  * channel holds another third of a stroke, so that the mean of the three is a third or two of the ink at most
  * (a panel's title on a narrow panel: its thin capitals came out uneven, some stems half as strong as others:
- * the owner, 2026-11-24). The darkest channel says how much ink the stroke has there. */
+ * the review of 2026-11-24). The darkest channel says how much ink the stroke has there. */
 EXPORT void freelab_gray_darkest(uint8_t *pixels, int64_t count)
 {
     int64_t i;
@@ -956,7 +956,7 @@ static uint32_t all_color(uint32_t rgb, int mode, double dark_l, double light_l,
 
 /* A list's rows on a paper dark already (a list dark by its stylesheet): a gray clearly darker than the paper is
  * ink drawn for a light list, black on what is now dark (Generate Instance's "Ag" beside each style, the
- * sample of the font in the Glyph window's bar: the owner, 2026-11-25). Too rare to be an anchor, it was left
+ * sample of the font in the Glyph window's bar: the review of 2026-11-25). Too rare to be an anchor, it was left
  * as drawn, dark on dark. It is taken for black ink over the paper, as much of it as it is darker, and comes
  * out as that much of light text over the paper. Returns 0 where that does not hold. */
 #define DARK_INK_PAPER_HLS 0.3 /* the paper: this dark at most */
@@ -1178,7 +1178,7 @@ static int light_surface_candidate(const Anchor *a)
     px[0] = (uint8_t)a->b;
     if (!a->surface || a->count < LIGHT_SURFACE_MIN_COUNT)
         return 0; /* (a few light letters are no surface: the Font window's script icons, white letters on dark
-                   * tiles, turned the tiles light around their letters, the owner, 2026-11-25) */
+                   * tiles, turned the tiles light around their letters, the review of 2026-11-25) */
     if (lightness(px[2], px[1], px[0]) >= WHITE_HLS)
         return 1;
     return (a->hrun >= LIGHT_SURFACE_RUN || a->vrun >= LIGHT_SURFACE_RUN) && a->okl >= LIGHT_SURFACE_OKL
@@ -1251,7 +1251,7 @@ static void survey_neighbors(const uint32_t *p, int64_t count, int64_t width, in
  * errors, about #8b0000, fringe in browns such as #340c00). The text it touches, mapped as ink (made
  * lighter in its own hue), or -1; cov: each channel's coverage, from the paper (0) to the text (1).
  * Mapped alone as dark ink, the fringe whose red is low turned light pink, lighter than the text it
- * smooths: light dots inside every letter (owner's report 155). */
+ * smooths: light dots inside every letter (report 155). */
 #define CLEARTYPE_STEP 24.0 /* levels: a channel the text moves this far from the paper says its coverage */
 #define CLEARTYPE_FLAT 10.0 /* levels: a channel that moves less stays this near the paper in a fringe */
 #define CLEARTYPE_SLACK 0.08 /* a coverage this far past 0 or 1 still counts (rounding) */
@@ -1786,7 +1786,7 @@ static int lighter_than_light_surface(uint32_t c, uint32_t surfaces)
  * paper as mapped plus k of the ink as content maps it (kept when clearly colored, turned over when not):
  * a red contour's smoothing is red at half strength over the dark canvas, as it was over the light one.
  * Before, each pixel was judged by its own color: a line's full pixels kept, light and red, its smoothing
- * turned over, dark, and every thin colored line came out as steps and dots (the owner, 2026-11-25:
+ * turned over, dark, and every thin colored line came out as steps and dots (the review of 2026-11-25:
  * "all color paths, contours and curves have this kind of jaggy edge"). Returns 0 where there is no light
  * main paper, or the pixel is no lighter mix of it (darker ink than any the paper could hold). */
 #define PAPER_MIN_HLS 0.6 /* the main paper of a light canvas (a Font window cell's gray, b7b7b8, is 0.72) */
@@ -1935,7 +1935,7 @@ static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, do
         px[0] = (uint8_t)b;
         if (spread_of(px) <= (tint > 0.0 ? TINTED_LINEAR_SPREAD : LINEAR_SPREAD)) {
             /* A blend with a strongly colored anchor, which the mapping keeps (red text on the Preview panel's
-             * white): mapped alone, the smoothing went gray, a gray rim around the red letters (the owner,
+             * white): mapped alone, the smoothing went gray, a gray rim around the red letters (the review of
              * 2026-11-25). Drawn as the blend of the two anchors as they come out. */
             if (keep_tint <= 0.0 && colored_anchor_bits && spread_of(px) > KEPT_BLEND_SPREAD /* (an island of the
                                      * interface, its ClearType grayed before: a canvas' ClearType colors are
@@ -2146,7 +2146,7 @@ static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int6
     {
         /* The paper itself is no text: the counter of a colored letter (an overlaid font's red O in a Font
          * window cell) has the letter's color on every side, and kept as drawn, it stood light in the dark
-         * cell (the owner, 2026-11-25). Text on a colored band is lighter than any paper around. */
+         * cell (the review of 2026-11-25). Text on a colored band is lighter than any paper around. */
         int a;
         uint32_t own = p[i] & 0xffffffU;
         for (a = 0; a < anchor_count; a++) {
@@ -2210,7 +2210,7 @@ static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int6
     /* Nor is a blend of the band and a paper text: the smoothing between a thin colored line and the paper (an
      * overlaid font's red outlines in a Font window cell, crossed slantwise where they curve) and the paper
      * between two colored letters (red text on the Preview panel's white, where the Q's tail meets its bowl)
-     * were kept light (the owner, 2026-11-25). Light text lies between the band and its own light color. */
+     * were kept light (the review of 2026-11-25). Light text lies between the band and its own light color. */
     return !band_paper_blend(self, band);
 }
 
@@ -2267,7 +2267,7 @@ static int white_on_colored(const uint32_t *p, int64_t i, int64_t width, int64_t
                    * of an a, an A's triangle: Overlay Fonts' sample on its white row) has strokes around it:
                    * where the color met, within a step or two (past its smoothing), is one of the picture's
                    * anchors and no surface, it is ink, and the white is the row's. Kept as a mark, it stood
-                   * white in the dark row (the owner, 2026-11-25). */
+                   * white in the dark row (the review of 2026-11-25). */
                     int64_t t;
                     for (t = 0; t < WHITE_MARK_INK_REACH; t++) {
                         int64_t tx = xx + sx * t, ty = yy + sy * t;
@@ -2355,19 +2355,19 @@ static int badge_count;
  * band, a guide) its warm gray takes a step or two, and only its frequent shades are candidates; the canvas'
  * own light grays (0.78 to 0.85) filled the BADGE_MAX_COLORS before the pill's turn; and the lines under it (a
  * guide, the side lines, a contour) ended the walks as dark. A walk then met another gray, a line, or nothing,
- * and the name's letters came out dark on one side of the line or all along (the owner, 2026-11-25). So on a
+ * and the name's letters came out dark on one side of the line or all along (the review of 2026-11-25). So on a
  * canvas a badge is no lighter than BADGE_PILL_MAX_HLS, a tinted badge's shades within BADGE_SHADE per channel
  * are it, and a walk crosses a thin line to a tinted badge (BADGE_CROSS_LINE). Lists (ink) keep the plain
  * rules: their badges are flat. Checked on every capture of the session's probes: only canvases with pills
  * change. */
 #define BADGE_PILL_MAX_HLS 0.8
 #define BADGE_SHADE 12 /* (the pill over the canvas' white above the baseline and its band below: 10 per channel
-                        * apart, and the letters below the line came out dark: the owner, November 25) */
+                        * apart, and the letters below the line came out dark: the review of November 25) */
 #define BADGE_PILL_MIN_RUN 2.0 /* a pill's gray runs both ways: a dashed sidebearing line, one pixel wide, was taken
                                 * for a pill, and its shades took in the names' fringes */
 #define BADGE_TINT 3 /* red above blue by this much at least: a tinted (warm) gray */
 #define BADGE_PILL_STROKE 5 /* px: on a pill, a name drawn pale over a glyph's fill has its smoothing within the
-                             * stroke's lightness, and an "n"'s stems ran 4 pixels across (the owner, 2026-11-25:
+                             * stroke's lightness, and an "n"'s stems ran 4 pixels across (the review of 2026-11-25:
                              * "uni" dark in every name over the glyph) */
 #define BADGE_CROSS_LINE 2 /* px: on a canvas, a walk crosses a dark line this thin (a guide, the side lines, a
                             * contour, drawn under a translucent pill) when the badge it reaches is a tinted
@@ -2522,7 +2522,7 @@ static int light_on_gray_badge(const uint32_t *p, int64_t i, int64_t width, int6
                 if (!badge_pill || ++dark_run > BADGE_CROSS_LINE) {
                     if (badge_pill && sy && !blocked) {
                         blocked = 1; /* (a glyph's slanted contour under the pill runs on below a stem: one way
-                                      * up or down, the other reaching the pill: the owner, November 25) */
+                                      * up or down, the other reaching the pill: the review of November 25) */
                         break;
                     }
                     return 0; /* dark before the gray: no badge around the pixel */
@@ -2774,7 +2774,7 @@ static int cleartype_fringe(const uint32_t *p, int64_t i, int64_t width, int64_t
     own = p[i] & 0xffffffU;
     /* No square root, and a neighbor of the pixel's own color is passed at once: a tinted surface (a Font
      * window's selected cells, pale blue, a million pixels of it) took a second to test, seven roots a pixel
-     * (the owner, 2026-11-24: menus slow to answer with many cells selected). The cosine test squared:
+     * (the review of 2026-11-24: menus slow to answer with many cells selected). The cosine test squared:
      * dot / (|v| |q|) <= c, with c negative, is dot < 0 and dot * dot >= c * c * |v|^2 * |q|^2. */
     for (d = -CLEARTYPE_REACH; d <= CLEARTYPE_REACH; d++) {
         const uint8_t *q;
@@ -2901,7 +2901,7 @@ static int find_glyph_icons(const uint32_t *p, int64_t count, int64_t width)
                 if (m >= 0 && !icon_px[m] && (p[m] >> 24) > 0
                     && (near_rgb(p[m], rgb, GLYPH_ICON_GROW)
                         /* through its light letters too, opaque (a tile: the Font window's script icons, cut in
-                         * pieces by their letters, each piece too small for a badge, came out light: the owner,
+                         * pieces by their letters, each piece too small for a badge, came out light: the review of
                          * 2026-11-25); a glyph icon drawn on nothing has no opaque light pixel on it */
                         || ((p[m] >> 24) == 255 && !light_row_pixel(m)
                             && lightness((uint8_t)(p[m] >> 16), (uint8_t)(p[m] >> 8), (uint8_t)p[m]) >= GLYPH_TILE_GROW_HLS))) {
@@ -2952,7 +2952,7 @@ static int find_glyph_icons(const uint32_t *p, int64_t count, int64_t width)
         /* light letters on it: a badge; a light pixel or two (a tag's hole): an icon. A shape whose box
          * holds more of a light row than of other light pixels is text on that row, its smoothing toward
          * the row being the light pixels: no badge (Overlay Fonts' sample, black on its selected row: the
-         * letters with counters were kept dark, light edges around them; the owner, 2026-11-24). A badge
+         * letters with counters were kept dark, light edges around them; the review of 2026-11-24). A badge
          * on a row fills its box but for its rounded corners. */
         if (light >= GLYPH_BADGE_MIN_LIGHT && (double)light >= GLYPH_BADGE_LIGHT_SHARE * (double)tail && on_row <= light
             && (2 * tail >= (x1 - x0 + 1) * (y1 - y0 + 1)
@@ -2960,7 +2960,7 @@ static int find_glyph_icons(const uint32_t *p, int64_t count, int64_t width)
             && x1 - x0 >= 7 && y1 - y0 >= 7) { /* (and a badge fills half its box at least, or, a tile, fills it with
                                                 * its letters: the Font window's Bengali and Kannada script icons,
                                                 * their letters more than half the tile, came out light gray: the
-                                                * owner, 2026-11-25; and holds letters: a letter or its end does
+                                                * review of 2026-11-25; and holds letters: a letter or its end does
                                                 * neither) */
             verdict = 3;
             for (y = y0; y <= y1; y++) { /* its letters and their smoothing too, as drawn */
@@ -3042,7 +3042,7 @@ static int dark_text_fringe(const uint32_t *p, int64_t i, int64_t width, int64_t
  * channel (ClearType never draws navy text's blue below navy's 128; small black text, whose thin stems
  * look like navy's, has an orange edge's low blue or a black core). Each such pixel is redrawn with one
  * coverage, its channels' mean, from the mapped white toward the mapped text color: gray smoothing in the
- * text's own dark-mode color, as the editors get (the owner, 2026-11-25: soft numbers, colored edges).
+ * text's own dark-mode color, as the editors get (the review of 2026-11-25: soft numbers, colored edges).
  * Checked on every capture of the session's probes: only the hinting numbers change. */
 #define COLORED_CT_MARK 5          /* white_mark */
 #define COLORED_CT_REACH 2
@@ -3159,7 +3159,7 @@ static int colored_cleartype(const uint32_t *p, int64_t i, int64_t width, int64_
         return 0; /* (a light fringe the darkest near: gray text, a ruler's digits on its near-white strip) */
     /* Small black text's thin stems are drawn as navy's would be ((43,43,128) beside (255,212,128)); its
      * letter has a pixel below the text color somewhere (an orange edge's low blue, a black core), navy
-     * text never: looked for over a letter's reach (the Fonts panel's list as drawn, the owner's fonts) */
+     * text never: looked for over a letter's reach (the Fonts panel's list as drawn, the fonts then open) */
     for (dy = -COLORED_CT_VETO_REACH; dy <= COLORED_CT_VETO_REACH; dy++) {
         for (dx = -COLORED_CT_VETO_REACH; dx <= COLORED_CT_VETO_REACH; dx++) {
             int64_t at = i + dy * width + dx;
@@ -3200,7 +3200,7 @@ static uint32_t colored_cleartype_color(uint32_t c, uint32_t t, int mode, double
 
 /* Ink: colored text a list draws with ClearType on its light rows (Overlay Fonts' samples, "AaGg123" in each
  * layer's color, on white and on the light blue of the selected row). Kept as drawn, the text's edges, of
- * every hue but its own, stayed around it: dark edges, a gray and purple patch in each G (the owner,
+ * every hue but its own, stayed around it: dark edges, a gray and purple patch in each G (the review of
  * 2026-11-25). A pixel with a strongly colored anchor (the text's color) and a light paper of low color
  * within COLORED_TEXT_REACH, its channels between the two, is drawn with one coverage, the mean of its
  * channels', from the paper as it comes out toward the text as it comes out. */
@@ -3299,7 +3299,7 @@ static int colored_text_on_light(const uint32_t *p, int64_t i, int64_t width, in
 /* A strongly colored mark with a white halo (the Scoreboard's orange word, drawn for a light canvas, shown in
  * a window of its own with the ink effect): ink, with no anchor to map, turns the halo's whites dark as
  * stray whites, and the blends between the mark and its halo, kept as drawn, ringed the word in light dots
- * (the owner, 2026-11-25). Such a blend is drawn again as the blend of the mark and what the white becomes.
+ * (the review of 2026-11-25). Such a blend is drawn again as the blend of the mark and what the white becomes.
  * The pixel (BGRA) is changed in place; 1 when it was such a blend. */
 #define HALO_WHITE_HLS 0.95 /* the halo: this light, of low color */
 #define HALO_MARK_SPREAD 60 /* the mark it rings: strongly colored */
@@ -3343,8 +3343,8 @@ static int halo_blend(uint8_t *px, double dark_l, double light_l)
 }
 
 /* Colored text drawn on a light paper, kept in its own color over the mapped paper (Overlay Fonts' sample
- * rows and preview: each font in the color the owner picks for it). Mapped, a dark red came out pink and
- * its edges in light dots, and as the color was dragged the mess changed with it (the owner, 2026-11-25:
+ * rows and preview: each font in the color picked for it). Mapped, a dark red came out pink and
+ * its edges in light dots, and as the color was dragged the mess changed with it (the review of 2026-11-25:
  * "a different approach entirely that leaves colored text intact"). Over a paper, a smoothed pixel is the
  * text's color mixed with the paper's. The picture's text colors are its frequent strong colors (cores); a
  * pixel near a core is put on the line from its paper (the nearest pixel of a paper color) to the text color
@@ -3367,7 +3367,7 @@ static int halo_blend(uint8_t *px, double dark_l, double light_l)
 #define REGROUND_MIN_STEP 3 /* per channel: a pixel this near its paper is paper */
 #define REGROUND_REACH 2 /* a core this near */
 #define REGROUND_PAPER_REACH 4 /* a paper pixel this near (else the main paper) */
-/* Light text (freelab_reground_light: a near-white color picked, #e7e3d7 on the selected row's #e9f0ff, the owner,
+/* Light text (freelab_reground_light: a near-white color picked, #e7e3d7 on the selected row's #e9f0ff, the review of
  * 2026-11-26): too weak for the tests above, and frequent enough to pass for a paper, it was mapped with the paper
  * and its letters came out hollow. In the widgets that show samples, a light color is text when its edges blend
  * into a paper: its neighbors are mostly paper or the smoothing between that paper and it. A paper's neighbors
@@ -3383,7 +3383,7 @@ static int halo_blend(uint8_t *px, double dark_l, double light_l)
 #define REGROUND_LIGHT_FIT 0.4 /* a light text's line is short: a pixel on it within this share of its length */
 #define REGROUND_LIGHT_PASSES 64 /* sweeps that carry "reaches a paper" through a light text's cores, at most */
 #define REGROUND_DARK_GROUND_HLS 0.4 /* a sample with no light paper, its most frequent color this dark: as drawn */
-/* In the samples, two rules and no gap between them (the owner, 2026-11-26): a color is text by the strong-color
+/* In the samples, two rules and no gap between them (the review of 2026-11-26): a color is text by the strong-color
  * test, or else by its shape, whatever its lightness. A light rule from 0.75 up had left a pale yellow (#dfde92, at
  * 0.72) to neither, mapped dark with light edges, and a dark gray pick (#202020) came out light. By its shape: */
 #define REGROUND_LIGHT_SOLID 0.5 /* this share of its pixels inside a solid run at most: strokes (the pill's gray on
@@ -3621,7 +3621,7 @@ static int64_t reground_run(const uint8_t *orig, uint8_t *out, int64_t count, in
     }
     if (light) {
         /* a dark ground: FontLab drew the sample on the dark palette already, in the colors picked (Overlay Fonts'
-         * preview, #e7e3d7 on #2d2d30: mapped, its letters came out dark olive on the dark ground, the owner's report
+         * preview, #e7e3d7 on #2d2d30: mapped, its letters came out dark olive on the dark ground, report
          * of 2026-11-26). There, a light color is a paper only if it runs across the picture on some line, as a
          * list's row does (its letters, frequent enough to pass for a paper, never do); with no paper left, the sample
          * is drawn as it is */
@@ -4021,7 +4021,7 @@ static int64_t reground_run(const uint8_t *orig, uint8_t *out, int64_t count, in
             if (reground_spread(color) < REGROUND_TEXT_SPREAD) {
                 /* a pixel beside a text color's core that neither fits its line nor is a color of its own (a
                  * shade's smoothing over another ground): left to the mapping, it came out a light pixel at the
-                 * text's edge (the owner, 2026-11-25: "white pixels bleeding"); drawn on that line instead */
+                 * text's edge (the review of 2026-11-25: "white pixels bleeding"); drawn on that line instead */
                 int t[3];
                 if (best_text < 0)
                     continue;
@@ -4055,7 +4055,7 @@ EXPORT int64_t freelab_reground_light(const uint8_t *orig, uint8_t *out, int64_t
 }
 
 /* Light text on a band of a strong color, on a canvas (a selected cell's name, white on the selection's blue):
- * ClearType's colored edges were kept, and the mapping turned a few of the letters' pixels dark (the owner,
+ * ClearType's colored edges were kept, and the mapping turned a few of the letters' pixels dark (the review of
  * 2026-11-25: "degree" fringed, with a black pixel in its g). Each pixel with the band's color within reach on
  * its four sides, and lighter than the band, is drawn again from its coverage: its channels' mean share of the
  * way from the band's color to white, in gray between the two. A band color: a strong color (BAND_TEXT_SPREAD)
@@ -4127,7 +4127,7 @@ EXPORT int64_t freelab_band_text(const uint8_t *orig, uint8_t *out, int64_t coun
     if (!nbands)
         return 0;
     /* only rows with a band pixel, and one within reach above and below, are looked at: walked from every
-     * pixel, a cell chart took 115 ms, more than its mapping (the owner, 2026-11-25: FontLab stopped answering
+     * pixel, a cell chart took 115 ms, more than its mapping (the review of 2026-11-25: FontLab stopped answering
      * as a color was dragged in Overlay Fonts, both Font windows repainting at each step) */
     band_rows_before[0] = 0;
     for (y = 0; y < rows; y++) {
@@ -4180,7 +4180,7 @@ EXPORT int64_t freelab_band_text(const uint8_t *orig, uint8_t *out, int64_t coun
 /* An anchor's pill on a canvas, drawn again whole over the mapping: its gray as mapped, plain, and its name
  * from its coverage. The pill is translucent, and what runs under it (the baseline, a guide, a glyph's
  * contour, its fill) showed through it and across its name, which the pixel rules could not tell from the
- * letters (the owner, 2026-11-25: "anything that overlaps with contours or other elements makes it a mess").
+ * letters (the review of 2026-11-25: "anything that overlaps with contours or other elements makes it a mess").
  * A pill: pieces of one warm gray shade each (PILL_SHADE_STEP), the pill's two halves over the canvas' two
  * grounds and the pieces a line cuts it into, joined when they touch; PILL_MIN_HEIGHT to PILL_MAX_HEIGHT rows,
  * wider than tall. In each of its rows, between its first and last pixel of a shade, a pixel lighter than its
@@ -4210,7 +4210,7 @@ static int32_t pill_members[MAX_INDEXED]; /* the pixels of the piece being found
 static PillPiece pill_pieces[PILL_MAX_PIECES + 1]; /* (the last: "looked at, no piece", never kept) */
 
 /* 2 for a warm gray (a pill's own), 1 for a near neutral one (the translucent pill over the template glyphs' purple
- * grays: #9c9a9a beside #a09e9c, the owner's report of 2026-11-26: the name broke over that half only), 0 for
+ * grays: #9c9a9a beside #a09e9c, report of 2026-11-26: the name broke over that half only), 0 for
  * neither. The pill is as dark as PILL_MIN_HLS while its anchor is under the mouse (#7e7a72, opaque). */
 #define PILL_MIN_HLS 0.42
 #define PILL_NEUTRAL_STEP 4 /* per channel, between any two: a near neutral gray */
@@ -4450,14 +4450,14 @@ EXPORT int64_t freelab_pills(const uint8_t *orig, uint8_t *out, int64_t count, i
 /* Dark text ClearType drew on a light ground, in an island of the interface (the Fonts panel's names, black
  * on its near-white list): each pixel of a stroke's edges made the gray of its darkest channel, before the
  * island is mapped. Mapped with their colors, the edges came out orange and blue around the light text, with
- * a channel darker than the dark ground, which the defringe pass after keeps (the owner, 2026-11-25). The
+ * a channel darker than the dark ground, which the defringe pass after keeps (the review of 2026-11-25). The
  * pixels are judged as drawn, then changed; returns how many were. */
 static uint8_t gray_ct_mark[MAX_INDEXED];
 
 /* Whether a flat surface of a strong color lies within GRAY_CT_SURFACE_REACH of a pixel: a pixel of
  * GRAY_CT_SURFACE_SPREAD or more whose four neighbors are its color. On one (the Fonts panel's light-blue disc
  * around a selected style's letter), the disc's own pixels beside the letter were made the gray of their channels
- * and came out a gray block beside the "R" (the owner, 2026-11-25); ClearType's fringes are strong colors too,
+ * and came out a gray block beside the "R" (the review of 2026-11-25); ClearType's fringes are strong colors too,
  * but never flat. */
 #define GRAY_CT_SURFACE_REACH 3
 #define GRAY_CT_SURFACE_SPREAD 60
@@ -4573,7 +4573,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     /* An island of the interface (everything mapped, no tint kept): light text on a strongly colored surface
      * stays as drawn, as content's does on a surface it keeps. The Fonts panel's style links are a light letter
      * on a light blue disc; turned over with the rest, the disc came out dark blue and the letter darker still
-     * (the owner, 2026-11-24 and 25: "hard-to-read black text"). */
+     * (the review of 2026-11-24 and 25: "hard-to-read black text"). */
     plain_marks = (mode == ANCHORS_ALL || mode == ANCHORS_ICON) && !fringes && width > 0 && count <= MAX_INDEXED;
     band_plain = plain_marks;
     plain_marks = plain_marks && find_bands(p, count, width);
@@ -4590,7 +4590,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
             find_near_badges(p, count, width);
     }
     /* Content too (a canvas): light text on a gray badge, an anchor's name on its pill. Turned over with the
-     * rest, the white name came out darker than its pill, and could not be read (the owner's review of
+     * rest, the white name came out darker than its pill, and could not be read (the review of
      * 2026-11-24). Found as in ink mode, over a fringe's mark, and drawn the same way: from the badge as it
      * comes out toward white. */
     for (i = 0; fringes && badge_count && i < count; i++) {
@@ -4784,7 +4784,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
             /* ClearType's smoothing of dark text on white, kept content (a FontAudit caption on its white tag,
              * the sizes under TrueType Hinting's preview): each channel holds another third of the stroke,
              * so the pixel's own lightness is a third or two of the ink at most, and turned over, thin text
-             * came out dim, most of it fringe (the owner, 2026-11-24). Its darkest channel says how much ink
+             * came out dim, most of it fringe (the review of 2026-11-24). Its darkest channel says how much ink
              * the stroke has there: mapped from that, as gray. */
             uint32_t m = (uint32_t)min_channel((const uint8_t *)&v);
             c = (m << 16) | (m << 8) | m;

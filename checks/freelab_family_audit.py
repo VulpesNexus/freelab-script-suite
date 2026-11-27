@@ -151,7 +151,7 @@ def codes_text(codes):
 def tab_text(title, count=None):
     """A tab's title with its count of differences in parentheses, thousands grouped: "Compatibility
     (40)"; "(alike)" when nothing differs ("Metrics and info (alike)": a "(0)" over 20 fields alike read as
-    nothing compared, owner's images 327 and 328); the title alone before an audit."""
+    nothing compared, images 327 and 328); the title alone before an audit."""
     if count is None:
         return title
     return u"%s (%s)" % (title, grouped(count) if count else u"alike")
@@ -1536,7 +1536,7 @@ class FontLabCalls(object):
         """Live (2026-11-24): a new font's flPackage.tfn reads "Unnamed", its ffn "Unnamed Regular", and its
         psn "Unnamed-Regular", whatever fgPackage.info.familyName is set to, and its Font window's tab is
         titled by them (title_name(): the ffn, or "tfn: master" once it has several masters): the assembled
-        Sarabun came up as "Unnamed: Bold" (the owner, 2026-11-24). All four are settable; set before the
+        Sarabun came up as "Unnamed: Bold" (the review of 2026-11-24). All four are settable; set before the
         window opens, since a tab already open kept its title when ffn was set after. tsn, ffn, and psn are the
         current master's (live 2026-11-27): the caller names each master in turn. psn: the master's PostScript
         name, told apart from the other masters' (postscript_names)."""
@@ -2145,7 +2145,7 @@ class FamilyAuditDialog(object):
         layout = ak.window_layout(dialog)  # (its content scrolls on a small screen)
         if hasattr(ak, "one_line"):
             ak.one_line(NO_FONT_LINE)
-        # The header (owner's images 222, 223, 229): the top line, the shown tab's status line, the line
+        # The header (images 222, 223, 229): the top line, the shown tab's status line, the line
         self.font_label = ak.status_label()
         self.font_label.setWordWrap(True)
         layout.addWidget(self.font_label)
@@ -2154,7 +2154,7 @@ class FamilyAuditDialog(object):
         layout.addWidget(self.status_line)
         layout.addWidget(ak.header_separator())
 
-        # The options, Compare at their end (owner's image 262)
+        # The options, Compare at their end (image 262)
         options = QtGui.QHBoxLayout()
         self.add_button = QtGui.QPushButton(u"Add files\N{HORIZONTAL ELLIPSIS}")
         self.add_button.setWhatsThis(u"Opens font files in FontLab (several at once), in any format FontLab opens: "
@@ -2252,7 +2252,7 @@ class FamilyAuditDialog(object):
         self.log = ak.Log()
         layout.addWidget(self.log.widget)
 
-        # The bottom row (owner's images 255 and 298): the sources' ticks and Show in Glyph window at the left;
+        # The bottom row (images 255 and 298): the sources' ticks and Show in Glyph window at the left;
         # the committing action, then Cancel and Close, at the right
         buttons = QtGui.QHBoxLayout()
         self.tick_all = QtGui.QPushButton(u"Tick all")
@@ -2315,7 +2315,7 @@ class FamilyAuditDialog(object):
     def restore_last(self):
         """The last audit of the session shown again, its sources ticked, when every one of them is still open
         and none changed since (each font's History where it was): the window reopened (after another tool,
-        or closed) kept nothing (owner's image 330). Otherwise nothing is shown. Whether it was shown."""
+        or closed) kept nothing (image 330). Otherwise nothing is shown. Whether it was shown."""
         last = getattr(sys, "_freelab_family_audit_last", None)
         if not last or self.audit is not None or self.busy:
             return False
@@ -2726,7 +2726,7 @@ class FamilyAuditDialog(object):
             other = [e.family for e in opened if family is not None and e.family != family]
             if other:
                 # (another family's font, added by mistake or for a look: not compared with this family unless
-                # ticked by hand; it was ticked with it, owner's image 344)
+                # ticked by hand; it was ticked with it, image 344)
                 self.log.add(u"Opened %s in FontLab as %s, of another family (%s): left unticked; tick it to compare "
                              u"it with %s all the same." % (self.ak.i(os.path.basename(path)), labels,
                                                             self.ak.html(other[0] or u"no family name"),
@@ -2893,7 +2893,7 @@ class FamilyAuditDialog(object):
 
     def show_status(self):
         """The shown tab's status line, as tall as the tallest tab's: a tab whose line took one line more than
-        another's moved the sources and the results down as the tabs switched (owner's images 370 and 371)."""
+        another's moved the sources and the results down as the tabs switched (images 370 and 371)."""
         try:
             label = self.status_line
             shown = self.status_of(self.current_key()) if self.entries else u""

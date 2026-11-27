@@ -44,7 +44,7 @@ FONT_CHECK_FILE, FONT_CHECK_MODULE = "freelab_font_check.py", "freelab_font_chec
 FEATURE_CODE_FILE, FEATURE_CODE_MODULE = "freelab_feature_code.py", "freelab_feature_code"
 SETTINGS_FILE = u"proof.json"  # in FreeLab's settings folder (ak.state_dir()): the summary's two settings
 # What the summary lists of the languages, after their counts (the dropdown's items, after "Summary lists:":
-# capitalized, as every dropdown's in the label form, owner's image 271)
+# capitalized, as every dropdown's in the label form, image 271)
 SUMMARY_LANGUAGES = (("covered", u"Covered languages"), ("reach", u"Covered languages and those within reach"),
                      ("none", u"No languages (counts only)"))
 SUMMARY_TITLE_SIZE = 30  # points: the family's name, in the font itself
@@ -75,17 +75,17 @@ WATERFALL_MIN = 120  # characters of sample text the waterfall wants (it is cut 
 ALL_MASTERS = u"All masters"
 NOTE = u"Kerning applied; OpenType features not applied"
 KERNING_SETS = (("all", u"Every kerned pair"), ("common", u"Common pairs only"))
-# The window's line while no font is open, on one line (ak.one_line; owner's image 278), "hooks to" as the
+# The window's line while no font is open, on one line (ak.one_line; image 278), "hooks to" as the
 # shared NO_FONT_LINE
 NO_FONT_LINE = u"No font is open. This window hooks to the next font you open, and lays out its proof at once."
-NOT_AVAILABLE = u"n/a"  # a dropdown that lists the font's content, with no font (grayed: owner's images 289 and 290)
+NOT_AVAILABLE = u"n/a"  # a dropdown that lists the font's content, with no font (grayed: images 289 and 290)
 PRINT_LABEL = u"Print (black on white)"
 # The second choice beside a light window: light gray (#ebebeb) on an off-black (#1e1e1e), named as they are
-# (owner's image 378: the label said white ink on black paper, which neither is)
+# (image 378: the label said white ink on black paper, which neither is)
 DARK_LABEL = u"Dark (light gray on off-black)"
 # Dark mode's medium grays (its Shade setting), as they color a window: the Text color of its medium palette
 # (#e0e0e0) on its Base (#3c3c40), darkmode/freelab_dark_mode.py's PALETTE_MEDIUM (tests/proof_tests.py reads
-# them there). The owner asked for "white on medium gray": the ink is a light gray, named as it is.
+# them there). The request was "white on medium gray": the ink is a light gray, named as it is.
 MEDIUM_LABEL = u"Medium (light gray on medium gray)"
 # The dropdown's items (color_choices): the window's colors first, then the others it is not in already
 COLOR_MODES = (("window", u"As the window"), ("print", PRINT_LABEL), ("medium", MEDIUM_LABEL))
@@ -1436,7 +1436,7 @@ def features_text(features):
 def kerning_text(pairs, master, entries=None, classes=None):
     """A master's kerning in one line: its pairs of glyphs with the classes resolved, then the entries
     and classes they come from, where FontLab gives them."""
-    if not pairs:  # (a count right at 0: never "0 kerned pairs", owner's image 228)
+    if not pairs:  # (a count right at 0: never "0 kerned pairs", image 228)
         return u"No kerned pairs in master %s" % master
     text = u"%s in master %s, classes resolved" % (counted(pairs, u"kerned pair"), master)
     if entries is not None and classes is not None:
@@ -1617,7 +1617,7 @@ def coverage_summary(fc, codes, attaches=None):
         scripts.append(ScriptSummary(u"%s" % found.script, fc.script_text(found), covered, reach))
     # The sets counted as Font Check counts them (its set_tally, one definition for both): the scripts of
     # Unicode apart (a script checked as a set, by its ranges, as Font Check checks it), the Legacy sets,
-    # wholly optional and always covered, not at all (the owner). Live on Noto Sans, Proof said "33 of 312"
+    # wholly optional and always covered, not at all (as asked). Live on Noto Sans, Proof said "33 of 312"
     # (the scripts counted among the sets) where Font Check said 33 of 140
     check = getattr(fc, "check_entry", fc.check_language)
     results = [check(one, font, within) for one in fc.load_character_sets()]
@@ -1681,7 +1681,7 @@ class Options(object):
     """What a proof shows: sections (keys of SECTIONS), the page size (a key of PAGE_SIZES), the
     waterfall's and the text's sizes, keep(left, right): the kerned pairs to list (None: all), and
     collisions: the glyphs of the kerning and spacing strings whose ink overlaps a neighbor's drawn in red
-    (owner's image 348; off at first: a script font's letters may overlap on purpose)."""
+    (image 348; off at first: a script font's letters may overlap on purpose)."""
 
     def __init__(self, sections=None, page="A4", waterfall=WATERFALL_SIZES, text_sizes=TEXT_SIZES, keep=None,
                  collisions=False):
@@ -1778,7 +1778,7 @@ def section_text(layout, font, groups, sizes, left_out):
 
 
 COLLISIONS_NOTE = u" Glyphs whose ink overlaps the next glyph's are drawn in red."
-# (a word, as the section ticks beside it are: as a sentence with its period it looked apart from them, the owner's
+# (a word, as the section ticks beside it are: as a sentence with its period it looked apart from them,
 # image 240, 2026-11-27; its tooltip says what it does)
 COLLISIONS_LABEL = u"Collisions"
 
@@ -2128,7 +2128,7 @@ def same_scope(one, other):
 
 def split_languages(covered, expanded=True, kept=None):
     """(the most spoken languages, listed first, the others, whether the others are listed): the most
-    spoken SCOPE_LANGUAGES_TOP first, then the others, all of them (the owner asked why they waited
+    spoken SCOPE_LANGUAGES_TOP first, then the others, all of them (it was asked why they waited
     behind More languages...: the dropdown opens as a list of LONG_CHOICES rows, scrolled, and a name's
     first letters typed find it). A short list is one block (SCOPE_LANGUAGES_SLACK). expanded and kept
     are no longer needed: every language is listed."""
@@ -2293,7 +2293,7 @@ def common_filter(common, codes, ak=None):
 
 def kerning_note(kerned, masters, b):
     """What the top line says of the kerning applied: each master's kerned pairs counted, in bold, "no
-    kerned pairs" at 0 (owner's image 228: "0 kerned pairs"); the master named only when several are."""
+    kerned pairs" at 0 (image 228: "0 kerned pairs"); the master named only when several are."""
     if not any(kerned):
         return u"No kerned pairs to apply"
     if len(masters) == 1:
@@ -2319,7 +2319,7 @@ def status_line(named, proof, size, ak):
     if proof.left_out:
         text += u" No text for %s: %s shaping." % (ak.html(u", ".join(proof.left_out)),
                                                   u"it needs" if len(proof.left_out) == 1 else u"they need")
-    # (the font's sentence, a blank line, then the proof's: every window's top line, owner's images 346 and 355)
+    # (the font's sentence, a blank line, then the proof's: every window's top line, images 346 and 355)
     if not named:
         return text
     return ak.head_join(u"%s." % named, text) if hasattr(ak, "head_join") else u"%s. %s" % (named, text)
@@ -2380,7 +2380,7 @@ def dark_mode_shade(paper=None):
 def color_choices(dark_window, shade="dark"):
     """The Colors dropdown's items, [(mode, label)]: the window's own colors first, then those the window
     is not in already, black on white (for printing) first. Beside a light window: the dark and the medium
-    choices; beside a dark one, black on white and the shade of dark mode the window is not in (the owner:
+    choices; beside a dark one, black on white and the shade of dark mode the window is not in (the review:
     the dark mode setting decides, "naturally, the current theme color determines which options get
     listed"). The second item stays the other of light and dark (print or dark), as it was before the
     medium choice."""
@@ -2408,7 +2408,7 @@ def colors_label(mode, ink, paper):
 def saved_line(ak, pages, path, colors, size=None):
     """The log's line once the PDF is written: its pages counted in bold, its colors (colors_label) and its size
     (size, in bytes, worded by ak.file_size_text; None: not said), the folder as a link that shows the file
-    selected in a new window of the system's file manager (ak.reveal_link: owner's image 375), and its name in
+    selected in a new window of the system's file manager (ak.reveal_link: image 375), and its name in
     italics."""
     folder = os.path.normpath(os.path.dirname(path))
     link = getattr(ak, "reveal_link", None)
@@ -2898,7 +2898,7 @@ class ProofDialog(object):
         ak.size_dialog(dialog)
         layout = QtGui.QVBoxLayout(dialog)
         if hasattr(ak, "one_line"):
-            ak.one_line(NO_FONT_LINE)  # (a no-font line: its two sentences on one line, owner's image 278)
+            ak.one_line(NO_FONT_LINE)  # (a no-font line: its two sentences on one line, image 278)
         self.font_label = ak.status_label()
         layout.addWidget(self.font_label)
         # (the header's line: shown with no font too, the grayed controls under it)
@@ -2908,7 +2908,7 @@ class ProofDialog(object):
         self.captions = {}  # each control's caption (a label), by the control's name here: it shows the control's help
 
         def captioned(into, name, caption, control, tip, stretch=0):
-            """A control after its caption, in the label form (owner's image 271: "Page: [A4]"): the help is
+            """A control after its caption, in the label form (image 271: "Page: [A4]"): the help is
             the control's; the caption (ak.caption) shows it on a right-click, and grays with the control."""
             label = self.captions[name] = QtGui.QLabel(caption)
             control.setWhatsThis(tip)
@@ -2961,7 +2961,7 @@ class ProofDialog(object):
         layout.addLayout(row)
         # Their lists open as windows of their own, which dark mode took for one of FontLab's lists and
         # mapped: light text with ClearType's colored fringes, on the Proof dropdown that opens over the
-        # page (owner's report 162). Drawn from the dark palette, as the boxes are, they are left alone.
+        # page (report 162). Drawn from the dark palette, as the boxes are, they are left alone.
         for box in (self.masters_box, self.page_box, self.pairs_box, self.scope_box, self.colors_box, self.zoom_box):
             leave_list_alone(box)
 
@@ -2992,8 +2992,8 @@ class ProofDialog(object):
             box.setWhatsThis(tips[key])
             checks.addWidget(box)
             self.section_boxes[key] = box
-        # (owner's image 348: off at first, a script font's letters may overlap on purpose; spaced as the section
-        # ticks are, owner's image 240)
+        # (image 348: off at first, a script font's letters may overlap on purpose; spaced as the section
+        # ticks are, image 240)
         self.collisions_box = QtGui.QCheckBox(COLLISIONS_LABEL)
         self.collisions_box.setChecked(bool(self.settings.get("collisions")))
         self.collisions_box.setWhatsThis(u"Draws colliding glyphs in red: in <i>Kerning strings</i> and <i>Spacing "
@@ -3216,7 +3216,7 @@ class ProofDialog(object):
         return True
 
     def no_font_choices(self):
-        """The dropdowns that list the font's content, with no font (owner's images 289 and 290: an empty
+        """The dropdowns that list the font's content, with no font (images 289 and 290: an empty
         dropdown said nothing): Masters shows a grayed "n/a" (no_font_states grays it), and Proof its first
         choice, Every script, the last font's scripts and languages gone (the choice kept for the next
         font: scope_kept). Filled again as a font is read."""
@@ -3480,7 +3480,7 @@ class ProofDialog(object):
         the next session, and the proof laid out again. The file is read again and only that key is
         changed: another Proof window (another font's) may have set the other one since this window read
         the file. key None: both. A choice of Summary lists shows the first Language coverage page once
-        the proof is laid out (the owner: "Changing summary lists doesn't appear to change what is shown on
+        the proof is laid out (the review: "Changing summary lists doesn't appear to change what is shown on
         the proof": the lists close the proof, and the page shown stayed the one before)."""
         if key == "summary_languages":
             self.show_section = "coverage"
@@ -3709,7 +3709,7 @@ class ProofDialog(object):
         return u"%s, master %s" % (ak.b(self.package.tfn), ak.b(master))
 
     def status(self):
-        if self.proof is None:  # (the top line still says which font: owner's image 224)
+        if self.proof is None:  # (the top line still says which font: image 224)
             self.font_label.setText(u"%s: no proof (see the log)." % self.font_named())
             return
         size = dict((key, label) for key, label, _ in PAGE_SIZES).get(self.page_options.page, u"")
@@ -3829,7 +3829,7 @@ class ProofDialog(object):
         return True
 
     def wheel_page(self, event):
-        """The wheel alone over the page: past its top or its bottom, the page before or after (owner's image 347),
+        """The wheel alone over the page: past its top or its bottom, the page before or after (image 347),
         shown from its bottom or its top, as a PDF viewer goes on; elsewhere the page scrolls (False: left to
         Qt). True once the page turned."""
         QtCore = _qt()[0]
@@ -3916,7 +3916,7 @@ class ProofDialog(object):
         enable(self.languages_box, has_font and bool(self.summary_box.isChecked()))
         # (it marks the kerning and spacing strings: grayed while neither section is ticked)
         enable(self.collisions_box, has_font and any(self.section_boxes[key].isChecked() for key in ("kerning", "spacing")))
-        # No font: no masters and no scripts or languages to choose from, no pages to look at (owner's image
+        # No font: no masters and no scripts or languages to choose from, no pages to look at (image
         # 282: ak.no_font_states grays every other control meanwhile, Close and the tools aside)
         for box in (self.masters_box, self.scope_box):
             enable(box, has_font)
@@ -4017,9 +4017,9 @@ class ProofDialog(object):
         self.busy = True
         self.update_buttons()
         pages = self.proof.pages
-        # The pages written in the window's top row (owner's image 180), to a staged file beside the PDF: Cancel,
+        # The pages written in the window's top row (image 180), to a staged file beside the PDF: Cancel,
         # Esc, the tools menu, the arrows, and Close stop it between two pages, and a PDF stopped or failed is
-        # removed whole, the file there left as it was (the owner, 2026-11-24); only a whole one takes its place
+        # removed whole, the file there left as it was (the review of 2026-11-24); only a whole one takes its place
         self.ak.busy_start(self, u"Writing the PDF")
         staged = None
         try:
@@ -4103,10 +4103,10 @@ class ProofDialog(object):
 
 
 SAVE_FOLDER = []  # the folder a PDF was last saved in, while FontLab runs
-REPLACE_QUESTION = u"%s already exists. Replace it with a new proof?"  # (the owner's words, 2026-11-24, as Font Builder's)
+REPLACE_QUESTION = u"%s already exists. Replace it with a new proof?"  # (the words, 2026-11-24, as Font Builder's)
 # A save stopped (the question answered Cancel, Cancel or Esc while the PDF is written, the tools menu, the arrows,
 # or Close) or failed: the PDF is written beside its file and takes its place only once whole, so nothing is ever
-# half saved (the owner, 2026-11-24, as Font Builder's sheets)
+# half saved (the review of 2026-11-24, as Font Builder's sheets)
 STOPPED_LINE = u"The operation was interrupted. Nothing was saved or overwritten."
 CANCEL_NOTE = u"A PDF stopped leaves nothing behind: a file there stays as it was."
 

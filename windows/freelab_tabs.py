@@ -338,8 +338,8 @@ ENTER_EVENT = 10  # QEvent::Enter
 
 
 def cross_zone(bar, index):
-    """(left, right) in the bar of a tab's close cross, or None: the tab's left end. Read from the owner's
-    own closing clicks, 2026-11-24 (8 to 13 pixels from the left edge of tabs 571 wide, their titles
+    """(left, right) in the bar of a tab's close cross, or None: the tab's left end. Read from
+    closing clicks made by hand, 2026-11-24 (8 to 13 pixels from the left edge of tabs 571 wide, their titles
     centered far to the right); two earlier guesses, the tab's right end and the place of its icon, each
     left the cross needing two clicks. Never raises."""
     try:
@@ -372,14 +372,14 @@ def on_pressed(tab_widget, index, bar=None, pos=None):
     # window of its own already to FontLab)
     from_main = _in_main_window(tab_widget)
     # no_undock: the press on a main window tab is kept from FontLab's tab bar, which then has no tab to
-    # take away (the owner, 2026-11-23: put back after the drop, a tab could still be grabbed, which was
+    # take away (the review of 2026-11-23: put back after the drop, a tab could still be grabbed, which was
     # the nuisance). With reorder FreeLab follows the mouse itself and moves the tab along the bar at the
     # release; no window is ever made. Nothing is chosen at the press: a click chooses its tab at the
-    # release (on_released), so that the view does not change under a tab being moved (the owner,
+    # release (on_released), so that the view does not change under a tab being moved (the review of
     # 2026-11-23).
     # (but a press on the tab's close cross, which is the bar's own: kept, the cross took two clicks; and
     # handed to the bar afterwards as a click made up here, the cross was no longer shown, a held tab was
-    # chosen after two seconds, and a window no longer merged into another, the owner, 2026-11-23. FontLab
+    # chosen after two seconds, and a window no longer merged into another, the review of 2026-11-23. FontLab
     # follows the mouse beneath Qt's events, and a made-up click left it waiting for a release.)
     # (2026-11-24: FontLab showed no cross on main window tabs once their presses were kept from it, and
     # its own took two clicks. A press on the cross's place is kept like any other, and closes the tab at
@@ -411,7 +411,7 @@ def on_pressed(tab_widget, index, bar=None, pos=None):
 def on_window_moved(frame):
     """A window of its own moved (the filter on it, each step of a drag by its title bar): followed as a tab's
     drag is, so that released with the mouse on the main tab bar it docks there, at the marker's place.
-    FontLab docks such a window only where its own blue highlight shows, which was hard to get (the owner,
+    FontLab docks such a window only where its own blue highlight shows, which was hard to get (the review of
     2026-11-23). reorder only, and only while the mouse button is held: a window moved by a program, or
     snapped by Windows, is not being dragged."""
     state = _state()
@@ -445,7 +445,7 @@ def on_released():
     if drag.get("released"):
         return True  # (poll saw the button up first, and ended the drag)
     if button_down():
-        # A release with the button still held is not the owner's (the owner, 2026-11-23: a tab held some two
+        # A release with the button still held is not a real one (the review of 2026-11-23: a tab held some two
         # seconds without moving was shown, as if clicked): kept from the bar like the real one, which is
         # still to come, or which poll sees.
         state["own_press"] = held
@@ -523,7 +523,7 @@ def _cross_label(bar):
 
 def hover_cross():
     """The close cross shown at the left end of the main window tab under the mouse (no_undock: FontLab
-    shows none on tabs it gets no press on, the owner, 2026-11-24), and taken away as the mouse leaves the
+    shows none on tabs it gets no press on, the review of 2026-11-24), and taken away as the mouse leaves the
     bar, which also ends the looking. Not on the Sketchboard, which does not close. Never raises."""
     state = _state()
     bar = state.get("hover_bar")
@@ -569,7 +569,7 @@ def _hide_cross():
 
 def _note(what, key="notes"):
     """Something unexpected, kept with its time (state["notes"], the last few; "presses": where the last
-    presses on main window tabs were, against the close cross's zone), to be read when the owner reports
+    presses on main window tabs were, against the close cross's zone), to be read when a review reports
     what it led to. Never raises."""
     try:
         notes = _state().setdefault(key, [])
@@ -637,7 +637,7 @@ def poll():
     chosen = _options()
     point = cursor_pos()
     # (a tick that comes late: FontLab was busy meanwhile, as when its blue highlight comes up; kept in the
-    # drag's trace, to tell where a stall the owner sees falls)
+    # drag's trace, to tell where a stall seen falls)
     now, last = time.time(), drag.get("tick")
     drag["tick"] = now
     if last is not None and now - last > STALL_SECONDS:
@@ -689,7 +689,7 @@ TRACE_AFTER_MS = (100, 300, 600, 1000, 1500)  # after a release, when FontLab's 
 
 def hold_view(drag):
     """The tab shown kept as it was at the press, while the press is held and the mouse has not moved:
-    FontLab shows a tab held some two seconds, as if clicked (the owner, 2026-11-23 and 24, with its own
+    FontLab shows a tab held some two seconds, as if clicked (the review of 2026-11-23 and 24, with its own
     press as with one FreeLab kept). Put back at most HOLD_REVERTS times; the tab is chosen at the release
     (poll, or the kept press's own end). Not once a drag has started, nor when the bar has lost or gained a
     tab (FontLab took it for its drag). Never raises."""
@@ -730,14 +730,14 @@ def follow_drop(drag):
     """FontLab's own drop target on the main window, each step of a drag. Never raises.
 
     A tab dragged out of the main window: FontLab's blue highlight came up over the document area the tab
-    had just left, and a release there put the tab back, which made undocking hard (the owner, 2026-11-24).
+    had just left, and a release there put the tab back, which made undocking hard (the review of 2026-11-24).
     The highlight is hidden while the drag is young (grace_over), then left to FontLab.
 
     (The frame's QTimer, taken for FontLab's wait before the highlight, never ran in 25 drags followed live
-    on 2026-11-24: it is only read here, for the trace. The wait and the stall the owner saw as the
+    on 2026-11-24: it is only read here, for the trace. The wait and the stall seen as the
     highlight came up were dark mode's, mapping the widgets under it at each repaint.)
 
-    What is seen is kept (_trace), to be read when the owner reports how it went."""
+    What is seen is kept (_trace), to be read when a review reports how it went."""
     hold_paint(drag)
     try:
         frame = drag.get("frame")
@@ -769,10 +769,10 @@ HIGHLIGHT_GRACE_SECONDS = 1.5  # how long a tab just dragged out is not offered 
 
 def grace_over(drag, frame):
     """Whether a tab dragged out of the main window may be offered the main window again. Not at first: the
-    blue highlight over the area the tab had just left made undocking hard (the owner, 2026-11-24). Once the
+    blue highlight over the area the tab had just left made undocking hard (the review of 2026-11-24). Once the
     tab has been held HIGHLIGHT_GRACE_SECONDS, or the mouse has left the document area, FontLab's highlight
     is its own again: hidden at every step for the whole drag, it flashed and went each time FontLab showed
-    it, as if the tab could never be docked back (the owner, the same day). Never raises."""
+    it, as if the tab could never be docked back (the review, the same day). Never raises."""
     try:
         if drag.get("grace_over"):
             return True
@@ -795,7 +795,7 @@ PAINT_HOLD_SECONDS = 1.5  # how long after a drag's last step dark mode still ho
 def hold_paint(drag):
     """Dark mode told a drag is on, at each of its steps: it holds large widgets' pictures meanwhile, in place
     of mapping each anew at every repaint under FontLab's blue highlight (see its HOLD_PIXELS; a window
-    dragged over the main window stalled for 2.1 seconds each time the highlight came up, the owner,
+    dragged over the main window stalled for 2.1 seconds each time the highlight came up, the review of
     2026-11-24). Left on sys, which both modules read: neither imports the other. Never raises."""
     try:
         import sys
@@ -927,7 +927,7 @@ HIGHLIGHT_CHECKS_MS = (400, 1500)
 def clear_highlight():
     """FontLab's blue drop highlight hidden where it shows with no mouse button held: it stayed over the
     whole document area after a window was merged by Merge Window while FontLab was showing a drop for it
-    (the owner, 2026-11-23; read live: still visible minutes later, no drag, no window of its own left).
+    (the review of 2026-11-23; read live: still visible minutes later, no drag, no window of its own left).
     FontLab shows it again at its next drag. The number hidden; never raises."""
     count = 0
     try:
@@ -1104,7 +1104,7 @@ def dock(page, target=None):
     if window is not None:
         window.activateWindow()
     step("main window made active at")
-    # (where a dock's time goes, kept to be read when the owner reports a slow one: state["merges"])
+    # (where a dock's time goes, kept to be read when a slow one is reported: state["merges"])
     _note("dock: " + ", ".join(steps), "merges")
     return True
 

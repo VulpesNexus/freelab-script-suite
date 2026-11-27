@@ -124,7 +124,7 @@ class SupportTests(unittest.TestCase):
         self.assertEqual(fc.support(syllable, font(jamo, {}))[0], fc.MISSING, "jamo are letters, not marks")
 
     def test_single_character_never_had_through_another(self):
-        """The owner: the letters with oxia are required in their own right; a single character is
+        """The review: the letters with oxia are required in their own right; a single character is
         had by its own code point, never by the one it is canonically the same as."""
         tonos = [0x391, 0x386, 0x3B1, 0x3AC, 0x3B5, 0x3AD]
         self.assertEqual(fc.support(u(0x1F71), font(tonos))[0], fc.MISSING, "alpha with oxia, not through tonos")
@@ -484,7 +484,7 @@ class AddTests(unittest.TestCase):
         self.assertEqual(fc.gain_text(1, []), u"With 1 glyph ticked: no language is complete yet")
         gained = fc.languages_gained(results, [schwa, small_schwa])
         self.assertEqual(fc.gain_text(2, gained), u"With 2 glyphs ticked: +2 languages (Latin)")
-        # (every count bold with its noun, the glyphs ticked too: owner's images 297 and 301)
+        # (every count bold with its noun, the glyphs ticked too: images 297 and 301)
         self.assertEqual(fc.gain_text(2, gained[:1], lambda text: u"<b>%s</b>" % text),
                          u"With <b>2 glyphs</b> ticked: <b>+1 language</b> (Latin)")
         greek = fc.check_language(language(u(0x3B1), script=u"Greek", name=u"Greek"), font([]))
@@ -543,7 +543,7 @@ class AddTests(unittest.TestCase):
         self.assertEqual(fc.fold(u"\N{LATIN CAPITAL LETTER C WITH CARON}E\N{LATIN SMALL LETTER S WITH CARON}tina"), u"cestina")
 
     def test_found_by_another_name(self):
-        """The owner: a language "may hold several names that are not even necessarily listed as is in
+        """The review: a language "may hold several names that are not even necessarily listed as is in
         our list". A search finds it by any, the list keeps its one name, and the find says which."""
         zhu = u"\N{LATIN CAPITAL LETTER Z WITH CARON}hu"
         nama = fc.Language(u"naq", u"Khoekhoe", u"Khoekhoegowab", u"Latin", u"living", u"verified", 0, [u"a"], [], u"")
@@ -575,7 +575,7 @@ class AddTests(unittest.TestCase):
         self.assertFalse(fc.language_matches(r, u"nama"))
 
     def test_selection_has_a_tab_of_its_own(self):
-        """The owner: "Make the script-specific list its own tab so it doesn't get mixed in with the
+        """The review: "Make the script-specific list its own tab so it doesn't get mixed in with the
         high-value list." The selection's rows are its missing characters and nothing else."""
         results, (schwa, small_schwa, eng, small_eng) = self.results()
         rows = fc.add_rows(results)
@@ -639,9 +639,9 @@ class AddTests(unittest.TestCase):
         self.assertEqual(fc.value_title(34), u"High-value missing glyphs (34)")
         self.assertEqual(fc.value_title(0), u"High-value missing glyphs (0)")
         self.assertEqual(fc.selection_title(None), u"Select language, character set, or family",
-                         "the owner's caption: the tab works on families and character sets too")
+                         "the caption asked for: the tab works on families and character sets too")
         self.assertEqual(fc.selection_title(wolof), u"Wolof (2)")
-        # (a tick's caption that is a sentence ends with its period, owner's image 324)
+        # (a tick's caption that is a sentence ends with its period, image 324)
         self.assertEqual(fc.absent_caption(48), u"Show the 48 scripts whose glyphs are fully missing from the font.")
         self.assertEqual(fc.absent_caption(1), u"Show the 1 script whose glyphs are fully missing from the font.")
 
@@ -688,7 +688,7 @@ class AddTests(unittest.TestCase):
 
 
 class LanguageListTests(unittest.TestCase):
-    """The languages list: a search looks through every language (the owner searched "lao" and found
+    """The languages list: a search looks through every language (a search for "lao" found
     nothing: only the scripts the font has were searched), its order, and the choice of statuses."""
 
     def scripts(self, statuses=fc.STATUS_FILTERS[0][2]):
@@ -716,7 +716,7 @@ class LanguageListTests(unittest.TestCase):
         self.assertEqual([key for key, _, _ in fc.STATUS_FILTERS], ["current", "living", "historical", "high", "all"])
         self.assertEqual([label for _, label, _ in fc.STATUS_FILTERS],
                          [u"Living and constructed", u"Living only", u"Historical only", u"High-value only", u"All languages"],
-                         "the owner's report 129: the dropdown is Display, its choices short")
+                         "report 129: the dropdown is Display, its choices short")
         scripts, others = self.scripts(by_key["living"])
         self.assertNotIn(u"Esperanto", count(scripts))
         self.assertEqual(len(others), 3)
@@ -727,7 +727,7 @@ class LanguageListTests(unittest.TestCase):
         self.assertEqual((len(count(scripts)), others), (8, []))
 
     def test_high_value_only(self):
-        """The owner's report 129: Display's High-value only keeps the orthographies high_value_languages.json
+        """Report 129: Display's High-value only keeps the orthographies high_value_languages.json
         lists (by code and script: Serbian in both its scripts, a language's other scripts out), and a
         search finds the others under a heading of their own, whatever their status."""
         def one(iso, name, script=u"Latin", status=u"living"):
@@ -894,7 +894,7 @@ class CharacterSetTests(unittest.TestCase):
         self.assertIn(u" and %d more" % (256 - fc.TIP_SHOWN), fc.coverage_tip(many))
 
     def test_listed_in_a_tab_of_their_own(self):
-        """The owner: "this should get tabs instead to separately list languages from character sets"."""
+        """The review: "this should get tabs instead to separately list languages from character sets"."""
         results = [fc.check_language(one, font([0x61, 0x283])) for one in self.sets()]
         scripts = fc.coverage([language(u"a b", name=u"One")], font([0x61, 0x62]))
         sections, _ = fc.language_sections(scripts, [u"Latin"])
@@ -1114,7 +1114,7 @@ class FamilyTests(unittest.TestCase):
         self.assertIn(u"is not installed", fc.families_line(root, classified=False))
 
     def test_languages_hyperglot_does_not_describe(self):
-        """The owner searched for Juu and !Kung varieties and found nothing: Hyperglot documents no
+        """A search for Juu and !Kung varieties found nothing: Hyperglot documents no
         orthography for them. A search now says that such a language exists and cannot be checked."""
         families = self.families()
         self.assertEqual(families.unlisted_matches(u"ktz"), [(u"ktz", u"South-Eastern Ju", None)], "by its code")
@@ -1224,7 +1224,7 @@ def other_language(base, name=u"Other", evidence=fc.DECLARED, source=u"SIL's Loc
 
 
 class NotCoveredTests(unittest.TestCase):
-    """The owner: "we should keep track of languages/scripts/families we are aware of but can't offer
+    """The review: "we should keep track of languages/scripts/families we are aware of but can't offer
     support for yet, inviting users to open an issue to enrich the dataset." The languages Glottolog
     lists that no source describes are counted family by family and listed under each family's last
     node; the scripts Unicode has that no orthography is written in close the Languages tab."""
@@ -1399,7 +1399,7 @@ class CustomSetTests(unittest.TestCase):
 
 
 class OrthographyTests(unittest.TestCase):
-    """The languages Hyperglot does not describe (the owner: "Find ways to cover the languages that
+    """The languages Hyperglot does not describe (the review: "Find ways to cover the languages that
     cannot be checked"): a second data file from other sources, each language saying where its
     characters come from and whether they were declared or inferred from counting a text."""
 
@@ -1479,7 +1479,7 @@ class OrthographyTests(unittest.TestCase):
                         "whole text, Google's sample texts")
 
     def test_an_crubadan(self):
-        """A sixth source (the owner: "Evaluate one more data source"): Kevin Scannell's web corpora,
+        """A sixth source (the review: "Evaluate one more data source"): Kevin Scannell's web corpora,
         from the seven archives the Wayback Machine kept (word frequencies) and from the 2010 trigram
         counts NLTK distributes; each language it gives is one no other source had, or one whose
         only other evidence was a short sample text."""
@@ -1516,7 +1516,7 @@ class OrthographyTests(unittest.TestCase):
                          "nor a language described through its dialects or members (Latvian, Serbian-Croatian-Bosnian)")
 
     def test_misfiled_and_reinforced(self):
-        """The owner: "For the 73 weakest samples, look into UDHR-derived alternates/reinforcements
+        """The review: "For the 73 weakest samples, look into UDHR-derived alternates/reinforcements
         before dropping anything", and, of two doubtful entries, "double-check those before deciding".
         Three of An Crubadan's trigram files were another language's text (the declaration in Aja of
         Benin, Gen, and Waama, which Hyperglot describes): no row stands under their labels. An
@@ -1569,7 +1569,7 @@ class OrthographyTests(unittest.TestCase):
         self.assertEqual(fc.rests_text(one), u"A", "a row that says no more: its one source")
 
     def test_south_eastern_ju(self):
-        """The language the owner looked for: checked now, from a source that declares its characters."""
+        """The language looked for: checked now, from a source that declares its characters."""
         ju = [l for l in self.others if l.iso == u"ktz"]
         self.assertEqual(len(ju), 1)
         ju = ju[0]
@@ -1849,7 +1849,7 @@ class OrthographyTests(unittest.TestCase):
 
 
 class WidthTests(unittest.TestCase):
-    """The owner: "Default width for the font check panel appears to be too narrow for two lists"."""
+    """The review: "Default width for the font check panel appears to be too narrow for two lists"."""
 
     def test_sizes(self):
         self.assertEqual(fc.WIDE, 1400)
@@ -1862,7 +1862,7 @@ class WidthTests(unittest.TestCase):
         self.assertTrue(500 < left < right, "the languages' lists a little wider than the characters'")
 
     def test_columns_fill_the_list_and_the_bar_stays(self):
-        """The owner's reports 126 and 127: the columns fill the list exactly (no gap, nothing past it), the
+        """Reports 126 and 127: the columns fill the list exactly (no gap, nothing past it), the
         counts stay whole, and the families' bar no longer gives up all its width to the names: it gives way
         to BAR_LEAST first, then the names are cut to NAME_LEAST, and only then does the bar close."""
         # The families' list as live at 1,000 pixels (the coordinator's check): the long Languages counts took the
@@ -1897,7 +1897,7 @@ class WidthTests(unittest.TestCase):
                          "every column dragged: as dragged")
 
     def test_a_column_dragged_past_the_frame_leaves_the_others_room(self):
-        """The owner's image 214: a column dragged to the frame's edge, or past it, left every other column
+        """Image 214: a column dragged to the frame's edge, or past it, left every other column
         at nothing (all but one vanished), the columns wider than the list. It stops where the others keep
         their least (PINNED_FLOOR at least), and the columns still fill the list exactly."""
         bars = lambda pinned: fc.column_widths(1000, [300, fc.BAR_COLUMN, 200, 50], 0, (1,),
@@ -1920,7 +1920,7 @@ class WidthTests(unittest.TestCase):
 
 class TabNameTests(unittest.TestCase):
     def test_the_chosen_tab_whole_the_others_elided(self):
-        """The owner's report 125: a narrow window gave the tabs scroll arrows; the tab not chosen is
+        """Report 125: a narrow window gave the tabs scroll arrows; the tab not chosen is
         elided with an ellipsis instead, and the elided one is whole once chosen."""
         measure = lambda text: 7 * len(text)
         texts = [u"High-value missing glyphs (971)", u"Select language, character set, or family"]
@@ -2263,7 +2263,7 @@ class TrainTests(unittest.TestCase):
         self.assertEqual(sorted((r[0], r[3], r[4], r[5]) for r in refused), [("english", 26, 0, []), ("few", 5, 5, [])])
 
     def test_keyboard_unfinished(self):
-        """The owner, of Adilabad Gondi in Telugu, which lost 5 independent vowels to its layout: that
+        """The review, of Adilabad Gondi in Telugu, which lost 5 independent vowels to its layout: that
         layout was a prototype whose shift layer types Tibetan. A layout that types more than
         KEYBOARD_FOREIGN letters of another script is refused as unfinished, in its layers or its
         rules; a stray one or two pass (a capital with its small letter is one), and marks of another
@@ -2461,7 +2461,7 @@ class TrainTests(unittest.TestCase):
         self.assertEqual(o.independent([same, excerpt]), [same, excerpt], "without the whole text: as they are")
 
     def test_misfiled_and_the_declaration(self):
-        """The owner: "double-check those before deciding what's the best approach." Files a source
+        """The review: "double-check those before deciding what's the best approach." Files a source
         filed under another language's code are read as that language, and any other trigram file
         whose nearest text of the declaration is another code's is reported."""
         import io
@@ -2685,7 +2685,7 @@ class SpaceTests(unittest.TestCase):
 
     def test_the_other_spaces_in_a_note(self):
         has = lambda code: code in (0x2002, 0x2003, 0x2007, 0x2009)
-        # (owner's image 313: Glyph Compose's link sends the spaces there, listed and ticked, as Build with
+        # (image 313: Glyph Compose's link sends the spaces there, listed and ticked, as Build with
         # Glyph Compose sends glyphs; the tool's plain link opened it on its first tab with nothing done)
         self.assertEqual(fc.spaces_note(has, listed=[0x202F]),
                          u"The font lacks these spaces: no-break (U+00A0), hair (U+200A). <a href=\"freelab-spaces:00A0-200A\">"
@@ -2707,7 +2707,7 @@ class SpaceTests(unittest.TestCase):
 
 
 class TipTests(unittest.TestCase):
-    """Tooltips wrap: the owner's screen showed one a few thousand pixels wide (a tree row's plain
+    """Tooltips wrap: a screen showed one a few thousand pixels wide (a tree row's plain
     text is laid out on one line). Each goes out as rich text, in a width when it needs one."""
 
     def test_width(self):
@@ -2743,7 +2743,7 @@ class TipTests(unittest.TestCase):
 
 
 class SingleMasterTests(unittest.TestCase):
-    """The owner, of a font with one master: "Should be 'measured in the single master'"."""
+    """The review, of a font with one master: "Should be 'measured in the single master'"."""
 
     def test_sentences(self):
         self.assertEqual(fc.measured_text(1), u"Every glyph measured in the single master.")
@@ -2806,7 +2806,7 @@ class DiagramTests(unittest.TestCase):
         self.assertEqual([e.name for e in deepest], ["p", "g"], "a glyph in one list only")
 
     def test_the_highest_and_lowest_are_captioned(self):
-        """The owner's image 215: the diagram should always show and caption the highest and the lowest
+        """Image 215: the diagram should always show and caption the highest and the lowest
         glyph, saying how many other glyphs reach the same value."""
         extents = [fc.Extent(n, None, m, b, t) for n, m, b, t in
                    [("A", "L", 0, 700), ("Aring", "L", 0, 900), ("Aring", "B", 0, 950), ("p", "B", -250, 500),
@@ -2874,7 +2874,7 @@ class DiagramTests(unittest.TestCase):
                       [line.text for line in fc.check_lines(unset, [], fc.check_metrics(unset, []))])
 
     def test_glyphs_past_the_line_counted_in_grammar(self):
-        """The owner's report 137: "1 glyph reach below the line's descender"."""
+        """Report 137: "1 glyph reach below the line's descender"."""
         m = fc.VerticalMetrics(upm=1000, win_ascent=1200, win_descent=400, typo_ascender=950, typo_descender=-250,
                                typo_line_gap=0, hhea_ascender=950, hhea_descender=-250, hhea_line_gap=0, use_typo=True,
                                cap_height=700)
@@ -3496,7 +3496,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.checked, set(dialog.rows[-1].items))
 
     def test_checks_shared_by_the_two_tabs(self):
-        """The owner: the buttons "work on whichever tab is shown, and a character checked in one tab is
+        """The review: the buttons "work on whichever tab is shown, and a character checked in one tab is
         checked in the other"."""
         dialog = self.dialog()
         dialog.nearly.value, dialog.show_absent.checked = 30, True
@@ -3535,7 +3535,7 @@ class DialogTests(unittest.TestCase):
         dialog.left_tab_changed(Anything())  # (a signal's handler: it must not raise)
 
     def test_double_click_opens_that_character(self):
-        """The owner: "Clicking on a given character when there are ticked characters opens the list of
+        """The review: "Clicking on a given character when there are ticked characters opens the list of
         ticked characters instead of the individual, targeted glyph."""
         dialog, state, click, Row = self.linked_lists()
         opened = []
@@ -3706,7 +3706,7 @@ class DialogTests(unittest.TestCase):
         return made
 
     def test_headings_collapse(self):
-        """The owner: "Family headers should be collapsible to easily reach another family." A click or
+        """The review: "Family headers should be collapsible to easily reach another family." A click or
         a double-click on a heading closes or opens it; the state is kept by the heading's script."""
         dialog, state, click, Row = self.linked_lists()
         click(0)
@@ -3820,7 +3820,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.right_tab, "languages")
 
     def test_families_tab(self):
-        """The owner: "A nice third tab ... would be 'Families' with a tree that uses the same colors to
+        """The review: "A nice third tab ... would be 'Families' with a tree that uses the same colors to
         display support per linguistic families"."""
         dialog, state, click, Row = self.linked_lists()
         self.assertIsNotNone(dialog.families, "Glottolog's file is read with the languages")
@@ -3917,7 +3917,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual((dialog.selection, dialog.left_tab), (None, "value"), "a family is no character set")
 
     def test_defaults_and_captions(self):
-        """The owner: one check box whose caption is the sentence with the count, ticked by default;
+        """The review: one check box whose caption is the sentence with the count, ticked by default;
         the Display choice starts with All languages; the high-value tab is named with its count."""
         gui = sys.modules["PythonQt"].QtGui
         saved = dict(gui.classes)
@@ -3930,7 +3930,7 @@ class DialogTests(unittest.TestCase):
             gui.classes.update(saved)
         self.assertEqual(dialog.show_absent.checked, True, "ticked to start with")
         self.assertEqual(dialog.show_absent.made, (u"Show the scripts whose glyphs are fully missing from the font.",),
-                         "no count shown as a zero before the first check (and no period: owner's image 306)")
+                         "no count shown as a zero before the first check (and no period: image 306)")
         self.assertEqual(fc.STATUS_FILTERS[dialog.status_filter.currentIndex][1], u"All languages")
         self.assertEqual(fc.STATUS_START, "all")
         self.assertEqual(dialog.left_tabs.told("addTab"),
@@ -3973,7 +3973,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.left_tabs.told("setCurrentIndex")[-1], (0,))
 
     def test_says_glyph(self):
-        """The owner: "use the more technical terminology, which would be 'glyph' wherever relevant": what
+        """The review: "use the more technical terminology, which would be 'glyph' wherever relevant": what
         the font has or would get is a glyph; a character set and an orthography's base characters stay."""
         gui = sys.modules["PythonQt"].QtGui
         saved = dict(gui.classes)
@@ -4001,7 +4001,7 @@ class DialogTests(unittest.TestCase):
             self.assertNotIn(u"characters to add", text)
 
     def test_opens_wider(self):
-        """The owner: "Default width for the font check panel appears to be too narrow for two lists":
+        """The review: "Default width for the font check panel appears to be too narrow for two lists":
         it opens 1,400 pixels wide, or what the screen allows, at the height the shared size gave it."""
         gui = sys.modules["PythonQt"].QtGui
         saved = dict(gui.classes)
@@ -4038,7 +4038,7 @@ class DialogTests(unittest.TestCase):
     def test_columns_degrade(self):
         """At 1000 pixels the families' counts were cut ("95 of 177 la..."): the last column of each list
         at the right is as wide as its contents, the names take the rest, and the bar gives way first. The
-        owner's report 126: every column can be dragged (Qt's Stretch and ResizeToContents modes cannot),
+        report 126: every column can be dragged (Qt's Stretch and ResizeToContents modes cannot),
         and the list shares its width itself (column_widths); report 127: the families' bars are drawn to
         their column's width (a delegate), not as pictures of a set width."""
         calls, original = [], fc.FontCheckDialog.size_columns
@@ -4125,9 +4125,9 @@ class DialogTests(unittest.TestCase):
         dialog.share_columns(object())  # (never raises)
 
     def test_busy_hides_the_top_line(self):
-        """The owner's report 135: the duplicate "Listing..." line went, but its empty line stayed over the
+        """Report 135: the duplicate "Listing..." line went, but its empty line stayed over the
         progress bar: the view's line is hidden while the work runs, and shown again only with something to
-        say (shown empty, it left a blank line under the Coverage controls: owner's image 204)."""
+        say (shown empty, it left a blank line under the Coverage controls: image 204)."""
         dialog = self.dialog()
         dialog.coverage.status = Recorded()
         dialog.set_busy(True, fc.BUSY_STEPS[3])
@@ -4140,7 +4140,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.coverage.status.told("setHidden")[-1], (False,))
 
     def test_coverage_controls_go_through_the_shared_gate(self):
-        """Owner's image 203: with no font the Coverage controls were clickable: the check's end gave them
+        """Image 203: with no font the Coverage controls were clickable: the check's end gave them
         back with setEnabled, past the shared module's no-font gate (ak.enable keeps a marked one grayed)."""
         dialog = self.dialog()
         controls = (dialog.nearly, dialog.status_filter, dialog.inferred_box, dialog.composing, dialog.coverage_button,
@@ -4153,7 +4153,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual([widget.enabled for widget in controls], [False] * len(controls))
 
     def test_build_and_copy_say_this_or_those(self):
-        """The owner's report 132: "Build 2 glyphs with Glyph Compose" for one row selected (a capital and
+        """Report 132: "Build 2 glyphs with Glyph Compose" for one row selected (a capital and
         its small letter) read as two rows: the buttons say this glyph or those glyphs, the count is in
         their tooltips."""
         self.assertEqual([fc.build_caption(count) for count in (0, 1, 2)],
@@ -4174,7 +4174,7 @@ class DialogTests(unittest.TestCase):
         self.assertIn(u"2 glyphs", dialog.diacritics_button.told("setToolTip")[-1][0])
 
     def test_check_buttons_mate_the_list_shown(self):
-        """The owner's report 133: Check all and Check only what Glyph Compose can build lit up as a row
+        """Report 133: Check all and Check only what Glyph Compose can build lit up as a row
         was selected, then grayed out: the shared module grays them (ak.update_states, every 300 ms) when the
         first of the lists nearest them has no check box, and Qt's stack raises the list it shows, which puts
         it last among the stack's children. So once the selection's tab had been shown, the high-value tab's
@@ -4232,7 +4232,7 @@ class DialogTests(unittest.TestCase):
         self.assertIs(mate(), dialog.own_tree, "a click on the tab too")
 
     def test_a_check_names_its_glyphs_as_links(self):
-        """The owner's report 137: a check about glyphs, clicked, names them in the log, each a link that opens
+        """Report 137: a check about glyphs, clicked, names them in the log, each a link that opens
         it in a Glyph window (a glyph past the line's descender is not clipped: the click selected nothing)."""
         dialog = self.dialog()
         said, opened = [], []
@@ -4254,7 +4254,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual((opened[-1], said[-1]), (u"/eacute", u"The font does not have that glyph now."))
 
     def test_scripts_list_may_shrink_in_a_short_window(self):
-        """The owner asked what happens at 480p: the scripts' list had a fixed height of six rows, which held
+        """What happens at 480p was asked: the scripts' list had a fixed height of six rows, which held
         the window taller than such a screen. It is six rows at most and two at least now."""
         dialog = self.dialog()
         dialog.nearly.value = 30
@@ -4268,9 +4268,9 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.script_tree.told("setMinimumHeight"), [(min(30 * shown, 60),)])
 
     def test_metrics_checks_beside_the_values(self):
-        """The owner's report 128: the Checks list right of the values, its heading on the line of theirs,
+        """Report 128: the Checks list right of the values, its heading on the line of theirs,
         as tall as the values (scrolled when longer); the line spacing's choice under both. The buttons stand in
-        the window's bottom row now (owner's images 258 to 265): Write suggested values at its right, the others
+        the window's bottom row now (images 258 to 265): Write suggested values at its right, the others
         at its left, shown with the tab."""
         gui = sys.modules["PythonQt"].QtGui
         saved = dict(gui.classes)
@@ -4284,7 +4284,7 @@ class DialogTests(unittest.TestCase):
         widgets = body.told("addWidget")
         self.assertIn((dialog.values_tree, 0, 0), widgets)
         self.assertIn((dialog.checks_tree, 0, 1), widgets, "beside the values, on their row")
-        # (both choices of the line spacing on one line, owner's image 345)
+        # (both choices of the line spacing on one line, image 345)
         self.assertNotIn(dialog.mode_keep, [args[0] for args in widgets], "in the line spacing's row, not a row of its own")
         self.assertEqual([args[1:] for args in body.told("addLayout")], [(1, 0, 1, 2)], "the line spacing, under both")
         self.assertIs(dialog.metrics.commit, dialog.write_button, "the committing button, at the bottom row's right")
@@ -4386,7 +4386,7 @@ class DialogTests(unittest.TestCase):
         self.assertTrue([tip for tip in tips if u"font-family:'FreeLang'" in tip])
 
     def test_loading_state(self):
-        """The owner: "This stays empty for several seconds before it all loads, it should indicate
+        """The review: "This stays empty for several seconds before it all loads, it should indicate
         loading in some way so the user understands it's not broken." In a window that is shown, the
         check goes in steps from a timer: the lists' area says which one runs, the controls are grayed,
         a second check does not start inside the first, and no count shows as a zero meanwhile."""
@@ -4402,7 +4402,7 @@ class DialogTests(unittest.TestCase):
         dialog.defer = waiting.append
         dialog.nearly.value, dialog.inferred_box.checked = 30, True
         dialog.check_coverage()
-        # The owner: "'Listing...' appears twice": the step is said once, in the top row, never also in the
+        # The review: "'Listing...' appears twice": the step is said once, in the top row, never also in the
         # view's line or in the middle of the lists' area
         self.assertEqual((dialog.busy, what(), dialog.coverage.status.told("setHidden")[-1]),
                          (True, u"Reading the language data", (True,)))
@@ -4444,7 +4444,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual((dialog.busy, dialog.coverage_stack.currentIndex, waiting), (False, 1, []))
 
     def test_a_check_stopped_leaves_the_view_unchecked(self):
-        """Owner's image 174: the tools menu, the arrows, and Close work while the coverage loads; they stop
+        """Image 174: the tools menu, the arrows, and Close work while the coverage loads; they stop
         it first (ak.busy_progress raises Stopped), and the view is left as if not checked, not half listed."""
         dialog = self.dialog()
         waiting, logged = [], []
@@ -4586,7 +4586,7 @@ class DialogTests(unittest.TestCase):
         self.assertFalse([r for r in rows if isinstance(r.language, fc.ScriptSet)], "closed to start with")
         before = len(made)
         row = click(u"#Scripts not yet covered")
-        # The owner: "see how these can be supported going forward": each is a live row, checked as a script
+        # The review: "see how these can be supported going forward": each is a live row, checked as a script
         scripts = [r for r in rows if isinstance(r.language, fc.ScriptSet)]
         self.assertEqual((len(scripts), len(made) - before), (listed, listed))
         names = [r.language.name for r in scripts]
@@ -4857,7 +4857,7 @@ class DialogTests(unittest.TestCase):
         dialog.update_buttons()
 
     def test_beside_it_only_with_a_glyph_drawn(self):
-        """Owner's image 211: "Beside it" stood under the empty frame, with no font or nothing compared."""
+        """Image 211: "Beside it" stood under the empty frame, with no font or nothing compared."""
         dialog = self.dialog()
         dialog.beside_label, dialog.compare_master = Recorded(), Recorded()
         dialog.draw_comparison()
@@ -4873,7 +4873,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual((dialog.beside_label.visible, dialog.compare_master.visible), (False, False), "a font closed")
 
     def test_metrics_and_masters_stop_as_not_checked(self):
-        """Owner's image 180: the vertical metrics and the masters' comparison show their progress in the
+        """Image 180: the vertical metrics and the masters' comparison show their progress in the
         window's top row, and stop there (the tools menu, an arrow, Close, Esc): the view as if not checked."""
         dialog = self.dialog()
         dialog.check_vertical()
@@ -4901,7 +4901,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual([level for level, _ in logged], ["warning", "warning"])
 
     def test_check_buttons_grayed_with_nothing_listed(self):
-        """Owner's image 206: Check all, Check none, and Check only what Glyph Compose can build must be grayed
+        """Image 206: Check all, Check none, and Check only what Glyph Compose can build must be grayed
         while nothing is listed (glyphs left checked kept Check none clickable)."""
         dialog = self.dialog()
         dialog.check_buttons = dict((key, Recorded()) for key in dialog.check_buttons)
@@ -4912,7 +4912,7 @@ class DialogTests(unittest.TestCase):
         self.assertTrue(all(u"No glyph is listed" in button.toolTip for button in dialog.check_buttons.values()))
 
     def test_cancel_sits_before_close_usable_while_it_checks_not_while_it_fixes(self):
-        """The owner, 2026-11-24: a Cancel left of Close, grayed but while work that can stop runs (ak.cancel_button),
+        """The review of 2026-11-24: a Cancel left of Close, grayed but while work that can stop runs (ak.cancel_button),
         as Esc stops it; its help says what a stop leaves."""
         import io
         import qtfakes
@@ -4987,7 +4987,7 @@ class DialogTests(unittest.TestCase):
         logged = []
         dialog.log.add = lambda text, level="info": logged.append((level, text))
         dialog.fix_glyphs([u"o", u"i", u"Hacute", u"x"])
-        # (what the font still does wrong in amber, as every line that says so: owner's image 242)
+        # (what the font still does wrong in amber, as every line that says so: image 242)
         self.assertEqual([(level, text) for level, text in logged if level in ("error", "warning")],
                          [("warning", u"<b>1 glyph</b> still has problems that need the designer: %s."
                            % self.ak.glyph_name_link(u"x"))], logged)
@@ -5006,7 +5006,7 @@ class DialogTests(unittest.TestCase):
         self.assertTrue(done and u"3 glyph layers" in done[0], logged)
         self.assertIn(u"contour 1 reversed", done[0])
         self.assertTrue(any(u"need the designer" in text and u"x" in text for _, text in logged), logged)
-        # Each glyph fixed named by its name, a link that opens it (owner's request of 2026-11-24)
+        # Each glyph fixed named by its name, a link that opens it (the request of 2026-11-24)
         self.assertIn(u"%s in Bold (" % self.ak.glyph_name_link(u"o"), done[0])
         self.assertNotIn(u"&lt;", done[0], "no tag escaped into text")
 
@@ -5456,13 +5456,13 @@ class LoadingTests(unittest.TestCase):
                          "a switch writes the layout again and keeps it after them")
 
     def test_progress_bar(self):
-        """The owner: "The loading of Font Check is not visible enough; a green progression bar or status
+        """The review: "The loading of Font Check is not visible enough; a green progression bar or status
         in the log could help better visualize it." """
         dialog = self.dialog()
         dialog.coverage_stack, dialog.coverage.status = Recorded(), Recorded()
         logged = []
         dialog.log.add = lambda text, level="info": logged.append((text, level))
-        # The bar is the window's own now, in its top row (owner's images 174 and 180): ak's, recorded here
+        # The bar is the window's own now, in its top row (images 174 and 180): ak's, recorded here
         ak, moved, started, ended = self.ak, [], [], []
         real = ak.busy_start, ak.busy_progress, ak.busy_end
 
@@ -5493,11 +5493,11 @@ class LoadingTests(unittest.TestCase):
         self.assertEqual((dialog.busy, ended, pages[-1]), (False, [False], 1), "gone with the lists shown")
         done = [text for text, level in logged if level == "done"]
         self.assertEqual(len(done), 1, "one line when done, not one per step")
-        # (each count bold with its noun, in the log and the status line: owner's images 297 and 301)
+        # (each count bold with its noun, in the log and the status line: images 297 and 301)
         self.assertTrue(re.match(u"^Checked <b>2,512 languages</b>, <b>140 character sets</b>, and <b>172 scripts</b> in "
                                  u"[0-9]+\\.[0-9] s\\.$", done[0]), done[0])
         self.assertIn(u"<b>No script</b> of Unicode's 172 is covered whole.", dialog.coverage.status.text,
-                      "zero says No, not 0 ... are (owner, 2026-11-16)")
+                      "zero says No, not 0 ... are (the review of 2026-11-16)")
         self.assertIn(u"<b>No character set</b> of 140 is covered (the <b>5 Legacy sets</b>, wholly optional, are not "
                       u"counted).", dialog.coverage.status.text, "the 5 Legacy sets not counted, and said so")
         self.assertIn(u"(missing at most <b>30 base characters</b>)", dialog.coverage.status.text)
@@ -5601,7 +5601,7 @@ class LoadingTests(unittest.TestCase):
         self.assertIn(family.name, dialog.right_tip("families", Row(0)))
 
     def test_every_control_has_its_own_help(self):
-        """The owner found, in another tool, that right-clicking a control showed a neighboring
+        """In another tool, right-clicking a control was found to show a neighboring
         control's help: each button, check box, combo box, spin box, field, list, and tab bar built by
         the dialog has a What's This of its own, and a label has its control's."""
         kinds = ("QPushButton", "QCheckBox", "QComboBox", "QSpinBox", "QDoubleSpinBox", "QLineEdit", "QTreeWidget",
@@ -5625,9 +5625,9 @@ class LoadingTests(unittest.TestCase):
         self.assertEqual(shared, {}, "no two controls answer with the same text")
         labels = dict((one.made[0], one) for one in made if one.kind == "QLabel" and one.made and one.told("setBuddy"))
         # (every caption with its colon, but a sentence's, which ends with a period after its control: image 271)
-        # (and the sentence beside Check, which says what it does: grayed with it, owner's image 292)
+        # (and the sentence beside Check, which says what it does: grayed with it, image 292)
         measured = u"Every glyph measured in every master."
-        # (and a sentence's period, its control's caption: grayed with it, owner's images 319 to 323)
+        # (and a sentence's period, its control's caption: grayed with it, images 319 to 323)
         self.assertEqual(sorted(labels), [u".", u"Beside it:", u"Compare every master with", u"Display:", measured,
                                           u"Master:", u"Within reach: missing at most"])
         for text, control in ((u"Within reach: missing at most", dialog.nearly), (u"Display:", dialog.status_filter),
@@ -5694,7 +5694,7 @@ class ListCombo(object):
 
 
 class RoundThreeTests(unittest.TestCase):
-    """The owner's images 283 to 318: nothing that names a font's masters with no font (289, 291), the tabs'
+    """Images 283 to 318: nothing that names a font's masters with no font (289, 291), the tabs'
     settings rows as tall as one another (285, 286), and counts bold with their nouns (297, 301). On
     DialogTests' fakes."""
 
@@ -5712,11 +5712,11 @@ class RoundThreeTests(unittest.TestCase):
             dialog.font_changed()
         finally:
             self.workspace.packages = packages
-        # (owner's image 289: "Compare every master with [ ] ." with an empty box)
+        # (image 289: "Compare every master with [ ] ." with an empty box)
         self.assertEqual((dialog.reference.rows, dialog.reference.enabled), ([fc.NOT_AVAILABLE], False),
                          "a grayed n/a")
         self.assertEqual(fc.NOT_AVAILABLE, u"n/a")
-        # (owner's image 291: "Master:" over the clipped glyphs with no font)
+        # (image 291: "Master:" over the clipped glyphs with no font)
         self.assertEqual((dialog.clip_master_label.visible, dialog.clip_master.visible), (False, False))
         dialog.font_changed()  # (a font opened: its masters)
         self.assertEqual(dialog.reference.rows, dialog.master_names())
@@ -5779,7 +5779,7 @@ class RoundThreeTests(unittest.TestCase):
 
 
 class OptionalTests(unittest.TestCase):
-    """Optional characters (the owner's design): characters a set or a script holds but is complete
+    """Optional characters (the design chosen): characters a set or a script holds but is complete
     without, since text does not store them (presentation forms, compatibility characters). They are
     counted and listed, never in the level, the languages gained, or the high-value glyphs; a set
     wholly optional is the Legacy group's."""
@@ -5850,7 +5850,7 @@ class OptionalTests(unittest.TestCase):
         self.assertEqual(r.level, "missed", "its optional character alone: none of what it needs")
 
     def test_legacy_sets_not_counted(self):
-        """The owner: the Legacy sets "do not count towards the stats". A Latin-only font covered CJK
+        """The review: the Legacy sets "do not count towards the stats". A Latin-only font covered CJK
         Compatibility Ideographs in the top line's count; the sets are still checked and listed, each
         row saying what the font lacks of them."""
         sets = fc.load_character_sets()
@@ -6101,7 +6101,7 @@ class CoverageGapsTests(unittest.TestCase):
 
 
 class OwnerRoundTests(unittest.TestCase):
-    """The owner's round of 2026-11-14 on Font Check, item by item: the busy line said once, every name
+    """The round of 2026-11-14 on Font Check, item by item: the busy line said once, every name
     and character in FreeLang, one group per Unicode script, lists kept as they were across tabs and
     searches, a heading's press that selects nothing, quick and capped tooltips as wide as the window
     allows, a search that waits for a pause and clears at once, the own set's fields, the languages
@@ -6240,7 +6240,7 @@ class OwnerRoundTests(unittest.TestCase):
         self.assertIsNone(dialog.selection, "no character set is German")
 
     def test_a_scripts_click_keeps_every_scripts_list(self):
-        """The owner: "Clicking from one script to another can freeze up for a few seconds without visual
+        """The review: "Clicking from one script to another can freeze up for a few seconds without visual
         feedback". One list served every script and the one chosen, so each click between a script and All
         scripts made the whole list anew (1,800 rows on Noto Sans, under the fakes). Every script's list is
         kept apart from the chosen script's, the Character sets tab is made anew for no script, and a click
@@ -6272,7 +6272,7 @@ class OwnerRoundTests(unittest.TestCase):
         self.assertIs(dialog.right_trees["sets"], dialog.views["sets"]["full"].tree)
         self.assertEqual(len(made), len(dialog.rows) + len(dialog.own_rows), "the same sets for any script")
         dialog.right_tab_changed(0)
-        # The window's top-row bar while a click makes many rows (owner's images 174 and 180: it was the
+        # The window's top-row bar while a click makes many rows (images 174 and 180: it was the
         # view's own, over the lists, with a wait cursor)
         ak = self.ak
         real = ak.busy_start, ak.busy_progress, ak.busy_end
@@ -6473,7 +6473,7 @@ class OwnerRoundTests(unittest.TestCase):
                          and one.language.iso == u"cmn"], "opened from three characters on")
 
     def test_own_set_fields(self):
-        """Item 9: the owner's wording for the two fields; owner's image 309: a placeholder ends with an
+        """Item 9: the wording for the two fields; image 309: a placeholder ends with an
         ellipsis, not a period ("Name" stays as it is)."""
         dialog, made = self.recorded_dialog(("QLineEdit",))
         self.assertEqual(dialog.paste_field.told("setPlaceholderText"),
@@ -6506,7 +6506,7 @@ class OwnerRoundTests(unittest.TestCase):
 
     def test_not_yet_covered_and_notations(self):
         """Item 11: "not yet covered" means no source describes a language in the script, said plainly;
-        and the owner's follow-up: Braille and SignWriting are character sets (their characters do not
+        and the follow-up: Braille and SignWriting are character sets (their characters do not
         depend on the language written), not scripts not yet covered."""
         self.assertEqual([(script, block) for script, _, block in fc.NOTATION_SCRIPTS],
                          [(u"Braille", u"Braille Patterns (Unicode block)"),
@@ -6676,7 +6676,7 @@ class ThemeChangedTests(unittest.TestCase):
 
 
 class SpacesSaidOnceTests(unittest.TestCase):
-    """The owner saw the line on missing spaces logged again at every check: once a font, again only
+    """The line on missing spaces was seen logged again at every check: once a font, again only
     when it changes."""
 
     def test_once_a_font_again_when_it_changes(self):
@@ -6706,7 +6706,7 @@ class SpacesSaidOnceTests(unittest.TestCase):
         self.assertEqual(len(lines), 3, "nothing lacking: nothing said")
 
     def test_said_in_amber_with_glyph_compose_a_link(self):
-        """The owner's image 242: a line logged as the window reads a font that says what the font lacks is a
+        """Image 242: a line logged as the window reads a font that says what the font lacks is a
         warning (amber), and Glyph Compose in it opens that tool; image 313: on the spaces, listed and ticked
         on its Glyph generation tab (the tool's plain link opened it on its first tab, with nothing done)."""
         said = []
@@ -6807,7 +6807,7 @@ class SearchFirstTests(unittest.TestCase):
 
 
 class UiRoundTests(unittest.TestCase):
-    """The owner's UI round of 2026-11-17 (images 212 to 282) on Font Check: the header as every window's,
+    """The UI round of 2026-11-17 (images 212 to 282) on Font Check: the header as every window's,
     each tab's status and buttons shown with it, the bottom row, the window as wide as the others until
     a font comes."""
 
@@ -6863,7 +6863,7 @@ class UiRoundTests(unittest.TestCase):
 
     def test_as_wide_as_the_others_until_a_font_comes(self):
         """Image 279: with no font the window opens at the shared size; a font hooked to it widens it, unless
-        the owner gave a window its size by hand."""
+        a window was given its size by hand."""
         widened = []
         saved = fc.FontCheckDialog.widen
         fc.FontCheckDialog.widen = lambda owner, window: widened.append(window)

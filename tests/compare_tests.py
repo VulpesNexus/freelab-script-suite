@@ -128,7 +128,7 @@ class ChoiceTests(unittest.TestCase):
                          "a lone name stays bare; the user's copy of a shared file is marked")
 
     def test_the_open_list_leaves_out_the_placeholder(self):
-        # (the owner's screenshot 98: "Choose a font..." in the box and again as the list's first row)
+        # (screenshot 98: "Choose a font..." in the box and again as the list's first row)
         alone = fcmp.second_entries([(7, u"Sans", [u"Regular"], u"Sans.vfc")], 7, [(u"a.otf", u"alpha")])
         self.assertEqual(fcmp.popup_rows_hidden(alone), set([0, 1]), "and the separator with nothing above it")
         others = fcmp.second_entries([(7, u"Sans", [u"Regular"], u""), (8, u"Serif", [u"Regular"], u"")], 7)
@@ -226,7 +226,7 @@ class ChoiceTests(unittest.TestCase):
         self.assertEqual([row[1] for row in self.rows(fonts, 7) if row[0] == "font"], [9, 12, 12], "by number, not by name")
 
     def test_no_dash_or_dot_between_data(self):
-        # The owner's rule: data beside data goes in parentheses, not after an interpunct or an em dash
+        # The rule: data beside data goes in parentheses, not after an interpunct or an em dash
         import io
         with io.open(fcmp.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
             source = handle.read()
@@ -244,7 +244,7 @@ class ChoiceTests(unittest.TestCase):
         self.assertIn(u"Only <b>Sans</b> is open, with one master.", one)
         self.assertIn(u"<i>Open a font" + self.ELLIPSIS + u"</i>", one)
         self.assertIn(u"the master to compare with", line(u"<b>Sans</b>", 0, 2, False))
-        # Owner's image 257: a font picked in "with" is compared at once (no click on Compare to ask for)
+        # Image 257: a font picked in "with" is compared at once (no click on Compare to ask for)
         self.assertEqual(line(u"<b>Sans</b>", 1, 1, False),
                          u"Choose in <i>with</i> the font to compare <b>Sans</b> with: it is compared at once.")
         self.assertEqual(line(u"<b>Sans</b>", 3, 2, False), line(u"<b>Sans</b>", 1, 1, False))
@@ -927,7 +927,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.second_key, (second.fgPackage.id, u"Regular"))
         self.assertTrue(dialog.compare_button.enabled)
         self.assertEqual(dialog.missing(), u"")
-        # Owner's image 257: a font picked in "with" is compared at once, no click on Compare
+        # Image 257: a font picked in "with" is compared at once, no click on Compare
         self.assertIsNotNone(dialog.sides, "compared on the pick")
         self.assertTrue(texts[-1].startswith(u"Compared <b>Fake A</b> with <b>Fake B</b>"), texts[-1])
         self.assertFalse(dialog.swap_button.enabled, "two fonts: the first stays this window's")
@@ -938,7 +938,7 @@ class DialogTests(unittest.TestCase):
         self.assertTrue(dialog.compare_button.enabled)
 
     def test_a_glyph_not_read_is_named_as_a_link_to_it(self):
-        # (the owner's request of 2026-11-24: a glyph's name in a log line in italics, a link that opens it)
+        # (the request of 2026-11-24: a glyph's name in a log line in italics, a link that opens it)
         dialog = self.dialog([first_font(), second_font()])
         logged = []
         dialog.log.add = lambda text, level="info": logged.append((level, text))
@@ -987,7 +987,7 @@ class DialogTests(unittest.TestCase):
         found = dict((r.name, sorted(r.kinds())) for r in dialog.results)
         self.assertEqual(found, {u"o": ["outline"], u"n": ["anchors", "metrics"], u"a": ["only_a"], u"b": ["only_b"],
                                  u"uni0101": ["codes"], u"eacute": ["components"]})
-        # The owner: the glyphs only in one font "should probably be unchecked by default so it truly focuses
+        # The review: the glyphs only in one font "should probably be unchecked by default so it truly focuses
         # on comparing what is available in both fonts"
         chips = dict(dialog.glyph_chips)
         self.assertEqual(sorted(kind for kind, chip in dialog.glyph_chips if chip.checked),
@@ -1161,7 +1161,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(fcmp.kinds_first_on({"only_a": 2, "absent": 1}, fcmp.KERN_KINDS_FIRST),
                          set(["only_a"]), "no differing value: every other kind but the glyphs one font lacks")
         self.assertEqual(fcmp.kinds_first_on({"absent": 4}, fcmp.KERN_KINDS_FIRST), set(["absent"]),
-                         "those too when they are all there is (owner's image 369)")
+                         "those too when they are all there is (image 369)")
         self.assertEqual(fcmp.kinds_first_on({}, fcmp.KERN_KINDS_FIRST), set())
         first, second = first_font(), second_font()
         second.by_name.pop(u"o")  # (the only glyph whose outline differs: the Glyphs list keeps something)
@@ -1181,7 +1181,7 @@ class DialogTests(unittest.TestCase):
         self.assertTrue(dialog.kern_shown, "no differing value: the other pairs shown")
 
     def test_installed_fonts_are_listed_and_open_in_fontlab_when_picked(self):
-        # The owner: "'Choose a font' does nothing, only 'Open a font' is usable, which doesn't help much,
+        # The review: "'Choose a font' does nothing, only 'Open a font' is usable, which doesn't help much,
         # especially if it does not open in the default system font folder"
         first = first_font()
         type(self).installed = [(u"C:\\Fonts\\zeta.ttf", u"Zeta Sans"), (u"C:\\Fonts\\alpha.otf", u"Alpha Serif"),
@@ -1359,7 +1359,7 @@ class DialogTests(unittest.TestCase):
         self.assertTrue(any(u"open already" in text for level, text in said[mark:]), said[mark:])
 
     def test_a_font_opened_is_compared_and_the_window_comes_back(self):
-        # The owner: choosing a font "sends the script window in the background and doesn't bring it back to
+        # The review: choosing a font "sends the script window in the background and doesn't bring it back to
         # the front after opening (...) Could opening a font also automatically run the first
         # comparison without requiring to click 'Compare'?"
         first, second = first_font(), second_font()
@@ -1401,7 +1401,7 @@ class DialogTests(unittest.TestCase):
         dialog.compare = lambda: compared.append(1) or real_compare()
         dialog.choice_b.pick(1)
         self.assertEqual(raised, [dialog.dialog], "a font picked among those open: the window is in front already")
-        self.assertEqual(compared, [1], "and compared at once (owner's image 257)")
+        self.assertEqual(compared, [1], "and compared at once (image 257)")
         dialog.compare = real_compare
         # Review: the timers once the window is minimized or closed, and a click on Compare meanwhile
         stopped = []
@@ -1421,8 +1421,8 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(stopped, [1], "the settling's comparison called off: compared once")
 
     def test_a_comparison_shows_its_progress(self):
-        # The owner: "the comparing step could potentially get its own loading bar, since CJK fonts can take a
-        # bit to load". It is the window's own now, in its top row (ak.busy_*: owner's image 200)
+        # The review: "the comparing step could potentially get its own loading bar, since CJK fonts can take a
+        # bit to load". It is the window's own now, in its top row (ak.busy_*: image 200)
         dialog = self.dialog([first_font(), second_font()])
         dialog.choice_b.pick(1)
         ak = self.ak
@@ -1479,7 +1479,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual((logged[-1][0], dialog.busy, ended[-1]), ("warning", False, False))
 
     def test_cancel_sits_before_close_usable_while_it_compares(self):
-        """The owner, 2026-11-24: a Cancel left of Close, grayed but while work that can stop runs (ak.cancel_button),
+        """The review of 2026-11-24: a Cancel left of Close, grayed but while work that can stop runs (ak.cancel_button),
         as Esc stops it; its help says what a stop leaves. Font Compare never writes: it is grayed but then."""
         import qtfakes
         rows = []
@@ -1541,7 +1541,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(logged[-1], ("warning", u"The comparison was stopped: the lists show the one before it."))
 
     def test_has_font_and_the_choices_kept_usable(self):
-        """Owner's image 209: with no comparison to make, the controls are grayed (ak.no_font_states, which
+        """Image 209: with no comparison to make, the controls are grayed (ak.no_font_states, which
         asks has_font) but the two dropdowns that choose the fonts."""
         dialog = self.dialog([first_font(), second_font()])
         prop = getattr(self.ak, "WITHOUT_FONT_PROP", "freelabWithoutFont")
@@ -1612,7 +1612,7 @@ class DialogTests(unittest.TestCase):
         self.addCleanup(delattr, FakeCombo, "setEnabled")
         dialog = fcmp.CompareDialog()
         self.assertIsNone(dialog.failed, dialog.failed)
-        # (owner's image 290: "Compare [ ]" then the swap button, an empty box; a grayed "n/a" instead)
+        # (image 290: "Compare [ ]" then the swap button, an empty box; a grayed "n/a" instead)
         self.assertEqual((dialog.choice_a.rows, dialog.first_key(), dialog.second_key), ([fcmp.NOT_AVAILABLE], None, None))
         self.assertEqual(fcmp.NOT_AVAILABLE, u"n/a")
         self.assertIs(enabled.get(id(dialog.choice_a)), False, "grayed")
@@ -1629,7 +1629,7 @@ class DialogTests(unittest.TestCase):
         self.assertIs(enabled.get(id(dialog.choice_a)), True)
 
     def test_the_tick_of_the_features_alike_says_how_many(self):
-        # Owner's image 293: "I don't seem to be able to see a difference when ticking this option". It works:
+        # Image 293: "I don't seem to be able to see a difference when ticking this option". It works:
         # it lists the features whose code is the same in both fonts too; two fonts with none alike (every
         # feature differs or is only in one) leave it nothing to show. It says how many, and grays with none.
         self.assertEqual(fcmp.same_caption(None), u"Show the features that are alike.")
@@ -1659,7 +1659,7 @@ class DialogTests(unittest.TestCase):
         self.assertIn(u"No feature is alike", told["tip"])
 
     def test_the_options_rows_are_as_tall_as_one_another(self):
-        # (owner's images 285 and 286, in Kerning Check: a tab's row of options shorter than another's moved the
+        # (images 285 and 286, in Kerning Check: a tab's row of options shorter than another's moved the
         # list under it as the tab was shown; here the chips' rows and the Features tab's tick)
         dialog = self.dialog([first_font(), second_font()])
         self.assertEqual(len(dialog.option_rows), 3, "the chips' two rows and the tick's")
@@ -1700,7 +1700,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(texts, [u"The one feature is alike in both.", u"The <b>2 features</b> are alike."])
 
     def test_the_tabs_count_in_parentheses(self):
-        # Owner's image 235: "Glyphs 13,956" read as a name; every header puts its count in parentheses
+        # Image 235: "Glyphs 13,956" read as a name; every header puts its count in parentheses
         dialog = self.dialog([first_font(), second_font()])
         texts = {}
         dialog.tabs.setTabText = lambda index, text: texts.__setitem__(index, text)
@@ -1710,12 +1710,12 @@ class DialogTests(unittest.TestCase):
         dialog.update_buttons()
         self.assertEqual(texts, {0: u"Glyphs (6)", 1: u"Kerning (3)", 2: u"Features (3)"})
         self.assertEqual(fcmp.tab_text(u"Glyphs", 13956), u"Glyphs (13,956)")
-        # (owner's images 327 and 328: "(0)" over features alike read as nothing compared)
+        # (images 327 and 328: "(0)" over features alike read as nothing compared)
         self.assertEqual(fcmp.tab_text(u"Features", 0), u"Features (alike)")
         self.assertEqual(fcmp.counted(13956, u"glyph"), u"13,956 glyphs")
 
     def test_the_tab_lines(self):
-        # Owner's image 256: "632 glyphs differ." and "231 shown." on one line; names and counts in bold,
+        # Image 256: "632 glyphs differ." and "231 shown." on one line; names and counts in bold,
         # the chips' names in italics
         line = fcmp.glyphs_line
         self.assertEqual(line(632, 231, 231, [u"Only in A"]),
@@ -1735,7 +1735,7 @@ class DialogTests(unittest.TestCase):
                          u"with code that differs.")
 
     def test_the_code_is_written_in_the_views_enabled_colors(self):
-        # Owner's image 233: a font compared from the Features tab showed its code dimmed until another feature
+        # Image 233: a font compared from the Features tab showed its code dimmed until another feature
         # was selected. The pages are grayed while comparing, and Qt's palette() then gives the disabled
         # colors, which the code's HTML kept: the colors are read for the enabled view, whatever it is now
         dialog = self.dialog([first_font(), second_font()])
@@ -1763,7 +1763,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(asked, [("active", "base"), ("active", "text")])
 
     def test_the_first_font_is_as_wide_as_its_name_and_bold(self):
-        # Owner's images 236 and 237: a tab's width between the name and the swap button, the name not bold
+        # Images 236 and 237: a tab's width between the name and the swap button, the name not bold
         made = []
         real = FakeCombo.__init__
 
@@ -1792,7 +1792,7 @@ class DialogTests(unittest.TestCase):
         self.assertNotIn("font", dict(dialog.choice_b.calls), "the second lists other fonts: plain")
 
     def test_the_font_picked_is_kept_for_the_session(self):
-        # Owner's image 257: "the last loaded font should stay loaded and keep being compared with for the rest
+        # Image 257: "the last loaded font should stay loaded and keep being compared with for the rest
         # of the session (or until a new font is selected for comparison)"
         first, second, third = first_font(), second_font(), two_master_font()
         packages = [first, second, third]

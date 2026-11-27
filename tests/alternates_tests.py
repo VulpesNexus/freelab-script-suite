@@ -403,10 +403,10 @@ class PageTests(unittest.TestCase):
         page.letters_edit.slots["textChanged(QString)"][0](text)
 
     def test_empty_notes_take_no_room_and_the_previews_hold_the_spare_height(self):
-        """Owner's image 198: the empty line under the list's heading: hidden while it says nothing. Owner's
-        image 287: with the previews hidden, the part's spare height went to the heading and the paragraph,
+        """Image 198: the empty line under the list's heading: hidden while it says nothing. Image
+        287: with the previews hidden, the part's spare height went to the heading and the paragraph,
         blank bands above and below the paragraph. The previews stay, empty when there is nothing to draw
-        (owner's image 296), their captions hidden; the part ends with them, over the splitter's handle."""
+        (image 296), their captions hidden; the part ends with them, over the splitter's handle."""
         page, owner = self.page()
         self.assertTrue(page.note.visible)
         self.assertEqual(page.build_glyphs(), [], "nothing ticked: nothing to build, nothing to preview")
@@ -436,7 +436,7 @@ class PageTests(unittest.TestCase):
         self.assertEqual(page.characters_in_scope()[0], [u"a", u"l"], "the checked letters; a plus sign takes no turns")
         self.assertEqual(self.listed(page), ([u"a", u"l"], [u"a", u"l"]), "listed in Selected glyphs, ticked")
         self.assertEqual(page.build_button.text, u"Build 3 variants")
-        # (each count bold with its noun: owner's image 297)
+        # (each count bold with its noun: image 297)
         self.assertEqual(page.scope_note.text, u"<b>2 glyphs</b> (a, l): <b>3 variants</b> to build; <b>1 variant</b> "
                                                u"the font has already is left as it is.")
         self.assertTrue(page.build_button.enabled)
@@ -504,7 +504,7 @@ class PageTests(unittest.TestCase):
     def test_the_box_says_what_to_type_only_while_it_is_used(self):
         """Its gray example read "lest", which nobody took for one: the box says what to type while These
         glyphs is picked, and is grayed out, with no words in it, otherwise. Its words end with an ellipsis,
-        as every field's (owner's image 309); with no font, it says n/a. Owner's image 296: with nothing
+        as every field's (image 309); with no font, it says n/a. Image 296: with nothing
         typed, the previews showed a; they are empty."""
         page, owner = self.page()
         self.assertEqual(page.scope(), "checked")
@@ -552,9 +552,9 @@ class PageTests(unittest.TestCase):
                          "grayed out once the container is enabled again")
 
     def test_the_option_is_grayed_out_while_no_glyph_in_scope_has_an_alternate(self):
-        """The owner: the option should read "Also build variants from existing alternates", and be grayed
-        out where there is no alternate to build from. It then counts as unticked, its tick kept. Owner's
-        image 269: it stayed grayed out after a build of variants, the font's only alternates being the
+        """The review: the option should read "Also build variants from existing alternates", and be grayed
+        out where there is no alternate to build from. It then counts as unticked, its tick kept. Image
+        269: it stayed grayed out after a build of variants, the font's only alternates being the
         ones FreeLab built: they are alternates to build from too, and the scope decides (not the font)."""
         self.assertEqual(fa.DESIGNS_LABEL, u"Also build variants from existing alternates.")
         turns = lambda ch: bool(ch) and ft.fc.char_kind(ch) is not None
@@ -592,7 +592,7 @@ class PageTests(unittest.TestCase):
         self.assertTrue(page.designs_box.enabled, "u.01 and u.02 are designs of u")
 
     def test_a_scope_per_script_and_one_for_every_glyph(self):
-        """The owner asked for a dropdown of which glyphs get a variant (common pairs, all Latin, all
+        """Asked for: a dropdown of which glyphs get a variant (common pairs, all Latin, all
         glyphs): the font's scripts are scopes, Latin first, and one scope takes every glyph that can
         take turns."""
         glyphs = LATIN + [(u"uni0434", 0x434), (u"uni0436", 0x436), (u"uni0416", 0x416), (u"alpha", 0x3B1),
@@ -684,7 +684,7 @@ class PageTests(unittest.TestCase):
         self.assertEqual(owner.was_busy, [])
         self.assertEqual([level for level, _ in owner.logged], ["warning"])
         # The last build's pace refuses one that would take too long; a long one allowed says only that it
-        # may take a bit (the owner, 2026-11-14: no time, no word of the progress)
+        # may take a bit (the review of 2026-11-14: no time, no word of the progress)
         page.count_box.setValue(1)
         page.pace = 0.25
         page.update_buttons()
@@ -712,7 +712,7 @@ class PageTests(unittest.TestCase):
         suggested = len(page.group_rows(fa.SUGGESTIONS_KEY))
         page.all_button.slots["clicked()"][0]()
         self.assertEqual(len(page.checked_glyphs()), suggested)
-        # Owner's report 118: these buttons left no line in the log
+        # Report 118: these buttons left no line in the log
         self.assertEqual(owner.logged[-1][1], u"<i>Tick all</i> ticked <b>%d glyphs</b>." % suggested)
         self.assertFalse(page.all_button.enabled, "all checked: nothing more to check")
         self.assertTrue(page.none_button.enabled)
@@ -729,7 +729,7 @@ class PageTests(unittest.TestCase):
         self.assertEqual(page.checked_glyphs(), [], "busy: no click taken")
 
     def test_the_two_jobs_are_told_apart(self):
-        """The owner built variants without making copies first and wondered what the copies were for:
+        """Variants were built without copies made first, and it was asked what the copies were for:
         the button says what its copies are for, and each part says that neither is a step of the other."""
         page, owner = self.page()
         self.assertEqual(page.copy_button.text, u"Make copies to redraw")
@@ -737,7 +737,7 @@ class PageTests(unittest.TestCase):
                       page.note.text)
         self.assertIn(u"<i>Selected glyphs</i>: the glyphs <i>Variants that take turns</i> builds (picked by its "
                       u"<i>Glyphs</i> dropdown), with no such copy.", page.note.text)
-        # (a count bold with its noun; a number whose noun is outside, bold alone: owner's image 301)
+        # (a count bold with its noun; a number whose noun is outside, bold alone: image 301)
         self.assertIn(u"(counted in <b>128</b> of <b>412 open-licensed families</b>)", page.note.text)
         # The review of November 23, image 7: the note ran to a third line for its last word at the window's
         # first size, where two lines held 400 characters
@@ -782,7 +782,7 @@ class PageTests(unittest.TestCase):
         self.assertEqual([level for level, text in owner.logged], ["error"])
         self.assertIn(u"Nothing was changed", owner.logged[0][1])
 
-    # Variants built from a glyph's alternates as well as from the glyph (the owner's font has W and
+    # Variants built from a glyph's alternates as well as from the glyph (the font reviewed has W and
     # W.ss01, two designs: both variants were made of W)
 
     def test_the_designs_of_a_glyph(self):
@@ -791,7 +791,7 @@ class PageTests(unittest.TestCase):
         alternates = fa.alternates_of(u"W", names)
         self.assertEqual(fa.designs_of(u"W", alternates),
                          [u"W", u"W.2", u"W.alt", u"W.alt1", u"W.calt1", u"W.cv05", u"W.salt", u"W.ss01"],
-                         "the glyph and its alternates, a variant built before among them (owner's image 269); no "
+                         "the glyph and its alternates, a variant built before among them (image 269); no "
                          "variant of an alternate, no small capital, no other glyph's")
         self.assertEqual(fa.variant_numbers(u"W", alternates), {1: u"W.alt1", 2: u"W.ss01.alt2"})
         self.assertEqual(fa.alternates_index(names)[u"W"], alternates, "the same alternates, read once for the font")
@@ -898,7 +898,7 @@ class PageTests(unittest.TestCase):
         letters = len(glyphs)
         self.assertEqual(page.build_button.text, u"Build %d variants" % (2 * letters))
         self.assertTrue(plain(page.scope_note.text).endswith(u" " + fa.LONG_BUILD_WORDS))
-        self.assertEqual(fa.LONG_BUILD_WORDS, u"A build this large may take a bit.", "the owner's words")
+        self.assertEqual(fa.LONG_BUILD_WORDS, u"A build this large may take a bit.", "the words")
         self.assertNotIn(u"top line", plain(page.scope_note.text))
         self.assertIn(u"uni0107\N{HORIZONTAL ELLIPSIS})", page.scope_note.text, "the first letters named, not all")
         seen = []
@@ -964,7 +964,7 @@ class PageTests(unittest.TestCase):
         self.assertIn(u"the font has these variants already", page.preview_caption.text)
 
     def test_nothing_to_act_on_takes_no_click(self):
-        """The owner's audit of what stays clickable with nothing loaded: with no font, no control of the
+        """The audit of what stays clickable with nothing loaded: with no font, no control of the
         tab takes a click; with no glyph in scope (nothing checked), the variants' count, strength, and
         seed are grayed out with the button; a font with none of the suggested glyphs says so."""
         owner = Owner(self.ak, None)
@@ -995,8 +995,8 @@ class PageTests(unittest.TestCase):
             self.assertNotIn(u"the variants built here are built again in place", box.whats)
 
     def test_a_new_seed_builds_the_variants_built_here_again_in_place(self):
-        """Owner's image 270: after a build, another seed left nothing to build ("the font has these variants
-        already"), where the owner wanted the same variants with another seed. Variants this tab built and
+        """Image 270: after a build, another seed left nothing to build ("the font has these variants
+        already"), where the same variants with another seed were wanted. Variants this tab built and
         nobody changed since are built again in place, as one step of the History; the font's own variants,
         and one drawn over since, are left as they are."""
         page, owner = self.page()
@@ -1051,7 +1051,7 @@ class PageTests(unittest.TestCase):
         self.assertEqual(fa.variant_source(u"W.ss01.alt2", 2), u"W.ss01")
 
     def test_the_tab_is_two_parts_and_its_buttons_go_to_the_bottom_row(self):
-        """Owner's images 244, 245, 246, 258 to 260: the heading lost "(handwriting)"; the tab is two parts of a
+        """Images 244, 245, 246, 258 to 260: the heading lost "(handwriting)"; the tab is two parts of a
         splitter (it had no handle), its buttons in the window's bottom row (none between a list and its
         handle); the previews' captions are a preview's (quiet), a line between the two previews."""
         del Owner.headings[:]
@@ -1065,10 +1065,10 @@ class PageTests(unittest.TestCase):
                          "drawn in the quiet color (ak.preview_caption)")
         self.assertIsNotNone(page.preview_line, "a line between the two previews")
 
-    # -- the owner's round of 2026-11-18 (images 283 to 318) --------------------------------
+    # -- the round of 2026-11-18 (images 283 to 318) --------------------------------
 
     def test_the_list_has_suggestions_and_the_selected_glyphs(self):
-        """Owner's image 302: the glyphs a set of the Glyphs dropdown picks were nowhere to see or untick. The
+        """Image 302: the glyphs a set of the Glyphs dropdown picks were nowhere to see or untick. The
         list has two groups, laid out as the window's other grouped lists (a bold row, its count in
         parentheses, closable): Suggestions (copied by Make copies to redraw) and Selected glyphs (built by
         Build N variants), each button acting on its own group's ticks."""
@@ -1224,7 +1224,7 @@ class BaselineReachTests(unittest.TestCase):
         self.assertEqual(moved, fa.variant_params(u"a", 1, "bold", 3, 40, 1000.0), "the same seed, the same move")
 
     def test_variants_take_turns_up_and_down(self):
-        """The owner's images 238 and 239, 2026-11-27: Q's four variants at seed 6 went up, then further down at each
+        """Images 238 and 239, 2026-11-27: Q's four variants at seed 6 went up, then further down at each
         one; they take turns now, each moving at least a third of the reach."""
         for glyph in (u"Q", u"a", u"period"):
             for seed in range(1, 21):

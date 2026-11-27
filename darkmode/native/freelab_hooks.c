@@ -46,7 +46,7 @@ typedef struct {
 #define QIMAGE_INVALID 0
 /* A 32-bit format the mapping reads; any other (an icon loaded from an indexed, grayscale, or 1-bit PNG: 321 of
  * FontLab's resources, its Fonts panel's tab icon among them) is converted to ARGB32 first. Drawn as it was, it kept
- * its light-mode colors (the owner, 2026-11-26: the Fonts tab's icon, "and that's not the only one"). */
+ * its light-mode colors (the review of 2026-11-26: the Fonts tab's icon, "and that's not the only one"). */
 #define MAPPED_FORMAT(f) ((f) == QIMAGE_RGB32 || (f) == QIMAGE_ARGB32 || (f) == QIMAGE_ARGB32_PREMULTIPLIED)
 
 /* QPen and QBrush hold one pointer; room for a copy. */
@@ -105,7 +105,7 @@ static int ink_count;
 /* Surfaces that show colors the user picked (Overlay Fonts' sample rows and preview): of the hooked
  * surfaces, those whose brushes and images are drawn as they are. FontLab fills each sample glyph with
  * a brush of the layer's color, or draws it from an image in that color; mapped, a black pick came out
- * white and a white one dark (the owner: "black or near-black hues being displayed at pure white when
+ * white and a white one dark (the review: "black or near-black hues being displayed at pure white when
  * the user specifically selects this kind of color feels like overreach", image 152). Their grounds
  * (fillRect) and pens are mapped as anywhere, and so is FontLab's own gray of the rows' pills. */
 #define PICKED_MAX 64
@@ -319,7 +319,7 @@ static int64_t hook_changed[H_COUNT];
 /* The glyph canvases: their paper is the canvas' ground. FontLab paints a canvas on the workspace color dark mode
  * sets (#f0f0f0, mapped to about #2a2a2a), but draws some of its own surfaces there in pure white (TrueType Hinting's
  * strip of sizes and its pictures), which mapped to the darker #1f1f1f: a dark box on the canvas, where light mode has
- * white on white (the owner's images 183 and 189, 2026-11-26). On a canvas, a neutral at least as light as the
+ * white on white (images 183 and 189, 2026-11-26). On a canvas, a neutral at least as light as the
  * workspace color (canvas_paper_l) maps to the canvas' ground (canvas_dark_l), and a picture's paper too. */
 #define CANVAS_MAX 64
 static uintptr_t canvas_widgets[CANVAS_MAX];
@@ -380,7 +380,7 @@ static int map_qcolor(const qcolor *c, qcolor *out)
 /* Containers whose own painting is mapped (the dock, the panels, the Font window), apart from the islands: their
  * painting is mapped as an island's, but their palettes are not answered light outside painting. FontLab reads the
  * Font window's palette to color its document tab's name: answered light (black), the names came out black on the
- * dark tab bar (the owner's image 179, 2026-11-26). */
+ * dark tab bar (image 179, 2026-11-26). */
 #define FRAME_MAX 256
 static uintptr_t frame_widgets[FRAME_MAX];
 static int frame_count;
@@ -442,10 +442,10 @@ static int picked_target(const void *painter)
 
 /* A dark ground filled on a picked surface: FontLab's own choice for contrast, drawn as it is. For a
  * light pick, it fills the selected row navy (#2a3754) so that the sample shows; mapped, the row turned
- * pale (the owner's recording, a white pick). Light grounds (the rows' paper) are mapped as anywhere. */
+ * pale (recording, a white pick). Light grounds (the rows' paper) are mapped as anywhere. */
 #define PICKED_DARK_GROUND_OKL 0.5
 /* FontLab's two grounds for the selected row (pale behind a darker pick, navy behind a light one) are
- * one color in dark mode: the navy is drawn as the pale one mapped (the owner's images 155 and 156,
+ * one color in dark mode: the navy is drawn as the pale one mapped (images 155 and 156,
  * where the highlight changed shade with the pick). */
 #define PICKED_SELECTION_PALE 0xe9f0ffU
 #define PICKED_SELECTION_NAVY 0x2a3754U
@@ -469,10 +469,10 @@ static int picked_dark_ground(const void *painter, const qcolor *c, qcolor *out)
 
 /* FontLab's sunken edge on a picked surface (the color field's and the opacity bar's #808080 line along
  * their top and left), drawn in dark mode's frame color (the color slot's, PICKER_FRAME): mapped, the
- * mid gray stays mid gray, a light edge on the dark window (the owner's image 154). */
+ * mid gray stays mid gray, a light edge on the dark window (image 154). */
 #define PICKED_FRAME_GRAY 0x808080U
 #define PICKED_FRAME_DARK 0x292929U /* the panel's own: drawn as the slots' gray, it still read as a light edge
-                                     * (the owner's image 184, 2026-11-26) */
+                                     * (image 184, 2026-11-26) */
 static int picked_frame(const void *painter, const qcolor *c, qcolor *out)
 {
     uint32_t argb = painted_rgba(c);
@@ -499,7 +499,7 @@ static int white_pen(const qcolor *c)
 
 /* A translucent pure white pen: on a glyph canvas, a halo drawn to stand a mark out from what is under it, invisible on
  * light mode's white canvas. The Eraser's drop, a black ring in a 40% white halo, came out a light ring in a light glow
- * on the dark canvas (the owner's images 190 and 191, 2026-11-27): on a canvas, the halo takes the canvas' ground. */
+ * on the dark canvas (images 190 and 191, 2026-11-27): on a canvas, the halo takes the canvas' ground. */
 static int halo_pen(const qcolor *c)
 {
     uint32_t argb = painted_rgba(c);
@@ -744,8 +744,8 @@ static int pen_is_white(const void *painter)
 
 /* On a dark box mapped light (see on_dark_box), dark and middle grays are drawn darker still, so the text stands out
  * from the box: the glyph's caption, selected or with the mouse near it, is #1f1f1f at 70% under #646464 and #404040
- * text. Mapped as anywhere, the text came out #919191 on the box's #969696 (the owner's image 173, 2026-11-26); kept
- * as it was, #646464 on that mid gray still hardly read (the owner's recording, the same evening: the box is
+ * text. Mapped as anywhere, the text came out #919191 on the box's #969696 (image 173, 2026-11-26); kept
+ * as it was, #646464 on that mid gray still hardly read (recording, the same evening: the box is
  * translucent, so over the dark canvas it ends mid gray, not light). Such a pen is drawn at the mapping's dark end,
  * its hue kept. */
 #define DARK_BOX_KEEP_OKL 0.6
@@ -787,7 +787,7 @@ static int dark_on_badge(const void *painter, const qcolor *c)
 /* Dark boxes: FontLab fills a label dark and writes on it in white (on the canvas, the glyph's caption while
  * everything is selected, the measurements shown on hovering). The fill is mapped light, as dark ink is; the
  * white text, kept white as white pens are (see white_pen), then stood white on light gray, unreadable (the
- * owner's image 159, 2026-11-26). While the painter's brush is such a box, white pens are mapped with it. A box:
+ * image 159, 2026-11-26). While the painter's brush is such a box, white pens are mapped with it. A box:
  * a solid fill, mostly opaque, of little color (a dark colored fill is kept: CONTENT_KEEP_CHROMA), darker than
  * DARK_BOX_OKL but not black (FontLab's labels: #282828, #434343; black is a glyph's fill, with white marks on
  * it that stay white). Any other brush ends it. */
@@ -1012,7 +1012,7 @@ static int is_picture(const uint8_t *bits, int w, int h, int stride, int format,
 
 /* An icon FontLab draws itself on a hooked surface (its panels' tabs: the node panel's note, the anchors' red
  * pin): small, on transparency. Mapped color by color with content's tints kept, the node icon's pale yellow note
- * came out an olive block and the red marks dimmed (the owner's images 161 to 163, 2026-11-26). It is mapped as
+ * came out an olive block and the red marks dimmed (images 161 to 163, 2026-11-26). It is mapped as
  * dark mode maps every other icon (the script engine's map_image with anchors "icon"): its faces by anchor
  * blends, its colored marks kept. Straight alpha for the pixel helper, premultiplied again after. */
 #define ICON_MAX_SIDE 32
@@ -1059,7 +1059,7 @@ static void map_image_pixels(void *image, int format, int mode, int pictures)
     if (mode == SCREEN_INK_ICON) {
         /* On an ink list (its rows Qt draws, only its pens mapped): FontLab's delegates draw their check boxes as small
          * images. The checked one, blue with a white tick, is drawn as designed (mapped with the ink effect, its tick
-         * came out dark: the owner's image 202, 2026-11-27); the empty one, a white box, by the icon rule. */
+         * came out dark: image 202, 2026-11-27); the empty one, a white box, by the icon rule. */
         if (clear && w <= ICON_MAX_SIDE && h <= ICON_MAX_SIDE && stride == w * 4
             && !is_picture(bits, w, h, stride, format, 0))
             map_icon_pixels(bits, w, h, format);
@@ -1365,7 +1365,7 @@ static void trace_pen(int hook, const void *painter, const void *in, const void 
 /* The swatches of the color palettes (FontLab's ColorPickerItem): each paints a light checkerboard (#e1e1e1 and white
  * squares), then its color over it, both inside rounded, smoothed corners. Where a corner is partly covered, the
  * checkerboard shows through the color: on light mode's light popup that is invisible, on the dark popup every swatch
- * had a light rim at its corners, a faint frame around the dark ones (the owner's image 187, 2026-11-26). On a swatch,
+ * had a light rim at its corners, a faint frame around the dark ones (image 187, 2026-11-26). On a swatch,
  * the checkerboard's squares are held back until the painter's next call: an opaque color filled next hides those it
  * covers anyway, and they are dropped (see drop_covered); anything else (a translucent color, no color, a pen, the
  * painter's end) draws them first, as FontLab drew them. */
@@ -1729,7 +1729,7 @@ static void w_set_brush(void *p, const void *brush)
     int style = qt_brush_style(brush);
     note_badge(p, hooks_on && style == BRUSH_SOLID && badge_color(qt_color_rgba(qt_brush_color(brush))));
     /* (on the glyph canvases only, where the caption's box is: a tab bar's hover highlight, #606060, was taken for one,
-     * and the next tab's name came out black: the owner's image 192, 2026-11-27) */
+     * and the next tab's name came out black: image 192, 2026-11-27) */
     note_dark_box(p, hooks_on && style == BRUSH_SOLID && on_screen(p) && canvas_paint && !picked_brush(p, brush)
                      && dark_box_color(qt_brush_color(brush)));
     note_light_box(p, brush, hooks_on && style == BRUSH_SOLID && on_screen(p) && !picked_brush(p, brush));

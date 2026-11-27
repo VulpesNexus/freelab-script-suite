@@ -1084,7 +1084,7 @@ class AnchorPageTests(unittest.TestCase):
         self.assertEqual((page.writes, len(notified)), (["begin", "end"], 1))
         self.assertEqual(logged, [("done", u"Added 3 anchors to 1 glyph. <i>Edit &gt; Undo</i> takes it back.")])
 
-    # -- the bases' sections, the notes, and stacked examples (the owner's reports of 2026-11-12) --
+    # -- the bases' sections, the notes, and stacked examples (reports of 2026-11-12) --
 
     INKS = {"e": ac.Ink(40, -10, 440, 470, advance=480), "B": ac.Ink(60, 0, 520, 700, advance=580),
             "F": ac.Ink(60, 0, 480, 700, advance=520), "O": ac.Ink(40, -10, 660, 710, advance=700),
@@ -1150,7 +1150,7 @@ class AnchorPageTests(unittest.TestCase):
         self.assertEqual(page.reference_text(found["F"]), text(0x0046, 0x0302), "no mark below a letter with no anchor for it")
 
     def test_a_mark_drawn_on_the_other_side_is_referenced_by_its_twin_there(self):
-        """The owner's report of 2026-11-16 (Bellefair): uni0326.salt, a comma drawn above, was drawn in the
+        """Report of 2026-11-16 (Bellefair): uni0326.salt, a comma drawn above, was drawn in the
         reference as U+0326, a comma below, and o's reference showed two commas under it ("o;") while the
         preview put one above."""
         self.assertEqual(ac.reference_code(0x0326, "top"), 0x0312, "a comma below drawn above: the turned comma above")
@@ -1248,7 +1248,7 @@ def one_mark(code, base, root, side, glyph):
 
 
 class TouchTests(unittest.TestCase):
-    """A mark that joins its letter (ogonek, cedilla, horn) is right when it touches it: the owner's report
+    """A mark that joins its letter (ogonek, cedilla, horn) is right when it touches it: report
     of 2026-11-12 (the warning was the other way round)."""
 
     def test_joined_marks_are_judged_the_opposite_way(self):
@@ -1353,7 +1353,7 @@ O_GRAVE, O_HORN_HOOK = ac.unichr_(0xF2), ac.unichr_(0x1EDF)
 
 class GoToTests(unittest.TestCase):
     """A glyph named in the log, or drawn beside the edited one, clicked: its row shown, whether the list
-    has it or not (the owner's reports of 2026-11-12)."""
+    has it or not (reports of 2026-11-12)."""
 
     def dialog(self, listed=(), in_font=(), existing_on=False):
         """An AccentsDialog whose list has the listed characters; in_font: {character: glyph name}."""
@@ -1540,7 +1540,7 @@ class EditorClickTests(unittest.TestCase):
         return Stub(button=lambda: 1, pos=lambda: Stub(x=lambda: x, y=lambda: y))
 
     def test_a_double_click_on_the_other_letter_goes_to_it_and_one_click_does_nothing(self):
-        # (owner's image 333: one click went to the letter after the glyph, and far past its ink too)
+        # (image 333: one click went to the letter after the glyph, and far past its ink too)
         calls = []
         owner = Stub(neighbor_clicked=lambda role: calls.append(("go", role)) or role == "after",
                      neighbor_char=lambda role: u"x" if role == "after" else None,
@@ -1574,7 +1574,7 @@ class EditorClickTests(unittest.TestCase):
         self.assertEqual((editor.went, editor.cursor), (False, "arrow"))
 
 
-# -- Glyph Compose: the owner's reports of 2026-11-13 ---------------------------------------------------
+# -- Glyph Compose: reports of 2026-11-13 ---------------------------------------------------
 
 def font_check():
     """Font Check, as Glyph Compose loads it beside itself (its bundled font, vertical metrics, high-value list)."""
@@ -1809,7 +1809,7 @@ class LimitTests(unittest.TestCase):
         self.assertEqual(ac.limit_note([ac.LINE_NAME], True), u"meets the line above")
         self.assertEqual(ac.limit_note([ac.WINDOWS, ac.LINE_NAME], False), u"Windows clips below; meets the line below")
         self.assertEqual(ac.limit_note([], True), u"", "a reference line says nothing")
-        # the owner's font (image 48): the hhea descender and winDescent share a line, the font's and typo's another
+        # the font reviewed (image 48): the hhea descender and winDescent share a line, the font's and typo's another
         owners = [(u"font descender", -120.0, None), (u"typo descender", -120.0, None),
                   (u"hhea descender", -288.0, ac.MACOS), (u"winDescent", -288.0, ac.WINDOWS)]
         self.assertEqual(ac.limit_lines(owners, font_check().merge_names),
@@ -1875,7 +1875,7 @@ class LimitTests(unittest.TestCase):
 
 
 class CellTextTests(unittest.TestCase):
-    """Cells take no period, and data goes in parentheses (the owner's rules)."""
+    """Cells take no period, and data goes in parentheses (the rules)."""
 
     def test_built_from(self):
         self.assertEqual(ac.row_text(u"A + gravecomb"), u"A + gravecomb")
@@ -1916,7 +1916,7 @@ class CellTextTests(unittest.TestCase):
 
 
 class ReferenceClusterTests(unittest.TestCase):
-    """A reference never shows a mark standing beside its letter (the owner's report of 2026-11-13)."""
+    """A reference never shows a mark standing beside its letter (report of 2026-11-13)."""
 
     A_GRAVE_ACUTE = text(0x0041, 0x0300, 0x0301)
 
@@ -2060,7 +2060,7 @@ class ReferenceFontTests(unittest.TestCase):
                          "FreeLang's other families, with a space or a plus after its name, are not choices")
 
     def test_a_family_that_is_not_installed_is_never_a_row(self):
-        """The owner's chooser listed "FreeLab Languages", the bundled font's old family name saved as the
+        """The chooser listed "FreeLab Languages", the bundled font's old family name saved as the
         pick in an earlier session, and chose it: a ghost row, drawing nothing of its own."""
         rows = ac.reference_rows(u"FreeLang Essential", [u"Arial", u"Noto Sans"], [u"FreeLab Languages", u"Noto Sans"],
                                  shown=u"FreeLang")
@@ -2218,7 +2218,7 @@ class ReferenceFontTests(unittest.TestCase):
 
 
 class HandedOverTests(unittest.TestCase):
-    """Every glyph Font Check hands over is a row or is named in the top line (the owner's report: "one
+    """Every glyph Font Check hands over is a row or is named in the top line (report: "one
     glyph mentioned, none shown")."""
 
     MACRON_BELOW = ac.unichr_(0x0331)
@@ -2254,7 +2254,7 @@ class HandedOverTests(unittest.TestCase):
         self.assertEqual(ac.left_out_sentence(2, [("unbuildable", [u"x"])]),
                          u"Of the 2 glyphs Font Check handed over, 1 is not listed: it is not built from a letter and "
                          u"marks (x).")
-        bold = lambda text: u"<b>%s</b>" % text  # noqa: E731  (owner's images 297 and 301)
+        bold = lambda text: u"<b>%s</b>" % text  # noqa: E731  (images 297 and 301)
         self.assertEqual(ac.left_out_sentence(3, [("built", [u"x", u"y"])], None, bold),
                          u"Of the <b>3 glyphs</b> Font Check handed over, <b>2</b> are not listed: <b>2</b> were built "
                          u"here (x y).")
@@ -2282,7 +2282,7 @@ class HandedOverTests(unittest.TestCase):
                          glyph_links=lambda chars: u"[%s]" % u" ".join(chars))
         dialog.log = Stub(add=lambda line, level="info": lines.append((level, line)))
         # A combining mark stands on a dotted circle: alone, it was drawn on the parenthesis, the top line
-        # reading "the font has it already ()" (the owner's report of 2026-11-16)
+        # reading "the font has it already ()" (report of 2026-11-16)
         self.assertEqual(dialog.left_out_text(), u" The glyph Font Check handed over is not listed: the font has it "
                                                  u"already (<b>%s%s</b>)." % (ac.unichr_(0x25CC), self.MACRON_BELOW))
         dialog.say_left_out()
@@ -2295,7 +2295,7 @@ class HandedOverTests(unittest.TestCase):
         self.assertEqual(len(lines), 1)
 
     def test_a_glyph_built_here_is_not_said_to_be_in_the_font_already(self):
-        """The owner's report of 2026-11-16: just after Built 1 glyph (a combining mark, which has no row once
+        """Report of 2026-11-16: just after Built 1 glyph (a combining mark, which has no row once
         the font has it), the top line said "the font has it already", read as Font Check having handed over a
         glyph the font had."""
         font = ac.Font([u"a", u"uni0331"], [(u"a", 0x61), (u"uni0331", 0x0331)])
@@ -2357,7 +2357,7 @@ LIST_QT = Stub(Qt=Stub(UserRole=32, ItemIsUserCheckable=1, Checked=2, Unchecked=
 
 
 class SearchTests(unittest.TestCase):
-    """The search fields over the lists (the owner's request of 2026-11-13)."""
+    """The search fields over the lists (the request of 2026-11-13)."""
 
     def test_what_finds_a_row(self):
         a_ogonek = ac.unichr_(0x0105)
@@ -2447,7 +2447,7 @@ class SearchTests(unittest.TestCase):
             dialog.check_all(False)
             self.assertEqual([row.checked for row in build.rows], [True, False], "the hidden row as it was")
             # Each click leaves a line: how many it changed, how many are checked in all, the hidden ones said
-            # (the owner's report of 2026-11-16: Check all and Check none left none)
+            # (report of 2026-11-16: Check all and Check none left none)
             self.assertEqual(dialog.lines, [u"Ticked <b>1 glyph</b> (<b>2</b> ticked in all, <b>1</b> of them not shown).",
                                             u"Unticked <b>1 glyph</b> (<b>1</b> still ticked, not shown: a search hides it)."])
             dialog.search.text = u"U+1E0D"
@@ -2640,7 +2640,7 @@ class HighValueTests(unittest.TestCase):
 
 
 class ApplyResetTests(unittest.TestCase):
-    """A reset can be applied to the related letters (the owner's report of 2026-11-13: after Reset
+    """A reset can be applied to the related letters (report of 2026-11-13: after Reset
     diacritic, Apply to related letters was grayed, so a bad placement applied to all could not be taken
     back from them)."""
 
@@ -2702,7 +2702,7 @@ class ApplyResetTests(unittest.TestCase):
         self.assertIn(u"Placed the diacritics of 2 letters as on", dialog.lines[-1])
 
 
-# -- Glyph Compose: the owner's second round of 2026-11-13 ------------------------------------------------
+# -- Glyph Compose: the second round of 2026-11-13 --------------------------------------------------------
 
 try:
     from PIL import Image, ImageDraw, ImageFont  # noqa: F401
@@ -2813,7 +2813,7 @@ class HoleRenderingTests(unittest.TestCase):
 
 
 class HandReachTests(unittest.TestCase):
-    """A mark moved by hand: how far, how it is written, where it shows (the owner's report: a drag sent a
+    """A mark moved by hand: how far, how it is written, where it shows (report: a drag sent a
     mark to coordinates of three hundred digits, and Reset diacritic stayed grayed)."""
 
     def test_moves_are_kept_to_what_a_font_holds(self):
@@ -3007,7 +3007,7 @@ class DragTests(unittest.TestCase):
         self.dialog.mark_selected = broken
         with self.assertRaises(OverflowError):
             self.dialog.set_adjust(0, [5.0, 5.0, 1.0, 1.0], final=True)
-        self.assertEqual(self.calls, ["buttons", "buttons"], "whatever the line under the picture did (the owner's "
+        self.assertEqual(self.calls, ["buttons", "buttons"], "whatever the line under the picture did (in review, "
                                                              "Reset diacritic stayed grayed: they never came)")
 
     def test_scaling_uses_the_view_of_the_press_too(self):
@@ -3083,7 +3083,7 @@ class CompactTests(unittest.TestCase):
         ac.place(recipes[2], inks().get, placement, self.TIGHT)
         self.assertEqual(ac.room_counts(recipes), (2, 1, 1), "made compact (one of them too tall even so), and "
                                                              "one too tall as placed")
-        # Counted in glyphs, in sentences of their own (the owner's report of 2026-11-16: "42 glyphs that were
+        # Counted in glyphs, in sentences of their own (report of 2026-11-16: "42 glyphs that were
         # too tall for a 120% line were made compact"; it read "42 made compact to fit a 120% line")
         self.assertEqual(ac.room_details(2, 1, 0), [u"2 glyphs that were too tall for a 120% line were made compact.",
                                                     u"1 glyph is too tall even when compact: it is left unticked."])
@@ -3093,7 +3093,7 @@ class CompactTests(unittest.TestCase):
         self.assertEqual(ac.room_details(0, 0, 1), [u"1 glyph is too tall for a 120% line as placed."])
         self.assertEqual(ac.room_details(0, 0, 0), [])
         # The log's line names the box first: "Glyphs are no longer made compact", its time cut short, read as
-        # "9 Glyphs" (the owner's report of 2026-11-16)
+        # "9 Glyphs" (report of 2026-11-16)
         box = u"<i>Compact diacritics to fit the line</i>"
         self.assertEqual(ac.compact_text(False, 0), u"%s off: diacritics keep their own gaps and size, and the rows say "
                                                     u"which glyphs are too tall for a 120%% line." % box)
@@ -3108,7 +3108,7 @@ class CompactTests(unittest.TestCase):
         self.assertEqual(ac.compact_text(True, 0, 1), u"%s on: 1 glyph too tall for a 120%% line is made compact." % box)
         self.assertEqual(ac.compact_text(True, 0, 0), u"%s on: no glyph is too tall for a 120%% line." % box)
         self.assertTrue(ac.compact_text(True, 2).endswith(u"2 glyphs placed by hand keep what you set."))
-        bold = lambda text: u"<b>%s</b>" % text  # noqa: E731  (owner's images 297 and 301: a count bold with its noun)
+        bold = lambda text: u"<b>%s</b>" % text  # noqa: E731  (images 297 and 301: a count bold with its noun)
         self.assertEqual(ac.compact_text(True, 1, 8, bold), u"%s on: <b>8 glyphs</b> too tall for a 120%% line are made "
                                                             u"compact. <b>1 glyph</b> placed by hand keeps what you set." % box)
         for on in (True, False):
@@ -3193,7 +3193,7 @@ class BuildTextTests(unittest.TestCase):
     """Build builds every checked glyph, shown or not, and says how many a search hides."""
 
     def test_the_count_beside_the_search_says_how_many_are_not_shown(self):
-        # (owner's images 331 and 332: "Build 12 ticked glyphs (5 not shown)" on the button made the window wider
+        # (images 331 and 332: "Build 12 ticked glyphs (5 not shown)" on the button made the window wider
         # as a filter was ticked; the button keeps its text, the count beside the search says it)
         self.assertEqual(ac.build_text(12, 5), u"Build ticked glyphs")
         self.assertEqual(ac.search_count(3, 341, u"a", ticked_hidden=5), u"3 of 341 glyphs shown (5 ticked among those hidden).")
@@ -3349,7 +3349,7 @@ def recording_qt():
 
 class WhatsThisTests(unittest.TestCase):
     """Every control the dialog builds has a What's This of its own, and a label beside a control carries
-    the control's (the owner found, in another tool, a control showing its neighbor's help)."""
+    the control's (a control showing its neighbor's help was found in another tool)."""
 
     CONTROLS = ("QPushButton", "QCheckBox", "QComboBox", "QFontComboBox", "QSpinBox", "QDoubleSpinBox", "QLineEdit",
                 "QTreeWidget", "QListWidget", "QTabBar", "QToolButton", "QRadioButton", "QSlider", "MarkEditor")
@@ -3445,7 +3445,7 @@ class WhatsThisTests(unittest.TestCase):
         self.assertIsInstance(dialog.generation, gg.GenerationPage)
         self.assertEqual([slot for slot in later if slot == dialog.generation.run], [dialog.generation.run],
                          "its list read once the tab is up")
-        # Owner's images 250 and 251: the tab's own Reference section, its chooser one more of the window's
+        # Images 250 and 251: the tab's own Reference section, its chooser one more of the window's
         self.assertIs(dialog.generation.reference_font, dialog.reference_boxes[-1])
         self.assertEqual(len(dialog.reference_boxes), 3, "a chooser per tab, one choice")
         self.assertIn(dialog.set_reference_fonts, later, "its names given their own fonts too")
@@ -3583,7 +3583,7 @@ class WhatsThisTests(unittest.TestCase):
 
 class CellWalkTests(unittest.TestCase):
     """Every row a realistic font produces, in both lists: no cell ends with a period, none holds an em
-    dash, an en dash, or an interpunct (the owner's rules; rows still read "... + macron -- gaps closed to
+    dash, an en dash, or an interpunct (the rules; rows still read "... + macron -- gaps closed to
     fit a 120% line." with an em dash in an installed copy)."""
 
     NAMES = dict([(chr(code) if sys.version_info[0] >= 3 else unichr(code), code)  # noqa: F821
@@ -4363,7 +4363,7 @@ I_GRAVE, I_ACUTE, J_CIRCUMFLEX, DOTLESS_I, DOTLESS_J = (ac.unichr_(0xEC), ac.uni
 
 
 class DotlessTests(unittest.TestCase):
-    """A font with no dotless i or j (the owner's decision of 2026-11-24): its i read in every master; two
+    """A font with no dotless i or j (the decision of 2026-11-24): its i read in every master; two
     contours, one clearly the dot, make the dotless i (a part, in a History step of its own before the glyphs
     built on it); one contour is the font's i drawn dotless; anything else is not taken apart, and the glyphs
     stay on the dotted i, said in amber. Until then they were built on the dotted i, and nothing said so."""
@@ -4463,7 +4463,7 @@ class DotlessTests(unittest.TestCase):
         self.assertEqual(ac.made_dotless_text(u"dotlessi", u"i", 2),
                          u"Made dotlessi from i without its dot in every master: the font had none.")
         self.assertEqual(ac.made_dotless_text(u"dotlessj", u"j"), u"Made dotlessj from j without its dot: the font had none.")
-        # In the log, each glyph's name in italics, a link that opens it (owner's request of 2026-11-24)
+        # In the log, each glyph's name in italics, a link that opens it (the request of 2026-11-24)
         sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
         import freelab_auto_kerning as kerning
         self.assertEqual(ac.made_dotless_text(u"dotlessj", u"j", 1, kerning.glyph_name_link),
@@ -4592,7 +4592,7 @@ class DotlessTests(unittest.TestCase):
                                         (u"FreeLab Glyph Compose", ["igrave", "jcircumflex"])],
                          "the dotless glyphs first, in a step of their own, then the glyphs built on them")
         lines = [line for _, line in dialog.lines]
-        # (the owner's image of 2026-11-24: each glyph's name in italics, a link that opens it)
+        # (image of 2026-11-24: each glyph's name in italics, a link that opens it)
         self.assertIn(u"This takes two steps of <i>Edit &gt; Undo</i>: %s, %s were added in a step of their own first, so "
                       u"that FontLab's Undo never takes out a glyph that others still point to." % (
                           named_link(u"dotlessi"), named_link(u"dotlessj")), lines)
@@ -4737,7 +4737,7 @@ class AlternateTests(unittest.TestCase):
             self.assertIsNone(fc.check_code(text, letters + ["x", "x.alt", "y"]))
 
 
-# -- Glyph Compose: the owner's report of 2026-11-14 ------------------------------------------------------
+# -- Glyph Compose: report of 2026-11-14 ------------------------------------------------------
 
 
 def editor_qt(size):
@@ -4770,7 +4770,7 @@ def overlapping(boxes):
 
 
 class FreeLangCharactersTests(unittest.TestCase):
-    """Owner's images 316 and 317: Glyph generation's list drew \u33de and \u33ff as boxes, and the reference's caption
+    """Images 316 and 317: Glyph generation's list drew \u33de and \u33ff as boxes, and the reference's caption
     "Noto Sans lacks \u33de" too. FreeLang CJK has both: the lists drew their characters in the dialog's font, and
     Qt's Windows fallback (MS Gothic, which lacks \u33de \u33df \u33ff and has the rest of the block) drew them. Each list's
     characters, and a caption's, are now drawn in the FreeLang family that has them."""
@@ -4831,7 +4831,7 @@ class PreviewPartsTests(unittest.TestCase):
                          ["compact_box", "hint", "lower_line", "reference", "reference_font", "reference_line",
                           "reference_note", "reference_title"],
                          "a glyph that cannot be built: its letter in the reference and what it needs, no editor; "
-                         "the line over the Reference heading with it (owner's images 288 and 318)")
+                         "the line over the Reference heading with it (images 288 and 318)")
         alone = ac.preview_parts(True, True, False)
         self.assertFalse(alone["strip_label"] or alone["strip_area"], "no letter with the same diacritic: no strip")
         self.assertTrue(all(ac.preview_parts(True, True, True).values()))
@@ -4877,7 +4877,7 @@ class PreviewPartsTests(unittest.TestCase):
         self.assertEqual(sorted(shown), sorted(ac.preview_parts(False, False, False)))
         self.assertFalse(any(shown.values()), shown)
         self.assertIsNone(dialog.editor.scene)
-        # Owner's images 193, 194, and 217: the line on the window's first row, beside the "?" (the tabs stay
+        # Images 193, 194, and 217: the line on the window's first row, beside the "?" (the tabs stay
         # under the header, never on that row, where the busy bar crashed into them)
         self.assertEqual(dialog.window_line, u"No font is open. This window hooks to the next font you open.",
                          "the shared line: the window takes the next font opened")
@@ -4996,7 +4996,7 @@ class EditorLayoutTests(unittest.TestCase):
                     (-745, u"font, typo, and hhea descender, winDescent -745 (Windows and macOS clip below)", True)]
 
     def test_captions_too_wide_for_their_glyphs_split_their_detail_under_them(self):
-        """The owner's report of 2026-11-16: "Current" and "Suggested (13 right, 8 down)" on one line, the
+        """Report of 2026-11-16: "Current" and "Suggested (13 right, 8 down)" on one line, the
         parenthesis under "Suggested", never overlapping or wrapping (the whole second caption went a row down)."""
         self.assertEqual(ac.caption_layout([(100, 60), (300, 60)], 600),
                          [(0, "whole", 70.0, 60.0, 0), (1, "whole", 270.0, 60.0, 0)], "room for both: whole, centered")
@@ -5045,7 +5045,7 @@ class EditorLayoutTests(unittest.TestCase):
         return editor
 
     def test_no_text_overlaps_another_at_any_size(self):
-        """The owner's lines (the descenders and winDescent at -745, a 120% line at -430) and captions
+        """The lines reviewed (the descenders and winDescent at -745, a 120% line at -430) and captions
         ("Current", "Suggested (mark 121 left, 1 down)"), the editor from small to large."""
         captions = {"existing": u"Current", "new": u"Suggested (mark 121 left, 1 down)"}
         for size in ((300, 300), (420, 300), (640, 360), (1000, 700), (1600, 300), (360, 900)):
@@ -5171,7 +5171,7 @@ class FarOffTests(unittest.TestCase):
 
     def test_applied_far_off_is_a_warning_naming_the_letters(self):
         dialog, c, g, s = self.dialog()
-        c.adjust = {0: [6675.0, 4551.0, 1.0, 1.0]}  # the owner's: moved 6,675 right, 4,551 up
+        c.adjust = {0: [6675.0, 4551.0, 1.0, 1.0]}  # as reviewed: moved 6,675 right, 4,551 up
         dialog.propagate()
         self.assertEqual(dialog.lines[0][0], "warning", "not done, in green")
         self.assertIn(u"Placed the diacritics of 2 letters as on", dialog.lines[0][1])
@@ -5498,7 +5498,7 @@ class DiacriticsThemeTests(unittest.TestCase):
 
 
 class OwnerReportNovember15Tests(unittest.TestCase):
-    """The owner's Glyph Compose report of 2026-11-15, on Noto Sans: compacting by no more than needed, a
+    """The Glyph Compose report of 2026-11-15, on Noto Sans: compacting by no more than needed, a
     letter's own descender not counted against its diacritics, the rows of glyphs placed by hand following
     what was set, the captions and sections, the check box beside the preview, and the Mark anchors tab's
     sample marks."""
@@ -5573,7 +5573,7 @@ class OwnerReportNovember15Tests(unittest.TestCase):
                          u"uni04D8 + dieresis (suggested: 11 right, 46 down)")
 
     def test_what_is_placed_is_a_diacritic(self):
-        """A diacritic is the sign as placed on a letter; a mark, the glyph (the owner's request of 2026-11-15)."""
+        """A diacritic is the sign as placed on a letter; a mark, the glyph (the request of 2026-11-15)."""
         self.assertEqual(ac.HAND_NOTE, u"diacritics placed by hand")
         self.assertIn(u"diacritics keep their own gaps", ac.compact_text(False, 0))
         self.assertEqual(ac.far_words("outside", None), u"a diacritic outside the view")
@@ -5719,7 +5719,7 @@ class OwnerReportNovember15Tests(unittest.TestCase):
 
 
 class OwnerReportNovember16Tests(unittest.TestCase):
-    """The owner's checks of 2026-11-16 evening on Glyph Compose's Diacritics tab."""
+    """The checks of 2026-11-16 evening on Glyph Compose's Diacritics tab."""
 
     def test_check_all_and_check_none_say_how_many(self):
         """Item 118: neither button left a log line; the count says the rows a search hides too."""
@@ -5739,7 +5739,7 @@ class OwnerReportNovember16Tests(unittest.TestCase):
         Compact diacritics to fit the line jumped up and right."""
         shown, missing = ac.preview_parts(True, True, True), ac.preview_parts(True, False, False)
         gone = set(name for name, on in shown.items() if on and not missing[name])
-        # (owner's image 184: the editor's buttons give their room up, so that the box alone goes right)
+        # (image 184: the editor's buttons give their room up, so that the box alone goes right)
         self.assertTrue(gone <= set(ac.ROOM_KEPT + ac.ROOM_RELEASED), gone - set(ac.ROOM_KEPT + ac.ROOM_RELEASED))
         self.assertEqual(set(ac.ROOM_RELEASED), set(ac.room_texts()), "the buttons beside the box")
         self.assertFalse(set(ac.ROOM_KEPT) & set(ac.ROOM_RELEASED))
@@ -5869,7 +5869,7 @@ class OwnerReportNovember16Tests(unittest.TestCase):
                          "the font's own, each once (a glyph not made yet has no state to record)")
 
     def test_only_high_value_glyphs(self):
-        """The owner's request: List only high-value glyphs beside Also list existing glyphs."""
+        """The request: List only high-value glyphs beside Also list existing glyphs."""
         a_macron = ac.unichr_(0x0101)
         self.assertIsNone(ac.value_filter(None, set([a_macron])))
         self.assertIsNone(ac.value_filter(Stub(checked=False), set([a_macron])))
@@ -5925,7 +5925,7 @@ class OwnerReportNovember16Tests(unittest.TestCase):
 
 
 class OwnerReportNovember17Tests(unittest.TestCase):
-    """The owner's review of 2026-11-17 on 07LightNovelPOP, a CID-keyed font (Adobe-Japan1): its cmap
+    """The review of 2026-11-17 on 07LightNovelPOP, a CID-keyed font (Adobe-Japan1): its cmap
     maps U+00C0 to cid00164 and U+0306 to cid00130, glyphs of its collection never drawn."""
 
     U = staticmethod(ac.unichr_)
@@ -6097,7 +6097,7 @@ class OwnerReportNovember17Tests(unittest.TestCase):
 
 
 class UiRoundNovember17Tests(unittest.TestCase):
-    """The owner's UI review of 2026-11-17 (images 217 to 265): one header and one bottom row in every window,
+    """The UI review of 2026-11-17 (images 217 to 265): one header and one bottom row in every window,
     Tick for check boxes, counts right at 0, kana lowercase, a reference section on every tab."""
 
     def built(self):

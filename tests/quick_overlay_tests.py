@@ -45,7 +45,7 @@ class FlagTests(unittest.TestCase):
 
 
 class DialogTests(unittest.TestCase):
-    """The owner's images 171 and 172: the note formatted as the other tools' (the font's name bold, FontLab's command
+    """Images 171 and 172: the note formatted as the other tools' (the font's name bold, FontLab's command
     in italics), the flags' line a choice of its own, and Overlay grayed out while there is nothing to overlay."""
 
     def test_the_note_names_the_font_in_bold_and_the_command_in_italics(self):

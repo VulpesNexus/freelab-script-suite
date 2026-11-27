@@ -25,7 +25,7 @@ convention reads).
 With "Also build variants from existing alternates" (grayed out, and counted as unticked, while no
 glyph in scope has an alternate to build from), a glyph's variants are spread over its designs in turn:
 the glyph itself and the alternates the font has of it (W.ss01, W.2, W.salt, and the variants built
-before, W.alt1: designs_of; owner's image 269, the option stayed grayed out after a build of variants).
+before, W.alt1: designs_of; image 269, the option stayed grayed out after a build of variants).
 Variant 1 is a changed copy of the glyph, variant 2 of its first alternate, and around again, each of
 one design, never a blend. A variant of an alternate carries that alternate's name (W.ss01.alt2), so its
 origin reads from its name and no two variants share a number; the first tab cycles it with the glyph's
@@ -33,10 +33,10 @@ other variants (W, W.alt1, W.ss01.alt2), so a repeated glyph changes design as w
 
 Variants this tab built and nobody changed since are its own (own_variants: each one's outlines as the
 build left them, and the strength and seed it was built with, kept for the window's life). Built again
-with another strength or seed, they are replaced in place, as one step of FontLab's History (owner's
-image 270: a new seed could not rebuild what was just built); with the same, they are left as they are.
+with another strength or seed, they are replaced in place, as one step of FontLab's History
+(image 270: a new seed could not rebuild what was just built); with the same, they are left as they are.
 
-The list has two groups (owner's image 302): Suggestions, the copies' glyphs, and Selected glyphs, the
+The list has two groups (image 302): Suggestions, the copies' glyphs, and Selected glyphs, the
 glyphs the Glyphs dropdown picks for the variants, all ticked (a new pick replaces the last; a glyph
 unticked there is out of the build and the previews). The pick is the ticked suggestions (at first, kept
 in step as they are ticked), those that often stand doubled in text, characters typed in a box, a script
@@ -45,7 +45,7 @@ more than SELECTED_MOST glyphs is not listed: one click could not build them). M
 on the ticked suggestions, Build N variants on the ticked selected glyphs; Tick all and Untick all on
 both groups. Scripts and cases are read from the model's tables (features/train/
 scripts.py and kinds.py), not asked of the running Python. The button and the line under it say how
-many variants of which glyphs a click builds (the line in the paragraph over the settings, owner's
+many variants of which glyphs a click builds (the line in the paragraph over the settings,
 image 245); a build that would pass what a font holds (65,535
 glyphs), what one click builds (BUILD_MOST), or the time one click may take (SECONDS_MOST, at the
 pace of the session's last build) is refused before anything is made, in a sentence that says what
@@ -82,10 +82,10 @@ SCOPES = (("checked", u"The ticked suggestions"), ("doubled", u"Often doubled"),
 SCRIPT_SCOPE, SCRIPTS_AFTER, FIRST_SCRIPT = u"script:", "typed", u"Latin"
 # What the box beside the scopes says while These glyphs is picked (and only then: grayed out, it is
 # empty). It takes characters typed one after another, spaces or not (its What's This gives an example;
-# the gray example "lest" read as a word). A field's placeholder ends with an ellipsis (owner's image 309).
+# the gray example "lest" read as a word). A field's placeholder ends with an ellipsis (image 309).
 TYPED_HINT = u"Type characters\N{HORIZONTAL ELLIPSIS}"
 NO_FONT_FIELD = u"n/a"  # (what the field says, grayed out, while the window has no font)
-# The list's two groups (owner's image 302): the suggestions, which Make copies to redraw copies, and the
+# The list's two groups (image 302): the suggestions, which Make copies to redraw copies, and the
 # glyphs the Glyphs dropdown picks, which Build N variants builds. Each group row is bold, its count in
 # parentheses, and closes as every grouped list's; a row's group is told by its group row's key.
 SUGGESTIONS_GROUP, SELECTED_GROUP = u"Suggestions", u"Selected glyphs"
@@ -106,7 +106,7 @@ DESIGNS_NONE = (u"Grayed out: no glyph in scope has an alternate to build from (
                 u"itself. Your choice is kept for glyphs that have some.")
 NAMED_MOST = 8  # characters named in the line that says what a click builds; alternates drawn in the preview
 LONG_BUILD = 200  # variants: a build this large says that it may take a bit
-# The owner's words for it (2026-11-14), and nothing more: the sentence once gave a time at the last
+# The words for it (2026-11-14), and nothing more: the sentence once gave a time at the last
 # build's pace and said that the window's top line shows the progress
 LONG_BUILD_WORDS = u"A build this large may take a bit."
 LINKED_MOST = 12  # built variants named in the log, each a link drawn from its outlines; more: counted only
@@ -194,7 +194,7 @@ def alternates_index(names):
 def designs_of(glyph, alternates):
     """The designs the font has of a glyph, what its variants can be built from: the glyph, then the
     alternates it has (alternates: alternates_of), each named with one suffix (W.ss01, W.2, W.salt,
-    W.alt, and the builder's own variants, W.alt1: owner's image 269, the option stayed grayed out in
+    W.alt, and the builder's own variants, W.alt1: image 269, the option stayed grayed out in
     a font whose alternates were all built here). Not a variant of an alternate (W.ss01.alt2): a variant
     of it would be a third generation, drifting from the drawing."""
     start = len(glyph) + 1
@@ -232,7 +232,7 @@ def variants_planned(glyphs, count, names, designs=False, index=None, ours=None,
     (X.ss01.alt2). index: alternates_index(names), where the caller holds it. ours: {variant: the
     settings it was built with} of the variants this tab built and nobody changed since (own_variants);
     one of them whose settings are not settings (a strength and a seed) is planned again, under its own
-    name and from its own design, to be replaced in place (owner's image 270)."""
+    name and from its own design, to be replaced in place (image 270)."""
     index = alternates_index(names) if index is None else index
     ours = ours or {}
     plan = []
@@ -271,7 +271,7 @@ def counted(number, one, many=None):
 
 
 def bold(text):
-    """A count in bold with its noun (owner's images 297 and 301: one rule for every status line, note,
+    """A count in bold with its noun (images 297 and 301: one rule for every status line, note,
     and log line), as the shared module's b()."""
     return u"<b>%s</b>" % text
 
@@ -362,7 +362,7 @@ def build_words(plan, count, scope, designs=False, problem=None, pace=None, agai
         line += u"; %s the font has already %s left as %s" % (
             bold(counted(kept, u"variant")), u"is" if kept == 1 else u"are", u"it is" if kept == 1 else u"they are")
     line += u"."
-    if new >= LONG_BUILD:  # (the owner's words, nothing more: the top line's count needs no announcing)
+    if new >= LONG_BUILD:  # (the words, nothing more: the top line's count needs no announcing)
         line += u" " + LONG_BUILD_WORDS
     return (u"Build %s" % counted(new, u"variant")) if new else u"Build variants", line
 
@@ -493,7 +493,7 @@ def variant_params(glyph, number, strength, seed, baseline=0, upm=1000.0):
     """(rotation degrees, x scale, y scale, slant degrees, baseline shift in em) of glyph's variant number:
     each drawn within the strength's reach, from the seed (the same seed, the same variants; Python 2 and
     3 alike: the generator is seeded with a CRC of the text, not Python's hash). baseline: that many units at
-    most more up or down (owner's image 366; 0: the variants are as before it existed), the variants taking
+    most more up or down (image 366; 0: the variants are as before it existed), the variants taking
     turns up and down (variant_lift)."""
     _, _, rotation, scale, slant, rise = strength_of(strength)
     key = (u"%s|%s|%d|%s" % (seed, glyph, number, strength)).encode("utf-8")
@@ -515,7 +515,7 @@ def variant_lift(glyph, number, strength, seed, reach, rng):
     down, the first's way drawn from the seed and the glyph (so that glyphs side by side do not all start the
     same way), each move between a third of the reach and all of it, drawn from the variant's own generator.
     Drawn each on its own, up or down, a run of variants could go further down at each one: Q's four at seed 6
-    went up 496 units, then down 116, 229, and 353 (the owner's images 238 and 239, 2026-11-27: "they would
+    went up 496 units, then down 116, 229, and 353 (images 238 and 239, 2026-11-27: "they would
     rather jump up and down alternatively")."""
     first = zlib.crc32((u"%s|%s|%s|first" % (seed, glyph, strength)).encode("utf-8")) & 1
     up = (number % 2 == 1) == bool(first)
@@ -607,7 +607,7 @@ def describe(widget, text, tip=False):
 
 def say(label, text):
     """A note's text, the note hidden while it says nothing: an empty label still took a line, a gap under
-    the heading (owner's image 198) and above the code's splitter handle (owner's image 196)."""
+    the heading (image 198) and above the code's splitter handle (image 196)."""
     try:
         label.setText(text)
         label.setVisible(bool((u"%s" % (text or u"")).strip()))
@@ -637,7 +637,7 @@ def label_of(QtGui, text, what):
 
 
 def fit_combo(QtGui, combo):
-    """A dropdown as wide as its widest item, never stretched across its row (owner's image 239)."""
+    """A dropdown as wide as its widest item, never stretched across its row (image 239)."""
     try:
         combo.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)
     except Exception:
@@ -652,7 +652,7 @@ class AlternatesPage(object):
         QtCore, QtGui = _qt()
         self.owner, self.ak = owner, owner.ak
         self.model = load_model()
-        # Two parts in a splitter, as the window's other tabs (owner's image 259: this tab had no handle):
+        # Two parts in a splitter, as the window's other tabs (image 259: this tab had no handle):
         # the suggestions' list, whose frame the handle is right under, then the variants
         self.parts = self.widget = QtGui.QSplitter(QtCore.Qt.Vertical)
         try:
@@ -669,7 +669,7 @@ class AlternatesPage(object):
                   u"those ticked (untick one to leave it out). A column that means nothing for a row shows "
                   u"%s." % (SUGGESTIONS_GROUP, SELECTED_GROUP, NO_DATA))
         # (every label has a What's This of its own: one without answers with its container's: label_of). The
-        # list holds both jobs' glyphs (owner's image 302), so its heading names neither alone.
+        # list holds both jobs' glyphs (image 302), so its heading names neither alone.
         layout.addWidget(describe(owner.heading(QtGui, LIST_HEADING), listed))
         self.note = QtGui.QLabel(u"")
         self.note.setWordWrap(True)
@@ -688,7 +688,7 @@ class AlternatesPage(object):
         self.ak.table_layout(self.tree)
         layout.addWidget(self.tree, 1)  # (the last of its part: the splitter's handle right under its frame)
         # The list's buttons and the two jobs' go in the window's bottom row (bottom_buttons), shown with
-        # this tab: under the list, they stood between it and the next part (owner's images 258 and 260)
+        # this tab: under the list, they stood between it and the next part (images 258 and 260)
         self.all_button = QtGui.QPushButton(u"Tick all")
         self.all_button.setWhatsThis(u"Ticks every glyph of the list, in both groups (with <i>The ticked suggestions</i> "
                                      u"picked, <i>%s</i> follows the suggestions)." % SELECTED_GROUP)
@@ -709,13 +709,13 @@ class AlternatesPage(object):
                 u"X.alt2...: the first tab's <i>Alternates that take turns</i> then cycles them, so repeated glyphs "
                 u"differ. They need no copy to redraw made first. The same seed makes the same variants; variants "
                 u"built here are built again in place with another strength or seed.")
-        # (no "(handwriting)" after it: owner's image 244)
+        # (no "(handwriting)" after it: image 244)
         layout.addWidget(describe(owner.heading(QtGui, u"Variants that take turns"), what))
         hint = describe(QtGui.QLabel(what), what)
         hint.setWordWrap(True)
         layout.addWidget(hint)
         # What a click builds, or why nothing can be: with the paragraph over the settings, not under them
-        # (owner's image 245)
+        # (image 245)
         self.scope_note = QtGui.QLabel(u"")
         self.scope_note.setWordWrap(True)
         describe(self.scope_note, u"What a click on <i>Build variants</i> would make: how many variants, of which "
@@ -812,9 +812,9 @@ class AlternatesPage(object):
                                        u"has already is left as it is, one built here with another strength or seed is "
                                        u"built again in place): its label and the line over the settings say how many, "
                                        u"of which glyphs. <i>Edit &gt; Undo</i> takes them back.")
-        # Two previews side by side, a line between them (owner's image 269): what the font has of the
+        # Two previews side by side, a line between them (image 269): what the font has of the
         # glyph, and what would be built. Their captions are a preview's (ak.preview_caption: smaller, quiet;
-        # owner's image 246).
+        # image 246).
         previews = QtGui.QHBoxLayout()
         self.existing_caption, self.existing = self.caption_label(QtGui), QtGui.QLabel()
         self.preview_caption, self.preview = self.caption_label(QtGui), QtGui.QLabel()
@@ -845,7 +845,7 @@ class AlternatesPage(object):
             box.addWidget(picture, 1)
             previews.addLayout(box, 1)
             caption.setVisible(False)  # (shown with a glyph drawn: draw_preview)
-        # The previews take the part's spare height, drawn or empty (owner's image 287: hidden, they left it to
+        # The previews take the part's spare height, drawn or empty (image 287: hidden, they left it to
         # the heading and the paragraph, which Qt spread into blank bands above and below the paragraph); the
         # part's foot is always the previews, right over the splitter's handle under it (convention 21)
         layout.addLayout(previews, 1)
@@ -924,7 +924,7 @@ class AlternatesPage(object):
         """The list for the font open now: its suggestions, and the glyphs the Glyphs dropdown picks."""
         package = self.owner.package
         # The ticks kept for the same font read again (after a build, a copy, an undo): they went with the
-        # list, and a new seed for the variants just built took ticking the glyphs again (owner's image 270);
+        # list, and a new seed for the variants just built took ticking the glyphs again (image 270);
         # so are the selected glyphs unticked
         try:
             key = self.ak.font_key(package) if package is not None else None
@@ -975,7 +975,7 @@ class AlternatesPage(object):
         self.draw_preview()
         self.update_buttons()
 
-    # -- the list: Suggestions and Selected glyphs (owner's image 302) ----------
+    # -- the list: Suggestions and Selected glyphs (image 302) ----------
 
     def group_rows(self, key):
         """The rows of a group of the list (SUGGESTIONS_KEY or SELECTED_KEY), in order."""
@@ -1226,7 +1226,7 @@ class AlternatesPage(object):
             follows = self.scope() == "checked"
             rows = self.group_rows(SUGGESTIONS_KEY) + ([] if follows else self.group_rows(SELECTED_KEY))
             self.tree.blockSignals(True)  # (one answer for the whole list, not one a row)
-            try:  # (the log told how many it ticked or unticked, hidden ones said: owner's report 118)
+            try:  # (the log told how many it ticked or unticked, hidden ones said: report 118)
                 self.ak.check_rows(rows, on, log=self.owner.log, command=u"Tick all" if on else u"Untick all",
                                    noun=u"glyph", hidden_text=(u"in a closed group", u"in closed groups"))
             finally:
@@ -1399,7 +1399,7 @@ class AlternatesPage(object):
                 pass
             glyphs, names = (self.build_glyphs(), self.names) if has_font else ([], set())
             # Grayed out while no glyph to build has an alternate to build from (it would change nothing), and
-            # why; usable once one has, the variants built here among them (owner's image 269)
+            # why; usable once one has, the variants built here among them (image 269)
             usable = has_font and designs_in(glyphs, self.index)
             set_enabled(self.designs_box, usable)
             if has_font and not usable:
@@ -1509,7 +1509,7 @@ class AlternatesPage(object):
 
     def build_variants(self):
         """The variants of the glyphs ticked in Selected glyphs added to the font, and those this tab built with
-        other settings made again in place (owner's image 270), as one step of its History; the window's top
+        other settings made again in place (image 270), as one step of its History; the window's top
         row counts them meanwhile (ak.busy_*: a write, never stopped half way)."""
         owner = self.owner
         package = owner.package
@@ -1620,7 +1620,7 @@ class AlternatesPage(object):
     def preview_glyph(self):
         """The glyph the previews show: the selected row's (not one unticked in Selected glyphs: unticked, it
         is out of the preview as of the build), else the first glyph ticked in Selected glyphs, else none
-        (owner's image 296: with These glyphs and nothing typed, the previews showed a)."""
+        (image 296: with These glyphs and nothing typed, the previews showed a)."""
         QtCore, QtGui = _qt()
         for item in self.tree.selectedItems():
             key = self.group_of(item)
@@ -1671,7 +1671,7 @@ class AlternatesPage(object):
     def show_previews(self, existing, planned):
         """The previews' captions shown while there is a glyph to draw (the right one's says when nothing is
         to build), else hidden; the pictures emptied when they have nothing to show, never hidden: they hold
-        the part's spare height (owner's image 287, blank bands between the heading and its paragraph while
+        the part's spare height (image 287, blank bands between the heading and its paragraph while
         they were hidden), and the part ends with them, right over the splitter's handle under it. The line
         between them shows with the captions, only while a glyph is drawn (the shared preview_filled: with a
         font, the shared module showed it over two empty previews). Never raises."""

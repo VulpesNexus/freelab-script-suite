@@ -358,7 +358,7 @@ class MetricTests(unittest.TestCase):
                          "the font's own value is kept unless checked")
         self.assertTrue(metrics["vhea_line_gap"].checked, "unset (missing from the info: unset)")
         gap = dict((m.key, m) for m in cv.plan_metrics(1000.0, {}, 0, {"metrics": {"vhea_line_gap": 0.1484}}))
-        self.assertEqual(gap["vhea_line_gap"].value, 0, "the owner's choice, 0, not the corpus's median (0.15 em)")
+        self.assertEqual(gap["vhea_line_gap"].value, 0, "the choice made, 0, not the corpus's median (0.15 em)")
         none = dict((m.key, m) for m in cv.plan_metrics(2048.0, {}, 0, {}))
         self.assertFalse(none["advance_height"].checked, "every layer has one")
         self.assertEqual(none["vhea_ascent"].value, 1024, "half the em without a model")
@@ -659,7 +659,7 @@ class VkrnTests(unittest.TestCase):
 
 
 class PreviewTests(unittest.TestCase):
-    """The owner's screenshots (IBM Plex Sans JP): ideographs left out of the Chinese sample, columns past
+    """Screenshots (IBM Plex Sans JP): ideographs left out of the Chinese sample, columns past
     their pane, two Japanese samples, one marked "(vertical)" in a tool where every sample is vertical."""
 
     class Glyph(object):
@@ -945,7 +945,7 @@ class FakeQtTests(unittest.TestCase):
         self.assertTrue(any(kind == "error" and u"FontLab said no" in text for kind, text in logged), logged)
         # (the review of 2026-11-24: the log's error sentence ends with its period, through ak.error_sentence)
         self.assertIn((u"error", u"Stopped by an error: FontLab said no."), logged)
-        # (owner's image 183: under the top row's progress at once, never stoppable while it writes, and ended)
+        # (image 183: under the top row's progress at once, never stoppable while it writes, and ended)
         self.assertEqual((top.kinds()[0], top.kinds()[-1]), ("start", "end"))
         self.assertFalse(top.calls[0][2], "the write is not stoppable")
 
@@ -1114,7 +1114,7 @@ class FakeQtTests(unittest.TestCase):
                       "the write builds each form through it, and goes on to the next")
 
     def test_a_font_without_cjk_glyphs_is_offered_nothing(self):
-        """The owner, of Noto Sans: "The CJK spacing section is aware that the font contains no such glyphs,
+        """The review, of Noto Sans: "The CJK spacing section is aware that the font contains no such glyphs,
         but the CJK vertical section disagrees because of some punctuation marks". Its em-wide HORIZONTAL
         BAR (U+2015, General Punctuation: the dash Japanese text turns, so the corpus turns it) passed every
         test of a form, and the vertical metrics were offered too: a font with no CJK glyph is offered
@@ -1154,7 +1154,7 @@ class FakeQtTests(unittest.TestCase):
 
         latin = listed([0x41, 0x2015])
         self.assertEqual((latin.forms, latin.trims, latin.turned, latin.kerns, latin.metrics), ([], [], [], [], []))
-        # (the font line first, as every window's: ak.font_named, owner's images 223 and 238)
+        # (the font line first, as every window's: ak.font_named, images 223 and 238)
         self.assertEqual(latin.status.text, u"Fake Sans, master Regular. No kana, Hangul, ideographs, or CJK "
                                             u"punctuation: not a CJK font, nothing to add for vertical text.")
         cjk = listed([0x41, 0x2015, 0x300C])
@@ -1300,7 +1300,7 @@ class StaleCodeTests(unittest.TestCase):
         self.refused(features)
 
     def test_a_form_not_built_is_named_as_a_link_to_it(self):
-        # (the owner's request of 2026-11-24: a glyph's name in a log line in italics, a link that opens it)
+        # (the request of 2026-11-24: a glyph's name in a log line in italics, a link that opens it)
         dialog, features = self.make({"vert": self.USER_VERT})
         dialog.build_form_safely = lambda package, form: (None, u"FontLab kept none of <its> parts")
         dialog.write()
@@ -1555,8 +1555,8 @@ class ExportTests(unittest.TestCase):
 
 
 class ProgressTests(unittest.TestCase):
-    """Long work under a progress bar (the owner: about 13 s without one adding vertical metrics), in the
-    window's top row since owner's images 176 and 180 (ak.busy_*: its own bar under the settings before)."""
+    """Long work under a progress bar (the review: about 13 s without one adding vertical metrics), in the
+    window's top row since images 176 and 180 (ak.busy_*: its own bar under the settings before)."""
 
     class Widget(object):
         def __init__(self):
@@ -1686,7 +1686,7 @@ class ProgressTests(unittest.TestCase):
         dialog.cjk = True
         dialog.update_buttons()
         self.assertTrue(dialog.write_button.enabled, "a CJK font's change: Write")
-        self.assertTrue(dialog.compile_box.enabled, "and its compile, with it (owner's image 195)")
+        self.assertTrue(dialog.compile_box.enabled, "and its compile, with it (image 195)")
         dialog.pending = lambda: ({}, [], [])  # (nothing to write)
         dialog.update_buttons()
         self.assertEqual((dialog.write_button.enabled, dialog.compile_box.enabled), (False, False),
@@ -1708,7 +1708,7 @@ class ProgressTests(unittest.TestCase):
         self.assertEqual(self.top.kinds()[-1], "end")
 
     def test_cancel_sits_before_close_usable_while_it_lists_or_exports(self):
-        """The owner, 2026-11-24: a Cancel left of Close, grayed but while work that can stop runs (ak.cancel_button),
+        """The review of 2026-11-24: a Cancel left of Close, grayed but while work that can stop runs (ak.cancel_button),
         as Esc stops it; its help says what a stop leaves. A write's bar goes on as the list read again, which
         stops: Cancel is given back there (ak.busy_stoppable)."""
         import qtfakes
@@ -1716,7 +1716,7 @@ class ProgressTests(unittest.TestCase):
         with io.open(cv.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
             source = handle.read()
         init = source.split(u"class CJKVerticalDialog")[1].split(u"\n    def bottom_right")[0]
-        self.assertIn(u"for widget in self.bottom_right():  # (owner's image 298: the compile tick by the write it is "
+        self.assertIn(u"for widget in self.bottom_right():  # (image 298: the compile tick by the write it is "
                       u"about)\n            buttons.addWidget(widget)\n        ak.cancel_button(self, buttons, "
                       u"self.close_button, CANCEL_NOTE)", init)
         dialog = self.dialog()
@@ -1812,7 +1812,7 @@ class ProgressTests(unittest.TestCase):
         self.assertFalse(dialog.busy)
 
     def test_no_bar_of_its_own(self):
-        """Owner's image 180: its own bar under the settings ("Listing..."); the top row's now."""
+        """Image 180: its own bar under the settings ("Listing..."); the top row's now."""
         with io.open(os.path.join(HERE, os.pardir, "cjk", "freelab_cjk_vertical.py"), encoding="utf-8") as handle:
             source = handle.read()
         for gone in (u"QProgressBar()", u"processEvents", u"ExcludeUserInputEvents", u"self.busy_row"):
@@ -1820,7 +1820,7 @@ class ProgressTests(unittest.TestCase):
 
 
 class PreviewLayoutTests(unittest.TestCase):
-    """Owner's image 181 (07LightNovelPOP): the previews cut some glyphs at the bottom of a column. The font's
+    """Image 181 (07LightNovelPOP): the previews cut some glyphs at the bottom of a column. The font's
     own values are sane (VORG and typographic ascender 860, the ideographs' ink -110 to 833 in a 1000 em, every
     advance height 1000); the pictures were as tall as their squares alone, and the glyphs sat lower in them
     than the font has them, from an origin read higher than its own."""
@@ -1902,7 +1902,7 @@ class SourceTests(unittest.TestCase):
         self.assertNotIn(u" letter", interface.lower(), "the interface says glyph")
 
     def test_previews_have_a_line_between_and_quiet_captions(self):
-        # (owner's image 219: CJK Spacing's previews have a line between them, these did not; brief: the shared
+        # (image 219: CJK Spacing's previews have a line between them, these did not; brief: the shared
         # preview_caption for every preview's caption; image 261: Tick, not Check)
         text = self.source("cjk", "freelab_cjk_vertical.py")
         init = text.split(u"class CJKVerticalDialog")[1].split(u"\n    def watch_previews")[0]
@@ -1915,12 +1915,12 @@ class SourceTests(unittest.TestCase):
         for old in (u'"Check all"', u'"Check none"', u"Checks restored", u"what is checked", u"Checked rows",
                     u"left unchecked"):
             self.assertNotIn(old, text)
-        # (a tool named in the log is a link that opens it: owner's image 220)
+        # (a tool named in the log is a link that opens it: image 220)
         self.assertIn(u'self.ak.tool_link(u"Feature Check")', text)
         self.assertNotIn(u"<i>Feature Check</i> lists", text)
 
     def test_the_top_line_names_the_font_then_counts_what_is_there(self):
-        # (owner's images 223 and 238: one font line for every window; brief: no "0 drawn already")
+        # (images 223 and 238: one font line for every window; brief: no "0 drawn already")
         dialog = cv.CJKVerticalDialog.__new__(cv.CJKVerticalDialog)
         dialog.ak = type("Ak", (), dict(b=staticmethod(lambda t: u"<b>%s</b>" % t), i=staticmethod(lambda t: u"<i>%s</i>" % t),
                                         joined=staticmethod(lambda items: u", ".join(items)),
@@ -2074,11 +2074,11 @@ class PreviewRuleTests(unittest.TestCase):
 
 class PreviewNoteTests(unittest.TestCase):
     def test_the_note_says_what_the_previews_show(self):
-        """Owner's report 148: on Bellefair (no CJK glyph), the Korean sample's previews showed a comma and a
+        """Report 148: on Bellefair (no CJK glyph), the Korean sample's previews showed a comma and a
         period only, and nothing said why: a note in the log says what they show, and what the font lacks (its
         Hangul, its CJK punctuation, named)."""
         import freelab_cjk_spacing
-        korean = [s for s in freelab_cjk_spacing.SAMPLES if s[0] == "ko"][0][2]  # (the sample the owner saw)
+        korean = [s for s in freelab_cjk_spacing.SAMPLES if s[0] == "ko"][0][2]  # (the sample seen)
         names = {0x2C: u"comma", 0x2E: u"period"}
         syllables = len(set(ch for ch in korean if 0xAC00 <= ord(ch) <= 0xD7A3))  # (each once)
         self.assertEqual(cv.preview_note(korean, names),
@@ -2091,7 +2091,7 @@ class PreviewNoteTests(unittest.TestCase):
                          u"The font has none of the sample's characters, so the previews are empty: it lacks 1 ideograph "
                          u"and 1 CJK punctuation mark (the ideographic comma).")
         self.assertEqual(cv.preview_note(u"あ い", {0x3042: u"a", 0x3044: u"i"}), u"", "all there: nothing to say")
-        # (owner's images 297 and 301: each count bold with its noun; the sample's characters made safe)
+        # (images 297 and 301: each count bold with its noun; the sample's characters made safe)
         bold = lambda text: u"<b>%s</b>" % text
         escape = lambda text: text.replace(u"<", u"&lt;")
         self.assertEqual(cv.preview_note(u"<あ", {0x3C: u"less"}, bold, escape),
@@ -2105,9 +2105,9 @@ class PreviewNoteTests(unittest.TestCase):
         # Live pass: "(, .)" read oddly; marks by their names, anything else quoted
         self.assertEqual(cv.character_words(u"a,.a"), u"“a”, the comma, and the period")
         self.assertEqual(cv.character_words(u"abcdefgh", 2), u"“a”, “b”, and others")
-        # (owner's image 169: "and others" for a single seventh mark; one left is named)
+        # (image 169: "and others" for a single seventh mark; one left is named)
         self.assertEqual(cv.character_words(u"abc", 2), u"“a”, “b”, and “c”")
-        # (owner's images 168 and 169: the counts are of characters, each once, as the parentheses name them)
+        # (images 168 and 169: the counts are of characters, each once, as the parentheses name them)
         self.assertEqual(cv.preview_note(u"、。、。ー ー", {0x30FC: u"bar"}),
                          u"The previews show only the 1 character of the sample the font has (“ー”): it lacks 2 CJK "
                          u"punctuation marks (the ideographic comma and the ideographic full stop)."
@@ -2115,7 +2115,7 @@ class PreviewNoteTests(unittest.TestCase):
 
 
 class LacksNoteTests(unittest.TestCase):
-    """The owner, of both CJK windows: "Shouldn't we have this line in the log instead?" The note was a quiet line
+    """The review, of both CJK windows: "Shouldn't we have this line in the log instead?" The note was a quiet line
     between the previews and the Code preview while the log stayed empty: it is said in the log now (CJK
     Spacing's LacksNote, whose own tests are in cjk_tests), once per font and words, after a pause in typing."""
 
@@ -2215,14 +2215,14 @@ class TokenReadingTests(unittest.TestCase):
 
 class CheckAllTests(unittest.TestCase):
     def test_check_all_and_none_say_how_many(self):
-        """Owner's report 118: Check all and Check none left no line in the log."""
+        """Report 118: Check all and Check none left no line in the log."""
         sys.path.insert(0, HERE)
         import cjk_tests
         cjk_tests.check_all_logged(self, cv, cv.CJKVerticalDialog, u"row")
 
 
 class UIRound3Tests(unittest.TestCase):
-    """The owner's UI round 3: a Code preview (image 305), the bottom row's order (298), splitter handles (310,
+    """The UI round 3: a Code preview (image 305), the bottom row's order (298), splitter handles (310,
     318), and the samples grayed for a font without their writing (304), as CJK Spacing's."""
 
     def source(self):
@@ -2251,7 +2251,7 @@ class UIRound3Tests(unittest.TestCase):
         self.assertIn(u"# And an advance height of 1,000 units set on 9,507 layers without one (no code).", shown[-1])
         dialog.pending = lambda: ({}, [], [])
         dialog.update_buttons()
-        self.assertEqual(shown[-1], dialog.cj.NO_CODE_EMPTY, "no row to tick (owner's image 29)")
+        self.assertEqual(shown[-1], dialog.cj.NO_CODE_EMPTY, "no row to tick (image 29)")
         dialog.forms = [form]
         dialog.update_buttons()
         self.assertEqual(shown[-1], dialog.cj.NO_CODE)
@@ -2266,14 +2266,14 @@ class UIRound3Tests(unittest.TestCase):
     def test_the_layout_splitter_code_preview_and_bottom_row(self):
         init = self.source().split(u"class CJKVerticalDialog")[1].split(u"\n    def watch_previews")[0]
         self.assertIn(u"self.splitter = QtGui.QSplitter(QtCore.Qt.Vertical)", init)
-        self.assertIn(u"list_part.addWidget(self.tree, 1)", init, "a handle under the list (owner's image 310)")
+        self.assertIn(u"list_part.addWidget(self.tree, 1)", init, "a handle under the list (image 310)")
         self.assertNotIn(u"layout.addWidget(self.tree", init)
         # (what the font lacks of the sample is said in the log, not in a line over the Code preview: LacksNoteTests)
         self.assertNotIn(u"preview_note = QtGui.QLabel", init)
         self.assertIn(u"self.lacks_note = self.cj.LacksNote(ak, self.log, dialog)", init)
         self.assertIn(u"self.cj.CodePreview(ak, reader(), self.splitter, CODE_PREVIEW_WHAT", init)
         self.assertIn(u"self.code_preview.refresh", init, "its colors again when dark mode switches")
-        # (owner's image 298: the compile tick, the write it is about, the other committing buttons, Close)
+        # (image 298: the compile tick, the write it is about, the other committing buttons, Close)
         dialog = cv.CJKVerticalDialog.__new__(cv.CJKVerticalDialog)
         for name in ("compile_box", "write_button", "put_back_button", "export_button", "close_button"):
             setattr(dialog, name, name)

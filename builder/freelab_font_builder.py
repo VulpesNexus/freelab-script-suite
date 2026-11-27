@@ -31,7 +31,7 @@ PER_SHEET_MAX = 400  # at most (a sheet stays under SHEET_PIXELS_MAX at the defa
 EM_PIXELS = 500  # the em's size on the sheet, in pixels, by default
 EM_PIXELS_RANGE = (150, 1200)
 PRINT_DPI = 300  # the resolution the em size's help measures a printed sheet at
-# (the owner asked, 2026-11-24, whether the font's metrics affect the em size: they do not, and the help says so)
+# (asked on 2026-11-24 whether the font's metrics affect the em size: they do not, and the help says so)
 EM_HELP = ("The em's size on the sheet, in pixels (%d at first, which draws well on a screen), whatever the font's "
            "units per em: the font's metrics set where its lines fall within the em, and how tall a box is. "
            "Printed at %d dpi, %d pixels make a centimeter, so an em of %d pixels is about %.1f cm." % (
@@ -70,7 +70,7 @@ GUIDE_INK_RGB = (221, 239, 253)
 GUIDE_INK_GRAY = 235
 GUIDE_PAD = 0.02  # the room, in ems, a guide character's ink keeps from its box's sides
 EVEN_SIDE = 0.05  # each sidebearing, in ems, of a glyph placed With even sidebearings
-# Ink darker than: where the risk begins, from the grays themselves (the owner, 2026-11-24)
+# Ink darker than: where the risk begins, from the grays themselves (the review of 2026-11-24)
 THRESHOLD_TIP = ("The gray under which a pixel counts as ink (0 black, 255 white). The boxes' lines read at about %d "
                  "and the guide characters at about %d, so up to %d neither is ink: raise it only as far as pale ink "
                  "needs." % (GUIDE_GRAY, GUIDE_INK_GRAY, THRESHOLD_MAX))
@@ -80,7 +80,7 @@ THRESHOLD_HELP = ("What counts as ink: pixels darker than this gray (0 black, 25
                   "reading can make white brings them closer: the higher this is set, the sooner the lines, then the "
                   "guide characters, show in the glyphs read. Raise it only as far as pencil or pale ink needs, and "
                   "lower it if lines appear in the glyphs." % (GUIDE_GRAY, GUIDE_INK_GRAY, THRESHOLD_MAX))
-# Save template...: the formats, and what may be hidden in a sheet before it is saved (the owner, 2026-11-24)
+# Save template...: the formats, and what may be hidden in a sheet before it is saved (the review of 2026-11-24)
 SAVE_HELP = ("Writes the sheets, one file a sheet, numbered: as SVG drawings (for a vector app, or any app that "
              "opens SVG), as PNG or TIFF images, or as Photoshop documents (PSD). SVG and PSD keep the template on "
              "locked layers of their own, with an empty layer above it to draw on; PNG and TIFF are flat images. The "
@@ -88,7 +88,7 @@ SAVE_HELP = ("Writes the sheets, one file a sheet, numbered: as SVG drawings (fo
              "the bands) must stay visible. A save is all or nothing: stopped or failed, it leaves no file behind and "
              "replaces none. The log then links to the folder.")
 # A save stopped (the question answered Cancel, Cancel or Esc during the writing, the tools menu, the arrows, or
-# Close): every sheet is staged beside its file until all are written, so nothing is ever half saved (the owner,
+# Close): every sheet is staged beside its file until all are written, so nothing is ever half saved (the review of
 # 2026-11-24)
 STOPPED_LINE = "The operation was interrupted. Nothing was saved or overwritten."
 CANCEL_NOTE = ("A save stopped leaves nothing behind: no sheet of it is kept, and the files there stay as they "
@@ -368,7 +368,7 @@ def sheet_svg(sheet, guide_rgb=(170, 215, 250), guides=None):
     """A sheet as an SVG drawing, the same as render_sheet's image (its pixels its user units): the paper,
     boxes, lines, labels, and guide characters in a locked group, "template", and what the reading finds the
     sheet by (the corner squares and the bands) in a locked group of their own above it, "marks", so the
-    template can be hidden before the sheet is saved (the owner, 2026-11-24: the reading needs the marks
+    template can be hidden before the sheet is saved (the review of 2026-11-24: the reading needs the marks
     alone; a hidden template leaves them on a clear ground, read as white paper), for a vector app to draw on
     a layer above them ("drawing"). Drawn in the order it always was (the marks last, over a title wider than
     a small sheet), so it renders as before. Read back as an image (Qt renders it at its size), so whatever
@@ -432,12 +432,12 @@ def sheet_svg(sheet, guide_rgb=(170, 215, 250), guides=None):
 # ---------------------------------------------------------------------------
 
 PSD_SIDE_MAX = 30000  # a PSD's width and height at most (version 1, "8BPS"; past it, the PSB format)
-# The layers, bottom to top (the owner, 2026-11-24): what the reading finds the sheet by, on white; the boxes,
+# The layers, bottom to top (the review of 2026-11-24): what the reading finds the sheet by, on white; the boxes,
 # lines, labels, and guide characters, on a clear ground, which may be hidden before the sheet is saved (and
 # need not be: "can be hidden" says what is true, where "preferably hidden" read as "hide it to draw"); and
 # an empty layer to draw on
 PSD_LAYERS = ("Marks (keep visible)", "Template (can be hidden)", "Draw here")
-# The Template layer prints in strong colors at a third of its opacity (the owner, 2026-11-24: "a user may want to
+# The Template layer prints in strong colors at a third of its opacity (the review of 2026-11-24: "a user may want to
 # temporarily boost colors to see things better"): at this opacity over white it looks as the flat sheet does, and
 # raised it shows the boxes, labels, and guides stronger. Each channel c of the sheet as painted is stored as
 # 255 - (255 - c) * 255 / opacity (template_strong): the boxes' lines and labels (GUIDE_RGB, 170, 215, 250, the
@@ -1178,7 +1178,7 @@ PREVIEW_POINTS_RANGE = (6, 72)
 # draws (tests/language_font_tests.py, test_duployan_drawn_by_the_optional_font_alone)
 DUPLOYAN_CODES = (0x1BC00, 0x1BCA3)
 # Pixels added above and below the line between the dropdown's common sets and every set: Qt's own row for a
-# separator is as tall as a frame's width, and the line sat tight between two rows (owner's review)
+# separator is as tall as a frame's width, and the line sat tight between two rows (the review)
 SEPARATOR_ROOM = 4
 
 
@@ -1797,7 +1797,7 @@ window then works on: the units per em, metrics, and family name of the font tha
 Then space the glyphs (<i>Auto Spacing</i>) and build the rest (<i>Glyph Compose</i>).<br><br>
 Click this help's button, then anything in the window, for what it does (or right-click it: <i>What's This?</i>)."""
 
-# The top line while no font is open, on one line (ak.one_line: owner's images 274 and 280): the window
+# The top line while no font is open, on one line (ak.one_line: images 274 and 280): the window
 # hooks to a font it builds too
 NO_FONT_TEXT = (u"No font is open. This window hooks to the next font you open (or build here). A template can still "
                 u"be made, with default metrics.")
@@ -1807,7 +1807,7 @@ FLOW_SPACING = 16  # pixels between two options of a row that wraps (FlowRow)
 def flow_rows(widths, room, spacing=FLOW_SPACING):
     """How many items each line of a row that wraps holds ([5], or [3, 2]): the items in their order, as
     many on a line as room allows (each width, spacing between two), at least one a line. room 0 or less
-    (not laid out yet): all on one line. The owner's images 241, 266, and 267: the options and their run
+    (not laid out yet): all on one line. Images 241, 266, and 267: the options and their run
     button on one line where the window is wide enough, wrapped where it is not, nothing lost."""
     widths = [max(0, int(w)) for w in widths]
     if not widths:
@@ -1858,9 +1858,9 @@ def grouped(number):
     return "{:,}".format(int(number))
 
 
-# The template's file types, the first the save dialog's own (owner's image 374: SVG, which every vector app and
+# The template's file types, the first the save dialog's own (image 374: SVG, which every vector app and
 # most drawing apps open, and which Read sheets reads back). Plural kinds of files, as Windows' own lists name
-# them; the owner's words of 2026-11-24 for SVG and PSD. A label holds two groups in parentheses: Qt takes the last
+# them; the words of 2026-11-24 for SVG and PSD. A label holds two groups in parentheses: Qt takes the last
 # as the patterns (QPlatformFileDialogHelper's filterRegExp, greedy on the name; Windows' dialog helper, the last
 # "("), so "(vector)" and "(layered)" stay words of the name (filter_patterns, its test). Nothing is keyed on a
 # label: the extension of the name chosen decides the format (template_ext)
@@ -1911,7 +1911,7 @@ def files_named(names, most=FILES_NAMED):
 
 
 def replace_question(existing, what="sheet"):
-    """The question before a save replaces files there (the owner's words, 2026-11-24): "DotTest.tif already
+    """The question before a save replaces files there (the words, 2026-11-24): "DotTest.tif already
     exists. Replace it with a new sheet?", "A.tif, B.tif, and C.tif already exist. Replace them with new
     sheets?"."""
     if len(existing) == 1:
@@ -2022,7 +2022,7 @@ def picked_paths(chosen):
     """The files a file dialog of several gave (getOpenFileNames), as a list of paths: PythonQt gives them as a
     tuple of strings, PyQt and PySide as (the list, the filter chosen), and a dialog of one file a string. The
     tuple of one string had been taken for the PyQt form, and its path read character by character, each a
-    sheet "not an image FontLab can read" (owner's image 376)."""
+    sheet "not an image FontLab can read" (image 376)."""
     if not chosen:
         return []
     if isinstance(chosen, _TEXT_TYPES):
@@ -2095,7 +2095,7 @@ def capped_size(width, height, most=SHEET_PIXELS_MAX):
 def saved_line(ak, paths, one="sheet", size=None):
     """The log's line once files are saved: how many in bold, their size together (size, in bytes, worded by
     ak.file_size_text; None: not said), the folder they are in as a link that shows the first selected in a new
-    window of the system's file manager (ak.reveal_link: owner's image 375), then their names (files_named: a
+    window of the system's file manager (ak.reveal_link: image 375), then their names (files_named: a
     long list shortened)."""
     folder = os.path.normpath(os.path.dirname(paths[0]))
     link = getattr(ak, "reveal_link", None)
@@ -2117,7 +2117,7 @@ def files_size(paths):
 
 
 # ---------------------------------------------------------------------------
-# What a save will take on disk, said before it writes (the owner, 2026-11-24: "for PSD size risks, is it
+# What a save will take on disk, said before it writes (the review of 2026-11-24: "for PSD size risks, is it
 # doable to estimate required size before writing based on template settings?")
 # ---------------------------------------------------------------------------
 
@@ -2248,7 +2248,7 @@ def _value(widget, name):
 class FlowRow(object):
     """A row of options (each a group: a caption and its control, a check box, the run button last) that
     stands on one line where the window is wide enough and wraps onto more lines where it is not
-    (flow_rows), in its order, nothing lost or overlapping: the owner's images 241, 266, and 267 ("both
+    (flow_rows), in its order, nothing lost or overlapping: images 241, 266, and 267 ("both
     lines of options could sit on the same line"; on a tiny screen, "wrapping/reflowing" must break
     nothing but the looks). Each line is a box of its own, its groups at the left (a stretch after
     them); a line with no group takes no room. Its width never holds the window wide (Ignored): the
@@ -2412,11 +2412,11 @@ class FontBuilderDialog(object):
         ak.size_dialog(dialog)
         layout = ak.window_layout(dialog)
         self.settings = read_settings(ak)
-        try:  # (its no-font line on one line, the only lines allowed to be: owner's images 274 and 280)
+        try:  # (its no-font line on one line, the only lines allowed to be: images 274 and 280)
             ak.one_line(NO_FONT_TEXT)
         except Exception:
             pass
-        # The header, as every window's (owner's images 222, 223, 240): the top line, the template's status
+        # The header, as every window's (images 222, 223, 240): the top line, the template's status
         # under it (the Template tab's: what it holds, or why there is nothing to draw), the header's line
         # (shown even with no font), then the tabs
         self.font_label = ak.status_label()
@@ -2429,7 +2429,7 @@ class FontBuilderDialog(object):
         self.tabs.setExpanding(False)
         self.tabs.addTab("Template")
         self.tabs.addTab("Build")
-        # (a right-click on a tab tells of it: owner's image 329)
+        # (a right-click on a tab tells of it: image 329)
         self.tabs.setTabWhatsThis(0, u"Makes template sheets to draw the glyphs on, in any app or on paper: a box for "
                                      u"each glyph picked here, shaped by the font's metrics.")
         self.tabs.setTabWhatsThis(1, u"Reads the sheets drawn and builds their glyphs in the font: traced into "
@@ -2442,7 +2442,7 @@ class FontBuilderDialog(object):
         self.log = ak.Log()
         self.log.link_handler = self.log_link  # (a template saved: its folder, the file selected, on a click)
         layout.addWidget(self.log.widget)
-        # The bottom row, as every window's (owner's images 258 to 265): the Build tab's committing button at
+        # The bottom row, as every window's (images 258 to 265): the Build tab's committing button at
         # the right, shown with its tab, then Close
         buttons = QtGui.QHBoxLayout()
         buttons.addStretch(1)
@@ -2489,7 +2489,7 @@ class FontBuilderDialog(object):
         except Exception:
             pass
         # (the other tab's buttons hidden before this one's are shown, ak.show_only: shown first, the row held
-        # both a moment and Qt widened the window for good, owner's image 284)
+        # both a moment and Qt widened the window for good, image 284)
         groups = {0: [], 1: [self.build_button]}
         show_only = getattr(self.ak, "show_only", None)
         try:
@@ -2504,7 +2504,7 @@ class FontBuilderDialog(object):
     def even_rows(self):
         """The rows above the two tabs' frames (the Template tab's Character set dropdown, the Build tab's Add
         sheets... and Clear) made as tall as the taller (even_height): a row of buttons was lower than one
-        with a dropdown, so the frame under it moved as the tabs switched (owner's images 285 and 286). At
+        with a dropdown, so the frame under it moved as the tabs switched (images 285 and 286). At
         each switch, as the window's style may have changed their sizes since. Never raises."""
         even_height([getattr(self, "template_bar", None), getattr(self, "build_bar", None)])
 
@@ -2513,14 +2513,14 @@ class FontBuilderDialog(object):
     def template_page(self, QtCore, QtGui):
         page = QtGui.QWidget()
         box = QtGui.QVBoxLayout(page)
-        box.setContentsMargins(0, 0, 0, 0)  # (its frames in line with the log's: owner's image 268)
+        box.setContentsMargins(0, 0, 0, 0)  # (its frames in line with the log's: image 268)
         # The row above the tab's frame, in a bar of its own: as tall as the Build tab's (even_rows), so the
-        # frames under them never shift as the tabs switch (owner's images 285 and 286)
+        # frames under them never shift as the tabs switch (images 285 and 286)
         bar = self.template_bar = QtGui.QWidget()
         row = QtGui.QHBoxLayout(bar)
         row.setContentsMargins(0, 0, 0, 0)
-        # The box's text size (owner's review: "one extra option ... to change font size up or down"): what the
-        # box shows, never the sheets. It stands right of the sets' dropdown (the owner, 2026-11-24: "Character
+        # The box's text size (the review: "one extra option ... to change font size up or down"): what the
+        # box shows, never the sheets. It stands right of the sets' dropdown (the review of 2026-11-24: "Character
         # set: [dropdown]   Text size: [14 pt]"), first left of it
         self.preview_size = QtGui.QSpinBox()
         self.preview_size.setRange(PREVIEW_POINTS_RANGE[0], PREVIEW_POINTS_RANGE[1])
@@ -2529,7 +2529,7 @@ class FontBuilderDialog(object):
         self.preview_size.setToolTip("The size of the characters in the box below.")
         self.preview_size.setWhatsThis("The size the box below shows its characters at, kept for the next time. It "
                                        "changes only what the box shows: the sheets keep their <i>Em size</i>.")
-        # (captioned as Glyph Compose's dropdown of the same sets is: owner's review, 2026-11-24)
+        # (captioned as Glyph Compose's dropdown of the same sets is: the review, 2026-11-24)
         row.addWidget(QtGui.QLabel("Character set:"))
         self.source = QtGui.QComboBox()
         self.source.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)  # (as wide as its widest item: image 239)
@@ -2560,7 +2560,7 @@ class FontBuilderDialog(object):
         self.lacking.setChecked(True)
         self.lacking.setWhatsThis("With a font open: no box for a glyph that has outlines, components, or an image in "
                                   "its current master.")
-        # Each box's character printed faintly in FreeLang (Guides), to show what to draw (the owner, 2026-11-24:
+        # Each box's character printed faintly in FreeLang (Guides), to show what to draw (the review of 2026-11-24:
         # users "may not know what each glyph looks like"); kept with the template's other settings
         self.guide_box = QtGui.QCheckBox(GUIDE_CAPTION)
         self.guide_box.setChecked(bool(self.settings.get("guides", True)))
@@ -2584,7 +2584,7 @@ class FontBuilderDialog(object):
         self.save_button = QtGui.QPushButton(SAVE_TEMPLATE)
         self.ak.mark_risky(self.save_button)  # (writes files: FreeLab MCP clicks it only in risky mode)
         self.save_button.setWhatsThis(SAVE_HELP)
-        # The options on one line with the run button at their end (owner's images 241 and 266), wrapping
+        # The options on one line with the run button at their end (images 241 and 266), wrapping
         # onto the next line where the window is too narrow (FlowRow); the template's status is in the header
         self.template_options = FlowRow([
             [self.lacking], [self.guide_box], [QtGui.QLabel("Alternates of each:"), self.alternates],
@@ -2715,7 +2715,7 @@ class FontBuilderDialog(object):
     def keep_set(self):
         """The settings (saved with the template, beside its characters) told the set last picked, by its key,
         or that none was: the window reopens on it (restore_set). Before this, only the characters were kept,
-        and a set's came back as Characters typed below (owner's review, 2026-11-24)."""
+        and a set's came back as Characters typed below (the review, 2026-11-24)."""
         number = getattr(self, "picked_set", None)
         try:
             key = set_key(self.sets[number]) if number is not None else None
@@ -2849,7 +2849,7 @@ class FontBuilderDialog(object):
                 return
             sheets = self.sheets()
             w, h = sheets[0].size()
-            b = self.ak.b  # (counts with their nouns in bold: owner's convention 8)
+            b = self.ak.b  # (counts with their nouns in bold: the convention 8)
             self.summary.setText("%s on %s of %s by %s pixels (%s megapixels)." % (
                 b(counted(len(glyphs), "glyph")), b(counted(len(sheets), "sheet")), grouped(w), grouped(h),
                 "%.1f" % (w * h / 1e6)))
@@ -2863,7 +2863,7 @@ class FontBuilderDialog(object):
         sheets = self.sheets()
         folder = self.settings.get("folder") or os.path.expanduser("~")
         base = (sheets[0].family or "template").replace(" ", "-")
-        # (SVG first, the name ending in it: the dialog's type is SVG unless another is picked, owner's image 374;
+        # (SVG first, the name ending in it: the dialog's type is SVG unless another is picked, image 374;
         # the dialog asked not to confirm replacing a file, which ask_replace asks in a box that follows dark mode)
         chosen, windows_asked = self.ak.save_file_name(QtGui, self.dialog, "Save the template",
                                                        os.path.join(folder, base + TEMPLATE_FORMATS[0][0]),
@@ -2896,7 +2896,7 @@ class FontBuilderDialog(object):
             line, level = None, None  # (an estimate never stops a save)
         if line:
             self.log.add(line, level)
-        # All or nothing (the owner, 2026-11-24: a save stopped by Close left the sheets written so far): every
+        # All or nothing (the review of 2026-11-24: a save stopped by Close left the sheets written so far): every
         # sheet is written to a staged file beside its own, and they take their places only once all are
         # written; a stop or a failure removes every staged file, and no file there is touched
         staged, placed, failed, why = [], [], None, ""
@@ -3038,7 +3038,7 @@ class FontBuilderDialog(object):
     def build_page(self, QtCore, QtGui):
         page = QtGui.QWidget()
         box = QtGui.QVBoxLayout(page)
-        box.setContentsMargins(0, 0, 0, 0)  # (its lists' frames in line with the log's: owner's image 268)
+        box.setContentsMargins(0, 0, 0, 0)  # (its lists' frames in line with the log's: image 268)
         bar = self.build_bar = QtGui.QWidget()  # (as tall as the Template tab's row: even_rows)
         row = QtGui.QHBoxLayout(bar)
         row.setContentsMargins(0, 0, 0, 0)
@@ -3073,7 +3073,7 @@ class FontBuilderDialog(object):
         self.placement.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)
         self.placement.addItem("Where drawn")
         self.placement.addItem("With even sidebearings")
-        # (no space before the percent sign: owner's image 216)
+        # (no space before the percent sign: image 216)
         self.placement.setWhatsThis("Where drawn: the ink stays where it was drawn against the box's origin line, the "
                                     "right side given the left side's room. Even: both sides %d%% of the em. Either "
                                     "way, <i>Auto Spacing</i> spaces them better after." % int(round(EVEN_SIDE * 100)))
@@ -3081,7 +3081,7 @@ class FontBuilderDialog(object):
         self.replace.setWhatsThis(REPLACE_HELP)
         self.read_button = QtGui.QPushButton("Read sheets")
         self.read_button.setWhatsThis("Reads every sheet added: finds it in its image, and traces each drawn box.")
-        # The options on one line with Read sheets at their end (owner's image 267), wrapping where the window
+        # The options on one line with Read sheets at their end (image 267), wrapping where the window
         # is too narrow (FlowRow)
         self.build_options = FlowRow([
             [QtGui.QLabel("Make:"), self.mode], [QtGui.QLabel("Ink darker than:"), self.threshold],
@@ -3094,10 +3094,10 @@ class FontBuilderDialog(object):
         self.glyph_list.setWhatsThis("The glyphs read: as traced, the sheet each came from, and what was read. Ticked "
                                      "ones are built.")
         # (left alone by dark mode, its pictures drawn in the window's text color: mapped as one of FontLab's
-        # lists, each picture came out twice, the second cut off and outlined; owner's image 168)
+        # lists, each picture came out twice, the second cut off and outlined; image 168)
         self.ak.table_layout(self.glyph_list, stretch=2)
         box.addWidget(self.glyph_list, 2)
-        # (in the window's bottom row, at its right, shown with this tab: owner's images 258 to 265)
+        # (in the window's bottom row, at its right, shown with this tab: images 258 to 265)
         self.build_button = QtGui.QPushButton("Build ticked glyphs")
         self.build_button.setWhatsThis("Writes the ticked glyphs into the current master (new glyphs added with their "
                                        "code points), as one step of FontLab's History. With no font open, makes a new "
@@ -3523,7 +3523,7 @@ class FontBuilderDialog(object):
         return package
 
     def hook_built_font(self, package):
-        """The new font this window built is its font from now on (owner's images 274 and 280: "This window
+        """The new font this window built is its font from now on (images 274 and 280: "This window
         hooks to the next font you open (or build here)"): taken as a window without a font takes the font
         opened (ak.window_font: its registry, its title), at once rather than at the next look at the fonts,
         and only while FontLab shows that font (it adds a new font as the current one): never another.

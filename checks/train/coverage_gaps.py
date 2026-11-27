@@ -1,7 +1,7 @@
 """Write docs/COVERAGE-GAPS.md and checks/coverage_gaps.json: what Unicode's own data describes that Font
 Check does not check, each with the reason, and the fonts to consider for what FreeLang cannot draw.
 
-The owner (2026-11-14): "If we're checking Unicode databases, we can cast the widest possible net and
+The review of 2026-11-14: "If we're checking Unicode databases, we can cast the widest possible net and
 look for anything we are currently missing that can be added or at the very least acknowledged as
 something we are aware of." Every Unicode block, Unihan source, sequence kind (named sequences,
 standardized variants, emoji sequences, ideographic variation sequences), shaping property, and CLDR
@@ -94,7 +94,7 @@ HAN_WRITINGS = (
     ("Tangut, Nushu, Khitan Small Script", "checked", "scripts of their own, checked as sets under Scripts (Unicode)"),
 )
 # The fonts the build looked at and left out, or that earlier work dismissed, looked at again on
-# 2026-11-14 (the owner: "worth going back over fonts we have already dismissed prior").
+# 2026-11-14 (the review: "worth going back over fonts we have already dismissed prior").
 RECONSIDERED = (
     ("GNU Unifont 18.0.01 (Unifoundry)", "taken", "dual-licensed (GPL 2 or later with the font embedding exception, "
      "and the SIL OFL 1.1, since 13.0.04): FreeLang takes it under the OFL, for the characters no outline font "
@@ -111,7 +111,7 @@ RECONSIDERED = (
     ("Plangothic P2's other characters (Tangut's additions of Unicode 16 and 17, Tai Yo, a few Syriac and Arabic)",
      "taken", "264 characters no source drew, or only Unifont's pixels, in the FreeLang+ General font; under the "
      "glyph names of Noto's fonts (lowko-taiyo, malayalamnga-syriac), its Tai Yo seemingly Noto Serif Tai Yo's, "
-     "which states no license of its own: taken under Plangothic's OFL, the owner's decision of 2026-11-14"),
+     "which states no license of its own: taken under Plangothic's OFL, the decision of 2026-11-14"),
     ("BabelStone Tangut Wenhai 1.002", "not needed", "OFL 1.1, of 2016: none of Tangut's Unicode 16 and 17 additions, "
      "which Plangothic P2 draws"),
     ("Tangut Yinchuan (as BabelStone's page lists it)", "still left out", "\"Copyright Prof. Jing Yongshi\", no license named"),

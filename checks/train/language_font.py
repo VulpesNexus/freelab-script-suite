@@ -113,7 +113,7 @@ FAMILY = "FreeLang"  # the fonts together, as the tools name them to the user
 #   optional: True for a font the tools work without (Font Check skips a fallback file that is not
 #     there); the build makes it like the others.
 Font = collections.namedtuple("Font", "label family file postscript sources own_layout optional")
-# The fourth font's family name, held here alone: its joining character is the owner's choice, an en
+# The fourth font's family name, held here alone: its joining character is the choice made, an en
 # dash (U+2013), written as an escape; another would be this one line, and the same name in
 # LIST_FONT_FALLBACKS of checks/freelab_font_check.py, which the tests compare with it. The font's
 # own copy of its name's characters follows this (NAME_SUBSETS). The label, the file name, and the
@@ -312,13 +312,13 @@ LAST_RESORT = ("Padauk", "Shafarik", "BabelStonePseudographica", "NewGardiner")
 # design, drew them until 2026-11-14; Plangothic draws every character they supplied.) Plangothic P2
 # also draws characters of other scripts no source above has (Tangut's newest, Tai Yo, a few Syriac and
 # Arabic ones), which it takes before Unifont's pixels, into the FreeLang+ General font (ELSEWHERE): the
-# owner's decision (2026-11-14), to go by Plangothic's own license.
+# the decision (2026-11-14), to go by Plangothic's own license.
 HAN_LAST = ("PlangothicP1", "PlangothicP2")
 # Last of all, for a character no outline font under a license FreeLang can take draws (14 emoji of
 # Unicode 16 and 17; until Plangothic P2 drew them, Tai Yo and Syriac Supplement too): GNU Unifont, whose glyphs are a 16 by 16 grid of pixels drawn
 # as squares. Its font files are dual-licensed (GPL version 2 or later with the font embedding
 # exception, and the SIL Open Font License 1.1, since 13.0.04): FreeLang takes them under the OFL. The
-# owner's rule (2026-11-14): a pixel font only where no outline source has the character; language_font.json
+# the rule (2026-11-14): a pixel font only where no outline source has the character; language_font.json
 # lists what it supplies (tests/language_font_tests.py: PIXEL_SOURCES).
 PIXEL_LAST = ("Unifont", "UnifontUpper")
 # The sources outside the two pinned repositories, each a release pinned by its version or a file of a
@@ -391,8 +391,8 @@ ONE_COLOR = ("NotoZnamennyMusicalNotation",)
 # combining parentheses (U+1AC1 to U+1AC4, Combining Diacritical Marks Extended) are marks of Latin
 # phonetic text: in the Essential font their anchors are carried onto Noto Sans's letters, dotted
 # circle, and other marks (ANCHORED), which the rest of Unicodia Funky, in the FreeLang+ General font,
-# has no use for. Plangothic P2's characters of other scripts than the CJK ones (since 2026-11-14, the
-# owner's word: taken under Plangothic's OFL, before Unifont's pixels and where no source drew them:
+# has no use for. Plangothic P2's characters of other scripts than the CJK ones (since 2026-11-14, as
+# decided: taken under Plangothic's OFL, before Unifont's pixels and where no source drew them:
 # Syriac Supplement, Arabic signs and ligatures, Tai Yo, Tangut's newest, legacy computing symbols) go
 # into the FreeLang+ General font with their scripts' other characters, so that the CJK font stays the
 # East Asian scripts' (Font Check's fallbacks_needed).
@@ -556,7 +556,7 @@ def tool_characters():
     generation table (compose/glyph_generation.json, with the squared words and the compatibility characters
     its module adds as it reads it) and the characters each is made of, and the letters with diacritics its
     Diacritics tab lists (its SETS: those Unicode decomposes into a letter and marks) with their letters and
-    marks. Its lists draw their characters in FreeLang (owner's images 316 and 317, 2026-11-18): the Kangxi
+    marks. Its lists draw their characters in FreeLang (images 316 and 317, 2026-11-18): the Kangxi
     radicals Glyph generation lists since then were in none of the five fonts."""
     import unicodedata
     if COMPOSE not in sys.path:

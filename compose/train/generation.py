@@ -71,7 +71,7 @@ GROUPS = (
 )
 EXPECTED = {"spaces": 18, "dashes": 10, "duplicates": 44, "punctuation": 28, "lookalikes": 52, "ligatures": 17,
             "fractions": 20, "arrows": 20, "turned": 41}
-# Characters added to the first scope (2026-11-16, the owner's report): the sources the arrows and triangles
+# Characters added to the first scope (2026-11-16, report): the sources the arrows and triangles
 # turn, built in turn from those where a font has one of them and not the source (⇒ from ⇐, ⇑, or ⇓). Not in
 # the research inventory's scope: no corpus counts, research confidence accepted.
 REVERSED_SOURCES = ("2192", "21D2", "25B6", "25B7")
@@ -143,7 +143,7 @@ def duplicates(inventory):
     found["02BC"].pop()  # (an apostrophe is not a turned comma: kept to the right single quote alone)
     found["02BD"].append(way("mirror", A, of="2019"))  # the reversed comma: the right single quote mirrored
     found["0189"].append(way("copy", A, of="0110"))
-    # Ð and Đ from Ɖ where the font has only that one (the owner's question of 2026-11-16): the same shape
+    # Ð and Đ from Ɖ where the font has only that one (the question of 2026-11-16): the same shape
     # in most fonts (Ɖ copies Ð in 24 of the 50 families that build it). No loop: a way reading a glyph that
     # is made of the row's own is refused (component_loop), and one the list builds after it is not taken
     found["00D0"].append(way("copy", A, of="0189"))

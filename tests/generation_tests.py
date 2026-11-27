@@ -421,7 +421,7 @@ def without(glyphs, *names):
 
 
 class ReverseTests(unittest.TestCase):
-    """The owner's questions of 2026-11-16: the sources built from what they make (⇒ of ⇐), named where they
+    """The questions of 2026-11-16: the sources built from what they make (⇒ of ⇐), named where they
     must be drawn, and Ð from Ɖ; the loop guards of Codex's rounds 1 to 3 kept closed."""
 
     def test_a_source_is_built_from_what_it_makes(self):
@@ -452,7 +452,7 @@ class ReverseTests(unittest.TestCase):
     def test_the_source_to_draw_is_named(self):
         planner, rows = plan()  # (a right arrow, no double arrow)
         self.assertEqual(rows[u(0x21D2)].missing, u"draw it: %s are built from it" % u" ".join(u(c) for c in (
-            0x21D0, 0x21D1, 0x21D3)), "⇒ listed, to draw: three arrows need it (the owner's report)")
+            0x21D0, 0x21D1, 0x21D3)), "⇒ listed, to draw: three arrows need it (report)")
         self.assertEqual(rows[u(0x21D0)].missing, u"needs ⇒ (U+21D2)")
         planner, rows = plan(FakeFont(without(BARE, "arrowright")))
         self.assertEqual(rows[u(0x2192)].missing, u"draw it: %s are built from it" % u" ".join(u(c) for c in (
@@ -480,7 +480,7 @@ class ReverseTests(unittest.TestCase):
 
 
 class SurenessTests(unittest.TestCase):
-    """The owner's question of 2026-11-16: ǝ (accepted: a copy of ə) was checked, ə (e turned) a starting point."""
+    """The question of 2026-11-16: ǝ (accepted: a copy of ə) was checked, ə (e turned) a starting point."""
 
     def test_a_glyph_made_of_a_draft_is_one(self):
         font = FakeFont(dict(BARE, e=(0x65, 500, [rect(40, 0, 460, 500)], None)))
@@ -679,7 +679,7 @@ class TextTests(unittest.TestCase):
     def test_counts_follow_their_number(self):
         self.assertEqual(gg.corpus_text(1, 1), u"1 family of the corpus has it; 1 of them builds it of other glyphs.")
         self.assertEqual(gg.corpus_text(509, 0), u"509 families of the corpus have it; 0 of them build it of other glyphs.")
-        bold = lambda text: u"<b>%s</b>" % text  # noqa: E731  (owner's images 297 and 301: a count bold with its noun)
+        bold = lambda text: u"<b>%s</b>" % text  # noqa: E731  (images 297 and 301: a count bold with its noun)
         self.assertEqual(gg.corpus_text(509, 12, bold), u"<b>509 families</b> of the corpus have it; <b>12</b> of them "
                                                         u"build it of other glyphs.")
 
@@ -1373,7 +1373,7 @@ class WriteTests(unittest.TestCase):
             page.planner_now = gg.Planner(DATA, font, None, False, codes)
             page.rows = page.planner_now.plan()
             rows = dict((r.hex, r) for r in page.rows)
-            self.assertIn("0259", rows, "ə listed: the owner sees the draft")
+            self.assertIn("0259", rows, "ə listed: the draft is seen")
             self.assertEqual(rows["0259"].confidence, u"starting point")
             self.assertEqual(page.planner_now.prerequisites([rows["01DD"]]), [], "never a hidden draft")
             self.build(page, [0x01DD])
@@ -1643,7 +1643,7 @@ class WriteTests(unittest.TestCase):
 
 
 class ListControlTests(unittest.TestCase):
-    """The tab's list controls (the owner's reports of 2026-11-16): Check all and Check none say how many,
+    """The tab's list controls (reports of 2026-11-16): Check all and Check none say how many,
     Check only high-value glyphs and List only high-value glyphs as on the Diacritics tab, and the rows that
     cannot be built dimmed."""
 
@@ -1733,7 +1733,7 @@ class ListControlTests(unittest.TestCase):
         self.assertFalse(any(child.foreground for section in built for child in section.children))
 
     def test_the_status_counts_right_at_0_1_and_2(self):
-        """Owner's images 247 and 265: the status under the window's top line (which names the font), "No glyph
+        """Images 247 and 265: the status under the window's top line (which names the font), "No glyph
         can be built" rather than "0 glyphs", Build ticked glyphs named only when something can be built."""
         b, i = (lambda text: u"<b>%s</b>" % text), (lambda text: u"<i>%s</i>" % text)
         self.assertEqual(gg.status_text(134, [u"<b>19</b> exact"], 84, b, i),
@@ -1759,7 +1759,7 @@ VARIED = dict(BARE, R=(0x0052, 640, [rect(90, 0, 590, 700), rect(200, 300, 400, 
 
 
 class VaryTests(unittest.TestCase):
-    """The owner's request of 2026-11-16: Vary turned and mirrored glyphs, with Feature Code's alternates'
+    """The request of 2026-11-16: Vary turned and mirrored glyphs, with Feature Code's alternates'
     changes from a seed, so that a reused glyph is no carbon copy in a hand-drawn font."""
 
     def varied_plan(self, font=None, seed=7, strength="moderate", existing=False):
@@ -1810,7 +1810,7 @@ class VaryTests(unittest.TestCase):
         self.assertNotEqual(regular[4:], heavy[4:], "each about its own ink's center")
 
     def test_the_preview_shows_the_glyph_as_planned_now(self):
-        """Owner's image 252: ticking Vary turned and mirrored glyphs did not change the preview. The list is
+        """Image 252: ticking Vary turned and mirrored glyphs did not change the preview. The list is
         planned again and refilled with its signals blocked, so the selection went silently and the preview
         kept the glyph as it was: the row is selected again and the preview drawn from the new plan."""
         planner, rows = self.varied_plan(strength="bold")
@@ -1956,7 +1956,7 @@ class VaryTests(unittest.TestCase):
         self.assertEqual(titles, [(u"FreeLab Glyph Compose (parts)", ["quoteleft"]),
                                   (u"FreeLab Glyph Compose", ["ellipsis", "quotedblleft"])], "in build order")
         self.assertEqual(steps[-1], ("end", True))
-        # (the glyph's name in italics, a link that opens it: owner's request of 2026-11-24)
+        # (the glyph's name in italics, a link that opens it: the request of 2026-11-24)
         self.assertIn(("info", u'This takes two steps of <i>Edit &gt; Undo</i>: <a href="glyphname:quoteleft"><i>quoteleft</i></a> '
                                u"was added in a step of its own first, so that FontLab's Undo never takes out a glyph that "
                                u"others still point to."), logged)
@@ -2155,7 +2155,7 @@ class EmptySourceTests(unittest.TestCase):
 
 
 class SquaredTests(unittest.TestCase):
-    """Owner's report 177: "even a Japanese font doesn't offer the characters built from several kana into a
+    """Report 177: "even a Japanese font doesn't offer the characters built from several kana into a
     square composition". The squared words and abbreviations of the CJK Compatibility blocks, set in the em
     square from the font's own glyphs, as starting points, in a font with CJK only."""
 
@@ -2238,7 +2238,7 @@ class SquaredTests(unittest.TestCase):
         self.assertEqual(sy, gg.LATIN_LEAST_HEIGHT, "kcal: narrowed, never shorter than that")
 
     def test_a_lone_kana_keeps_its_rows_cell(self):
-        """Owner's image 315: ㌉ オンス set オン over ス, ス stretched across the whole second row. The ten
+        """Image 315: ㌉ オンス set オン over ス, ス stretched across the whole second row. The ten
         Japanese fonts of Windows 11 and Noto (2026-11-18) all draw the lone kana of a word of three as wide as
         a kana of the row above (0.37 to 0.48 em of ink, against 0.84 to 0.94 for the two above), at the left,
         under the first one: so does the layout now. Two stacked stay as wide as the square."""
@@ -2308,7 +2308,7 @@ class SquaredTests(unittest.TestCase):
 
 
 class CompatTests(unittest.TestCase):
-    """Owner's question of 2026-11-18 (image 315): "whether our glyph generator can cover more glyphs from
+    """The question of 2026-11-18 (image 315): "whether our glyph generator can cover more glyphs from
     scripts we may have not investigated". The compatibility characters the generator's recipes fit, made from
     Unicode's decompositions: the Kangxi radicals (the ideograph's own glyph, as Japanese fonts share it), the
     telegraph symbols (condensed in the em square), the Roman numerals, and the parenthesized and numbered forms

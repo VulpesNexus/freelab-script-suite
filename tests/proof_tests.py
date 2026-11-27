@@ -313,7 +313,7 @@ class StringTests(unittest.TestCase):
                       "the Glyph window gets the string in text order (FontLab kerns it by the same key)")
 
     def test_colliding_glyphs_are_marked_on_the_strings_only_when_asked(self):
-        # (owner's image 348: a tick to draw colliding glyphs in red, off at first, kerning and spacing strings)
+        # (image 348: a tick to draw colliding glyphs in red, off at first, kerning and spacing strings)
         font = hebrew_font({(u"yod", u"bet"): -64})
         for collisions in (False, True):
             layout = fp.Layout()
@@ -871,7 +871,7 @@ class InfoTests(unittest.TestCase):
         self.assertAlmostEqual(fp.fit_scale((300, 300), (600, 800)), 0.375, msg="the page's height decides")
 
     def test_the_dark_choice_is_named_as_its_colors_are(self):
-        # Owner's image 378: "Dark (white on black)" drew light gray on an off-black
+        # Image 378: "Dark (white on black)" drew light gray on an off-black
         ink, paper = fp.DARK_COLORS
         self.assertNotEqual(ink, (255, 255, 255))
         self.assertNotEqual(paper, (0, 0, 0))
@@ -909,7 +909,7 @@ class InfoTests(unittest.TestCase):
         return found
 
     def test_the_medium_choice_is_dark_mode_s_medium_grays(self):
-        # The owner: with dark mode's medium grays chosen, a light window should offer "white on medium gray". The
+        # The review: with dark mode's medium grays chosen, a light window should offer "white on medium gray". The
         # colors are those the medium shade gives a window (its Text on its Base), named as they are
         palettes = self.dark_mode_palettes()
         medium, dark = palettes["PALETTE_MEDIUM"], palettes["PALETTE_DARK"]
@@ -1022,7 +1022,7 @@ class Bag(object):
 
 
 class SaveReplaceTests(unittest.TestCase):
-    """Windows' own "Confirm Save As" box is light in dark mode (owner's report, 2026-11-24): Save PDF... asks the
+    """Windows' own "Confirm Save As" box is light in dark mode (report, 2026-11-24): Save PDF... asks the
     save dialog not to confirm, and asks in FreeLab's own box (which follows dark mode) before a PDF takes the
     place of a file; where this PythonQt takes no options, Windows' box asked of the name typed, as before."""
 
@@ -1146,7 +1146,7 @@ class SaveReplaceTests(unittest.TestCase):
 
     def existing(self, name):
         with open(os.path.join(self.folder, name), "w") as handle:
-            handle.write("OWNER PROOF")
+            handle.write("EXISTING PROOF")
 
     def read(self, name):
         with open(os.path.join(self.folder, name)) as handle:
@@ -1158,7 +1158,7 @@ class SaveReplaceTests(unittest.TestCase):
         stand.save_pdf()
         self.assertEqual(asked, [u"Hand.pdf already exists. Replace it with a new proof?"])
         self.assertEqual(marked, ["script", "risky"], "FreeLab's own question for FreeLab MCP, its Replace risky")
-        self.assertEqual((written, self.read("Hand.pdf")), ([], "OWNER PROOF"), "canceled: left as it was")
+        self.assertEqual((written, self.read("Hand.pdf")), ([], "EXISTING PROOF"), "canceled: left as it was")
         self.assertEqual(logged, [("warning", u"The operation was interrupted. Nothing was saved or overwritten.")])
         stand, asked, logged, written, marked = self.stand("Hand.pdf", "Replace")
         stand.save_pdf()
@@ -1188,14 +1188,14 @@ class SaveReplaceTests(unittest.TestCase):
         self.assertFalse(fp.replaces(os.path.join(self.folder, "None.pdf")))
 
     def test_a_pdf_stopped_or_failed_leaves_the_old_one_and_no_part(self):
-        """The owner, 2026-11-24: a stopped export must leave nothing behind. The PDF is written beside its file and
+        """The review of 2026-11-24: a stopped export must leave nothing behind. The PDF is written beside its file and
         takes its place only once whole: stopped after its first page (Cancel, Esc, Close, the tools menu, an
         arrow), or failed, the PDF there stays byte for byte, and no staged file is left."""
         self.existing("Hand.pdf")
         self.stop_at = u"Writing page 1 of 2"
         stand, asked, logged, written, marked = self.stand("Hand.pdf", "Replace")
         stand.save_pdf()
-        self.assertEqual((self.read("Hand.pdf"), os.listdir(self.folder)), ("OWNER PROOF", ["Hand.pdf"]))
+        self.assertEqual((self.read("Hand.pdf"), os.listdir(self.folder)), ("EXISTING PROOF", ["Hand.pdf"]))
         self.assertEqual(logged[-1], ("warning", u"The operation was interrupted. Nothing was saved or overwritten."))
         self.assertFalse(stand.busy)
         self.stop_at = None
@@ -1207,7 +1207,7 @@ class SaveReplaceTests(unittest.TestCase):
         stand, asked, logged, written, marked = self.stand("Hand.pdf", "Replace")
         fp.write_pdf = broken  # (setUp's cleanup puts the real one back)
         stand.save_pdf()
-        self.assertEqual((self.read("Hand.pdf"), os.listdir(self.folder)), ("OWNER PROOF", ["Hand.pdf"]))
+        self.assertEqual((self.read("Hand.pdf"), os.listdir(self.folder)), ("EXISTING PROOF", ["Hand.pdf"]))
         self.assertEqual(logged[-1], ("error", u"The PDF could not be written: Qt could not open the file for writing. "
                                                u"Nothing was saved or overwritten."))
 
@@ -1255,7 +1255,7 @@ def proof_source():
 
 
 class ZoomTests(unittest.TestCase):
-    """The owner asked what zoom in the preview would cost (report 162): a Zoom dropdown, Ctrl with the wheel,
+    """What zoom in the preview would cost was asked (report 162): a Zoom dropdown, Ctrl with the wheel,
     Ctrl+plus and Ctrl+minus. Fit page as before; a share of the printed size otherwise, scrolled."""
 
     A4 = fp.page_size("A4")
@@ -1469,7 +1469,7 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(fp.feature_title(u"ss00"), u"")
 
     def test_kerning_in_one_line_in_its_numbers(self):
-        # (a count right at 0: never "0 kerned pairs", owner's image 228)
+        # (a count right at 0: never "0 kerned pairs", image 228)
         self.assertEqual(fp.kerning_text(0, u"Regular"), u"No kerned pairs in master Regular")
         self.assertEqual(fp.kerning_text(0, u"Regular", 0, 0), u"No kerned pairs in master Regular")
         self.assertEqual(fp.kerning_text(1, u"Regular", 1, 1),
@@ -1647,7 +1647,7 @@ class SummaryTests(unittest.TestCase):
             self.assertTrue(fp.MARGIN + fp.HEADER_ROOM <= y <= 841.89 - fp.MARGIN - fp.HEADER_ROOM)
 
     def test_the_language_coverage_closes_the_proof(self):
-        # The owner: "maybe language/script coverage should be moved at the very end, leaving only technical data
+        # The review: "maybe language/script coverage should be moved at the very end, leaving only technical data
         # and font info at the beginning before letters"
         coverage = fp.CoverageSummary([fp.ScriptSummary(u"Latin", u"x", entries(u"Lang", 3), [])], [], 0)
         proof = fp.build_proof([make_font()], fp.Options(["charset", "figures"]), [], u"2026-11-11",
@@ -1782,7 +1782,7 @@ class ScopeListTests(unittest.TestCase):
                             1000 - index, [u"a"]) for index in range(count)]
 
     def test_the_most_spoken_then_every_other_one(self):
-        # The owner, of More languages...: "Works, but why not have them reachable by default?"
+        # The review, of More languages...: "Works, but why not have them reachable by default?"
         covered = self.languages(60)
         rows = fp.scope_rows([u"LATIN", u"GREEK"], covered)
         texts = [text for text, _ in rows]
@@ -2078,7 +2078,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.proof.masters, [u"Regular", u"Bold"])
 
     def test_laying_out_shows_in_the_top_row_and_stops(self):
-        """Owner's image 180: the proof's laying out in the window's top row (ak.busy_*), stopped by the tools
+        """Image 180: the proof's laying out in the window's top row (ak.busy_*), stopped by the tools
         menu, an arrow, Close, or Esc: the pages shown stay those of before."""
         dialog = self.dialog(fake_font())
         dialog.languages = []
@@ -2222,7 +2222,7 @@ class DialogTests(unittest.TestCase):
                                   u"3   %s (Bold)" % text], "data beside data: parentheses, no dash, no period")
 
     def test_no_dash_or_dot_between_data(self):
-        # The owner's rule: data beside data goes in parentheses, not after an interpunct or an em dash
+        # The rule: data beside data goes in parentheses, not after an interpunct or an em dash
         import io
         with io.open(fp.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
             source = handle.read()
@@ -2250,7 +2250,7 @@ class DialogTests(unittest.TestCase):
         dialog.show_in_glyph_window()
 
     def test_the_no_font_line_is_one_line_and_hooks_to_the_next_font(self):
-        # Owner's image 278: "No font is open." and "Open one: its proof is laid out at once." on two lines
+        # Image 278: "No font is open." and "Open one: its proof is laid out at once." on two lines
         dialog = self.dialog(None)
         self.assertIn(u"hooks to the next font you open", fp.NO_FONT_LINE)
         self.assertIn(fp.NO_FONT_LINE, self.ak.ONE_LINE, "registered: its sentences share one line")
@@ -2258,7 +2258,7 @@ class DialogTests(unittest.TestCase):
         self.assertIsNone(dialog.package)
 
     def test_without_a_font_its_own_controls_are_grayed(self):
-        # Owner's image 282: every control showed usable before graying. Those Proof itself sets are grayed with
+        # Image 282: every control showed usable before graying. Those Proof itself sets are grayed with
         # no font (the shared no_font_states grays the rest), the summary's list too
         dialog = self.dialog(None)
         states = {}
@@ -2274,7 +2274,7 @@ class DialogTests(unittest.TestCase):
             self.assertIs(states.get(id(widget)), False)
 
     def test_with_no_font_the_masters_dropdown_says_n_a(self):
-        # Owner's images 289 and 290 (round 3's convention 22): a dropdown that lists the font's content was
+        # Images 289 and 290 (round 3's convention 22): a dropdown that lists the font's content was
         # empty with no font, or kept the closed font's masters and languages: a grayed "n/a" instead, and the
         # Proof dropdown back at its first choice
         dialog, made = self.remembering(None)
@@ -2295,7 +2295,7 @@ class DialogTests(unittest.TestCase):
         self.assertIsNotNone(dialog.scope_kept, "the choice kept for the next font")
 
     def test_the_top_line_names_the_font_and_counts_right(self):
-        # Owner's image 228: "0 kerned pairs"; the font and master in bold (ak.font_named), the sections' names
+        # Image 228: "0 kerned pairs"; the font and master in bold (ak.font_named), the sections' names
         # in italics, their pages in parentheses
         ak = self.ak
 
@@ -2321,7 +2321,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.font_named([u"Bold"]), u"<b>Fake Sans</b>, master <b>Bold</b> (of <b>2 masters</b>)")
 
     def test_the_wheel_turns_the_page_past_its_edges(self):
-        # (owner's image 347: the wheel at the top or the bottom of a page should go to the next page)
+        # (image 347: the wheel at the top or the bottom of a page should go to the next page)
         self.assertEqual(fp.page_turn(1, 0, 0, 900), -1, "turned up at the top: the page before")
         self.assertEqual(fp.page_turn(-1, 900, 0, 900), 1, "turned down at the bottom: the page after")
         self.assertEqual(fp.page_turn(-1, 300, 0, 900), 0, "in between: it scrolls")
@@ -2408,7 +2408,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(box.rows[2], fp.DARK_LABEL)
 
     def test_the_saved_line_links_to_the_folder_and_a_click_shows_the_pdf(self):
-        # Owner's image 375: the log reminds where the PDF went, its folder a link that shows it selected
+        # Image 375: the log reminds where the PDF went, its folder a link that shows it selected
         ak = self.ak
         path = os.path.join(HERE, u"Fake Sans-Regular-2026-11-19.pdf")
         folder = os.path.normpath(HERE)
@@ -2471,7 +2471,7 @@ class DialogTests(unittest.TestCase):
         return dialog, made.made
 
     def test_every_control_has_a_help_text_of_its_own(self):
-        # The owner found, in another tool, a control whose right-click help was its neighbor's
+        # Found in another tool: a control whose right-click help was its neighbor's
         dialog, made = self.remembering(fake_font())
         dialog.rebuild()
         controls = [widget for widget in made if widget.kind in CONTROLS]
@@ -2498,12 +2498,12 @@ class DialogTests(unittest.TestCase):
         self.assertIn(u".<br><br>\nClick this help's button", fp.HELP)
         for name, control in named.items():
             # The help is the control's: its caption (ak.caption) shows it on a right-click and grays with it,
-            # and has none of its own (the brief of the owner's images 216 and 281)
+            # and has none of its own (the brief of images 216 and 281)
             caption = dialog.captions[name]
             self.assertIs(getattr(caption, "buddy_of", None), control, "%s: its caption answers for it" % name)
             self.assertEqual(caption.whats, u"", name)
             self.assertEqual(caption.kind, "QLabel")
-            # The label form (owner's image 271): a noun, a colon, then the control
+            # The label form (image 271): a noun, a colon, then the control
             self.assertTrue(caption.text.endswith(u":") and caption.text[0].isupper(), caption.text)
         for box in (dialog.pairs_box, dialog.languages_box):
             self.assertTrue(all(row[0].isupper() for row in box.rows), "items capitalized after a label: %r" % box.rows)
@@ -2620,7 +2620,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(len([text for level, text in self.said if u"language data could not be read" in text]), 1)
 
     def test_summary_lists_shows_the_pages_it_changes(self):
-        # The owner: "Changing summary lists doesn't appear to change what is shown on the proof, unless I'm
+        # The review: "Changing summary lists doesn't appear to change what is shown on the proof, unless I'm
         # missing something." The lists close the proof (its Language coverage pages), and the page shown
         # stayed the one before: a choice there now shows the first of those pages
         glyphs = [FakeGlyph(fp.char_of(code), code, {u"Regular": FakeLayer(500)}) for code in LATIN_1_A]
@@ -2655,11 +2655,11 @@ class DialogTests(unittest.TestCase):
         dialog.summary_changed()
         self.assertEqual(self.written[-1], {"summary": False, "summary_languages": "reach", "collisions": False})
         self.assertTrue(dialog.defaults_changed())
-        # (the collision tick, off at first and kept the same way: owner's image 348)
+        # (the collision tick, off at first and kept the same way: image 348)
         dialog, made = self.remembering(fake_font())
         self.assertFalse(dialog.collisions_box.isChecked(), "off at first")
         self.assertEqual(dialog.collisions_box.text, fp.COLLISIONS_LABEL)
-        # (a word as the section ticks are, its tooltip saying what it does: owner's image 240)
+        # (a word as the section ticks are, its tooltip saying what it does: image 240)
         self.assertEqual(fp.COLLISIONS_LABEL, u"Collisions")
         self.assertTrue((u"%s" % dialog.collisions_box.whats).startswith(u"Draws colliding glyphs in red"))
         dialog.collisions_box.setChecked(True)
@@ -2682,7 +2682,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.languages_box.currentIndex, 0)
 
     def test_the_proof_dropdown_lists_every_language_the_most_spoken_first(self):
-        # The owner, of More languages...: "Works, but why not have them reachable by default?" Every
+        # The review, of More languages...: "Works, but why not have them reachable by default?" Every
         # dropdown now opens as a list of 24 rows, scrolled, and typing a name's first letters finds it.
         glyphs = [FakeGlyph(fp.char_of(code), code, {u"Regular": FakeLayer(500)}) for code in LATIN_1_A]
         dialog, made = self.remembering(FakePackage(glyphs, {}, (u"Regular",)))

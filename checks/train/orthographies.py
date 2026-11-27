@@ -2276,12 +2276,12 @@ def ranges_of(codes):
 
 
 # A Unicode block's set of more characters is not drawn whole by the bundled font: 256 until
-# 2026-11-14, when the owner lifted the bound on size; every block a set holds is drawn now (the
+# 2026-11-14, when the bound on size was lifted; every block a set holds is drawn now (the
 # largest, Mathematical Alphanumeric Symbols, has 996).
 BLOCK_FONT_LIMIT = 1100
 # A script's set is drawn whole when its own characters number at most this: every script but Han
-# (103,351 ideographs, more than a font's 65,535 glyphs) since 2026-11-14, when the owner lifted the
-# bound on size (it was 300: Hangul, Tangut, the hieroglyphs, cuneiform, Yi, and the larger alphabets
+# (103,351 ideographs, more than a font's 65,535 glyphs) since 2026-11-14, when the bound on
+# size was lifted (it was 300: Hangul, Tangut, the hieroglyphs, cuneiform, Yi, and the larger alphabets
 # were drawn only as far as an orthography or another set used them).
 SCRIPT_FONT_LIMIT = 12000
 UNIHAN_SETS = "unihan-"  # (character_sets.py's UNIHAN_PREFIX: the Han repertoires)

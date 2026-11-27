@@ -574,11 +574,11 @@ def flag_icon(mark):
 
 
 def note_text(family):
-    """The dialog's note, in rich text as the other tools say what they work on (the owner's image 171): the font's
+    """The dialog's note, in rich text as the other tools say what they work on (image 171): the font's
     family in bold, FontLab's command in italics."""
     name = (family or u"").replace(u"&", u"&amp;").replace(u"<", u"&lt;").replace(u">", u"&gt;")
     # (said as what the tool does, then why: the earlier note, "Overlay Fonts opened on a new font holding only these
-    # glyphs", had no verb and spoke of glyphs not chosen yet: the owner found it confusing, image 215)
+    # glyphs", had no verb and spoke of glyphs not chosen yet: it was found confusing, image 215)
     return (u"Copies the glyphs chosen below from %s into a new font, and opens <i>Overlay Fonts</i> on it with the "
             u"family's fonts overlaid. Each change then shows at once; on the whole font, FontLab takes seconds for each "
             u"change on a large font." % (u"<b>%s</b>" % name if name else u"the current font"))
@@ -602,7 +602,7 @@ def ask_glyphs(family, choices):
     dialog.setProperty(SCRIPT_WINDOW_PROP, True)
     # (FreeLab's own window, as the shared module marks its tools': dark mode then leaves its lists and dropdowns as
     # the dark palette draws them; taken for one of FontLab's, its flag list got an effect that drew each color twice,
-    # the owner's image 215)
+    # image 215)
     dialog.setProperty(FREELAB_WINDOW_PROP, -1)
     flags = int(dialog.windowFlags()) if callable(dialog.windowFlags) else int(dialog.windowFlags)
     dialog.setWindowFlags(Qt.WindowFlags(flags & ~int(Qt.WindowContextHelpButtonHint)))
@@ -636,7 +636,7 @@ def ask_glyphs(family, choices):
     ok.connect("clicked()", dialog.accept)
     cancel.connect("clicked()", dialog.reject)
 
-    def update_ok(*_args):  # (nothing typed and no flag chosen: nothing to overlay, the owner's image 172)
+    def update_ok(*_args):  # (nothing typed and no flag chosen: nothing to overlay, image 172)
         try:
             index = combo.currentIndex() if callable(combo.currentIndex) else combo.currentIndex
             ok.setEnabled(can_overlay(u"%s" % field.text, index))

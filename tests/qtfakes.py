@@ -634,7 +634,7 @@ def uninstall():
 
 
 # -- A window's Cancel button (ak.cancel_button), for each tool's tests: one set of fakes, as every tool shares
-# the function (the owner, 2026-11-24: "a 'Cancel' button left of 'Close' could be useful")
+# the function (the review of 2026-11-24: "a 'Cancel' button left of 'Close' could be useful")
 
 class CancelButton(object):
     """A QPushButton as ak.cancel_button uses one: its text, properties, tooltip, help, state, and slots kept."""

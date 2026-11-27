@@ -122,7 +122,7 @@ MAX_MAPPED_LIGHTNESS = 0.89  # HLS: below WHITE_L, so the ink mapping never take
 # inverted between the two grays, and keep_tint (0 to 1) of each channel's distance from the
 # mean is kept. Text smoothing lives in these colors (blends of text and background, ClearType's
 # colored edges), and only a linear mapping keeps a blend a blend; the perceptual mapping moved
-# edge pixels to the wrong brightness. The interface keeps no tint (gray, as the owner prefers,
+# edge pixels to the wrong brightness. The interface keeps no tint (gray, as preferred,
 # and no ClearType fringes); content keeps it all (muted anchors, nodes, marks).
 # (Asking Qt for grayscale text smoothing instead made GDI drop smoothing altogether at FontLab's
 # small UI sizes.)
@@ -151,18 +151,18 @@ ISLAND_CLASSES = frozenset((
     "YNibShape", "YStrokeShape", "YBrushStrokePreview",  # Brush panel previews
     # Fonts panel: its rows, painted light. Left to the look at start, it was found an island or ink depending on
     # what it showed then (the fonts still opening); as ink, its text came out doubled and the style dot's letter
-    # light (the owner's image 157, after a relaunch, 2026-11-26)
+    # light (image 157, after a relaunch, 2026-11-26)
     "CIconView",
     # Adjust Kerning's counters: a pill FontLab paints on the dialog's own dark ground; as ink, that ground was mapped
-    # light, the pill in a light square (the owner's image 197, 2026-11-27)
+    # light, the pill in a light square (image 197, 2026-11-27)
     "YRoundedLabel",
 ))
 # Classes always mapped as ink. Find Outline's two previews, left to the look at start, came out one an island (empty
-# when found: its outlines then black on the dark ground) and one ink (white outlines), side by side (the owner's
-# image 201, 2026-11-27).
+# when found: its outlines then black on the dark ground) and one ink (white outlines), side by side (image
+# 201, 2026-11-27).
 INK_CLASSES = frozenset(("YPathPreview",))
 # Web pages FontLab shows as they come (Software Update's news, FontLab's own HTML with its colors set for white paper:
-# blue and red banners, dark text on them). Mapped as ink, they came out garbled (the owner's image 203, 2026-11-27):
+# blue and red banners, dark text on them). Mapped as ink, they came out garbled (image 203, 2026-11-27):
 # their HTML is recolored instead, as a stylesheet is (see _show_page).
 PAGE_NAMES = frozenset((("FvUpdateWindow", "QTextBrowser", "textBrowser"),))
 ISLAND_NAMES = frozenset((
@@ -179,10 +179,10 @@ ISLAND_NAMES = frozenset((
 # had the dark palette's light text, which the island's mapping then turned as dark as the list).
 ISLAND_TEXT = {("YSelectableTree", "itemsList"): u"QTreeWidget{color:#000000;}"}
 # The tool bar's checked tool: FontLab draws its blue icon on a light chip, and mapped with the bar, the icon's
-# edges came out in light dots and gray (the owner, 2026-11-25: "selected tools look weird"). Over the bar's
+# edges came out in light dots and gray (the review of 2026-11-25: "selected tools look weird"). Over the bar's
 # mapping, dark mode paints a dark chip of its own and the icon FontLab gives a checked tool, blue, as it is
 # (draw_checked_tools). Not through the bar's stylesheet: a chip given there had edges, and moved the slant
-# tool's icon up as it was checked (the owner, the same evening). Only the bar's tool buttons, which have its
+# tool's icon up as it was checked (the review, the same evening). Only the bar's tool buttons, which have its
 # margin; the round buttons below have their own look.
 CHECKED_TOOL_CHIP = "#3a3c40"
 CHECKED_TOOL_ICON_SPREAD = 80  # a checked tool's icon pixel: strongly colored (FontLab's blue)
@@ -209,13 +209,13 @@ def _dark_box(image):
 
 # A document tab's close cross: FontLab draws it, while the mouse is over the tab, as a character in the application
 # palette's text color, taken when the palette changes, not from the tab bar's own: the dark palette's light gray,
-# on the tabs' white, came out nearly the tab's dark (the owner, November 25). A cross of dark mode's own, drawn where
+# on the tabs' white, came out nearly the tab's dark (the review of November 25). A cross of dark mode's own, drawn where
 # FontLab's was found, lagged FontLab's fading and its highlight under the mouse, and came out halved or missing (the
-# owner's video, the same evening). So FontLab's own drawing is kept and made stronger: over the bar's mapping, each
+# video, the same evening). So FontLab's own drawing is kept and made stronger: over the bar's mapping, each
 # pixel of a tab's cross box gets the light color at the share of the way it goes from its tab's ground to the
 # cross' color (draw_tab_crosses): the shape, its place, its fading, all FontLab's.
 TAB_CROSS_COLOR = (212, 212, 212)  # the mouse on the cross
-TAB_CROSS_DIM = (140, 140, 140)  # the mouse elsewhere on the tab: dimmer, as the owner liked FontLab's
+TAB_CROSS_DIM = (140, 140, 140)  # the mouse elsewhere on the tab: dimmer, as FontLab's was liked
 TAB_CROSS_HIT = 7  # pixels from the cross' center: the mouse on it
 TAB_CROSS_CENTER = 13  # pixels from a tab's left edge to its cross' center, as FontLab draws it
 TAB_CROSS_PRESSED = (88, 88, 90)  # held down: a lighter rounded square under the cross
@@ -291,7 +291,7 @@ SKIP_CLASSES = ("ColorPickerItem", "ColorPickerButton", "QtColorPicker", "QDeskt
 SKIP_CLASS_WORDS = ("ColorSource", "OpacityBar", "Eyedropper")
 SWATCH_NAME_PREFIXES = ("flag",)
 # The flag bar's buttons that hold no color: the clear-flag cross and the two arrows beside the swatches, black icons
-# left black on the dark bar with the swatches (the owner's image 216, 2026-11-27: "only the cross, not its frame").
+# left black on the dark bar with the swatches (image 216, 2026-11-27: "only the cross, not its frame").
 # Left alone as the swatches are, with their icons mapped: processed as any button, the cross's face was found light,
 # made an island, and Qt drew it white, which the hooks do not map.
 FLAG_TOOL_NAMES = ("flagNone", "flagUp", "flagDown")
@@ -361,7 +361,7 @@ def checker_rect(image, rect, max_x, max_y):
 def swatch_rect(image, x, y, max_x):
     """The rectangle of the color at (x, y) in a QImage, found along its row (up to max_x) and its column: a picker's
     whole swatch. Kept as drawn: a picker painting its swatch wider than the square (Overlay Fonts', 21 by 18 pixels)
-    had its edges mapped, and a black pick showed in a white frame (the owner's recording, November 26); colored picks
+    had its edges mapped, and a black pick showed in a white frame (recording, November 26); colored picks
     kept their edges by their chroma only."""
     QRect = _core("QRect")
     color = image.pixel(x, y)
@@ -408,7 +408,7 @@ PICKER_DARK_RING = 0x80  # the frame's pixels darker than this in every channel 
 def dark_ring_image(image, rect):
     """A transparent QImage the size of `image` holding the dark pixels of the one-pixel ring around `rect` (dark mode's
     #55555a frame, PICKER_FRAME), to draw as they are: mapped again, they made a faint light edge that other color
-    slots do not have (the owner's image 153). A picker's own light frame is left out (mapped), or None if none."""
+    slots do not have (image 153). A picker's own light frame is left out (mapped), or None if none."""
     QImage = _gui("QImage")
     ring = QImage(image.width(), image.height(), QImage.Format_ARGB32)
     ring.fill(0)
@@ -425,8 +425,8 @@ def dark_ring_image(image, rect):
                 found = True
     return ring if found else None
 PICKER_KEEP_CHROMA = 48  # around the swatch's inside, pixels this colored keep their color
-# Color pickers and mark-color buttons keep their look, the white "no color" slot included (the owner
-# preferred that to a half-dark frame).
+# Color pickers and mark-color buttons keep their look, the white "no color" slot included (that was
+# preferred to a half-dark frame).
 
 # Panels (YPanel) paint their whole background a fixed #edeeef, which shows wherever their
 # content paints none: beside tabs, behind scroll bars, under translucent labels. Their tab
@@ -486,9 +486,9 @@ NATIVE_INK_PROP = "freelabNativeInk"  # a list whose dark pens the native engine
 # effect. Only lists whose delegates leave the drawing to Qt (Metrics' sets colors only); a delegate
 # of FontLab's that paints its rows (FontAudit's badges, the Elements tree) keeps the ink effect.
 # LanguagesDelegate: the preferences' FontAudit list (and Font Info's languages): its checked boxes are blue with a white tick,
-# which the ink effect turned dark (the owner's image 202, 2026-11-27); its rows are text Qt draws.
+# which the ink effect turned dark (image 202, 2026-11-27); its rows are text Qt draws.
 # ScriptListDelegate: the Scripting panel's list, whose names a partial repaint mapped on its own came out half dark
-# (the owner's image 200, 2026-11-27).
+# (image 200, 2026-11-27).
 # Delegates that draw their rows' check boxes as small pictures of FontLab's (a blue box, a light-mode box with notched
 # corners): the app's own check box is drawn over each ("checks" overlay: draw_item_checks)
 CHECK_PICTURE_DELEGATES = ("LanguagesDelegate",)
@@ -504,7 +504,7 @@ SCRIPT_ISLAND_CLASSES = ("YContinueWidget",)
 # widget (a search field's line edit keeps its placeholder's ink), not hooked.
 # (Not QAbstractScrollArea: a list draws its rows on its viewport, and FontLab's rows carry light backgrounds of their own
 # that no stylesheet reaches; let go of by the hooks, the History panel's rows stood white, "-Origin-" and its steps
-# on light cyan: the owner's image 213, 2026-11-27.)
+# on light cyan: image 213, 2026-11-27.)
 QT_DRAWN_BASES = ("QLineEdit", "QAbstractButton", "QAbstractSpinBox", "QComboBox", "QLabel", "QAbstractSlider", "QTabBar")
 PICKED_PROP = "freelabPicked"  # a hooked island showing colors the user picked, drawn as they are (see PICKED_WIDGETS)
 # A container whose own painting the native engine maps, its children left as they are (not an island: see
@@ -710,7 +710,7 @@ def _help_palette(app, palette):
     """What's This help given a palette of its own, the dark one with its shadow in the frame's color. Qt
     draws that window's frame in the tooltip text color, then dots in the shadow color over the frame's
     right and bottom sides: unseen on a light tooltip's black frame, a dashed edge on a dark one's light
-    frame (the owner, November 23, image 22; read from a live one, November 24: #0e0e0f and #e0e0e0 by
+    frame (the review of November 23, image 22; read from a live one, November 24: #0e0e0f and #e0e0e0 by
     turns along the last row and column). Never raises."""
     try:
         QPalette = _gui("QPalette")
@@ -849,7 +849,7 @@ def _gray_byte(l):
 def SUBPIXEL_PAPER_OKL():
     """The lightness TrueType Hinting's preview maps its white paper to: the canvas' own ground (the workspace color
     dark mode sets, mapped), not the interface's darkest. Mapped to that, the preview stood in a darker box on the
-    canvas (the owner's images 183 and 189, 2026-11-26)."""
+    canvas (images 183 and 189, 2026-11-26)."""
     return oklab(*map_rgb(*_workspace_rgb()))[0]
 
 
@@ -957,7 +957,7 @@ _TEXT_COLOR_RE = re.compile(r"(?<![-\w])(color\s*:\s*)([^;}]+)", re.I)
 def _dim_disabled(sheet):
     """A sheet's :disabled rules given the dark palette's disabled text for their color. FontLab grays a disabled
     field, label, or button with a light gray (#a0a0a0, #b0b0b0), faint on white; kept on dark, it stood nearly as
-    bright as enabled text, and a field that takes no typing looked like one that does (the owner's images 222 to 231,
+    bright as enabled text, and a field that takes no typing looked like one that does (images 222 to 231,
     2026-11-27)."""
     gray = _disabled_text()
 
@@ -1176,21 +1176,21 @@ def band_text_image(drawn, mapped):
 
 
 # Overlay Fonts' window (FontLab's ActionOverlay): each font's sample rows and preview in the color picked for it.
-# Mapped, the colors changed (a dark red came out pink) and their edges broke into dots (the owner, November 25);
+# Mapped, the colors changed (a dark red came out pink) and their edges broke into dots (the review of November 25);
 # its widgets' colored text is drawn again in its own colors over the mapping (reground_image).
 REGROUND_WINDOWS = ("ActionOverlay",)
 # Of those, the widgets that show the samples (the list's rows, by its viewport, and the preview): there, a light color
-# picked is text too, and a sample FontLab drew on a dark ground is kept as drawn (the owner, November 26: #e7e3d7 came
+# picked is text too, and a sample FontLab drew on a dark ground is kept as drawn (the review of November 26: #e7e3d7 came
 # out hollow in the list and dark olive in the preview). Not the window's other widgets, whose light grays are
 # borders and fields.
 REGROUND_LIGHT_WIDGETS = ("FontPreviewWidget", "ActionOverlayList")  # (the class, or its parent's)
 # Under the native engine, the same widgets show the colors as picked: the hooks map their grounds and FontLab's own
-# grays, and leave the samples' fills and pictures as they are (the owner, November 26, image 152: a black pick shown
+# grays, and leave the samples' fills and pictures as they are (the review of November 26, image 152: a black pick shown
 # white "feels like overreach"; images 150 and 151: white picks, white on the rows' white paper, came out hollow or not
 # at all). The list's rows are FontLab's own painting, so its viewport is hooked too, not inked.
 PICKED_WIDGETS = ("FontPreviewWidget", "YColorBar", "YOpacityBar")
 # The color field and the opacity bar, left as FontLab paints them, kept its light look's sunken edge: a #808080 line
-# along their top and left, light on the dark window (the owner's image 154). Hooked as picked surfaces, their pictures
+# along their top and left, light on the dark window (image 154). Hooked as picked surfaces, their pictures
 # (the colors, the checkerboard) stay as they are and that line is drawn in dark mode's frame color.
 PICKED_BARS = ("YColorBar", "YOpacityBar")
 PICKED_LISTS = ("ActionOverlayList",)  # (by their viewports)
@@ -2233,7 +2233,7 @@ def _list_items(widget):
 LOGO_ROWS_MAX = 200  # visible rows looked at per paint
 LOGO_MAX_ASPECT = 2  # wider than this many times its height, a list's picture is no logo: a line of text, mapped
 # with its row (drawn from its icon in a logo's square, Overlay Fonts' sample text came out dark with light
-# edges over its first letters: the owner, November 24)
+# edges over its first letters: the review of November 24)
 LOGO_MIN_SIDE = 24  # a list icon drawn this large or larger is a picture (Export Profiles' formats are 32 px)
 
 
@@ -2333,7 +2333,7 @@ def _logo_icon(icon, state):
     if mapped:
         # dark already: its own smoothing, over the dark row. A small one too when it is a tile (the Font window's
         # script icons, light letters on a dark square): mapped again with the row, some tiles passed for dark
-        # glyph icons and came out light gray under their light letters (Bengali, Kannada: the owner, 2026-11-25)
+        # glyph icons and came out light gray under their light letters (Bengali, Kannada: the review of 2026-11-25)
         return icon if large or _icon_is_tile(icon) else False
     if icon_is_swatch(icon):
         return icon  # as FontLab draws it
@@ -2412,7 +2412,7 @@ def _swap_item_icons(widget):
             item.setIcon(new)
     if record.get("item_icons") and "icons_timer" not in record:
         # FontLab gives a list's items their own icons again as one is selected (Font Info's pages): its Zones icon's
-        # white band flashed until a sweep came by (the owner's images 219 and 220, 2026-11-27). Mapped again at once.
+        # white band flashed until a sweep came by (images 219 and 220, 2026-11-27). Mapped again at once.
         try:
             timer = _core("QTimer")(widget)  # (its parent the list: Qt deletes it with it)
             timer.setSingleShot(True)
@@ -2425,7 +2425,7 @@ def _swap_item_icons(widget):
             _note_error("item icons", exc)
     if tree:
         # Its header's icons too: Font Info's masters and instances lists showed theirs black on the dark header (the
-        # owner's images 217 and 218, 2026-11-27)
+        # images 217 and 218, 2026-11-27)
         header = widget.headerItem() if hasattr(widget, "headerItem") else None
         for column in range(header.columnCount() if header is not None else 0):
             new = _mapped_item_icon(header.icon(column))
@@ -2530,11 +2530,11 @@ INK_VIEW_PARENTS = ("QAbstractItemView", "QTextEdit", "QPlainTextEdit", "QtnProp
 # gets grayscale smoothing; the ink mapping leaves light text as it is.
 GRAYSCALE_TEXT_CLASSES = ("YSelector",)
 # Tables of small figures FontLab draws with ClearType on a light ground: mapped as ink, their digits kept
-# orange and blue fringes on the dark cells (the Glyph window's metrics table: the owner, November 24). Drawn
+# orange and blue fringes on the dark cells (the Glyph window's metrics table: the review of November 24). Drawn
 # in grays before the mapping, as fields are.
 GRAY_INK_CLASSES = ("MetricsTable",)
 # (a slider too: Fusion draws its groove and handle from the dark palette, and taken for ink, Autotrace's
-# handles came out light with ragged corners: the owner, November 24; not seen again here, Autotrace needing
+# handles came out light with ragged corners: the review of November 24; not seen again here, Autotrace needing
 # a picture in the glyph)
 STYLE_DRAWN_BUTTONS = ("QRadioButton", "QCheckBox", "QPushButton", "QSlider")  # never ink by render detection
 # Bars dark mode's stylesheet already darkens inside a window drawn through the ink effect: kept
@@ -2659,13 +2659,13 @@ def _effect_classes():
 
             def draw(self, painter):
                 # (timed: where a slow repaint's time goes is read from _paint_times when one is reported,
-                # as the stall the owner saw when FontLab's blue drop highlight came up, November 24)
+                # as the stall seen when FontLab's blue drop highlight came up, November 24)
                 began = time.time()
                 depth = _DRAWING[0]
                 if getattr(self, "freelab_drawing", False) or depth >= MAX_DRAW_DEPTH:
                     # Drawn again from inside its own drawing (an event loop run during a paint), or nested past
                     # any real nesting of effects: drawn as it is. Mapped, each level started the next, and the
-                    # stack ran out as a color was dragged in Overlay Fonts (the owner, 2026-11-25: FontLab died
+                    # stack ran out as a color was dragged in Overlay Fonts (the review of 2026-11-25: FontLab died
                     # after a few seconds; the stack held hundreds of nested message dispatches).
                     try:
                         self.drawSource(painter)
@@ -2692,7 +2692,7 @@ def _effect_classes():
                         if not (hold[0] == MODAL_HOLD and held_down and box.width() * box.height() >= MODAL_OWN_PIXELS
                                 and not _typing_area(self.freelab_widget)):
                             # (a picture held for an earlier press let go: shown at the next press, it was the dialog
-                            # as it was then, Font Info's Font Lib text gone while the mouse was held, the owner's
+                            # as it was then, Font Info's Font Lib text gone while the mouse was held, the
                             # video of 2026-11-27)
                             kept = _held().get(id(self))
                             if kept is not None and kept[0] and kept[0][0] == MODAL_OWN_HOLD:
@@ -2750,14 +2750,14 @@ def _effect_classes():
                                 inside = inside.united(swatch_rect(image, probe_x, probe_y, reach))
                                 # the swatch's own color when it is flat; a translucent color shows a checkerboard,
                                 # past the square looked at (a wider swatch: mapped, a gray band at its right and bottom)
-                                # and whose border took one square's color (the owner's images 185 and 186): the whole
+                                # and whose border took one square's color (images 185 and 186): the whole
                                 # checkerboard is kept, its edge pixels carried out, as in light mode
                                 flat = swatch_flat(image, inside)
                                 if not flat:
                                     inside = checker_rect(image, inside, reach, pixmap.height())
                                 # Its rounded corners, blended by FontLab into its light frame: kept as drawn, and
                                 # carried out to its edge, two lighter (or darker) pixels at each corner on the dark
-                                # frame (the owner's image 236, 2026-11-27). Squared, in the picture all of it is
+                                # frame (image 236, 2026-11-27). Squared, in the picture all of it is
                                 # drawn from.
                                 for x, y, value in swatch_corner_pixels(image, inside):
                                     image.setPixel(x, y, value)
@@ -2776,7 +2776,7 @@ def _effect_classes():
                         if border is not None:
                             # The swatch's one-pixel border, a blend of its color and the light frame, kept as a
                             # color by the pass above: a lighter or off-colored line around every color slot on the
-                            # dark frame (the owner's images 180 and 181, 2026-11-26). Drawn in the swatch's own color:
+                            # dark frame (images 180 and 181, 2026-11-26). Drawn in the swatch's own color:
                             # a crisp edge on the dark frame.
                             rect, color = border
                             edge = rect.adjusted(-1, -1, 1, 1).translated(offset)
@@ -2866,7 +2866,7 @@ def _effect_classes():
                     # A field or a selector drawn light on a dark ground already (its stylesheet's, or the dark
                     # palette's): grayed, never mapped. Mapped, so small a picture has no ground to judge by,
                     # and its text came out doubled and heavy (Actions' "Glyph" and "Baseline", a unit beside
-                    # a field, text typed in the Glyph window's small fields: the owner, November 24).
+                    # a field, text typed in the Glyph window's small fields: the review of November 24).
                     plain = gray and kind == "ink" and dark_ground(pixmap)
                     draw_mapped(painter, mapped_from, offset, whole, 0.0, None, -1.0, self.freelab_keep_tint, None, 0.0, 0,
                                 anchors, SUBPIXEL_PAPER_OKL() if kind == "subpixel" else None, gray,
@@ -3001,7 +3001,7 @@ def _effect_classes():
         def without_kept(pixmap, areas):
             """A copy of pixmap with areas cleared to transparent: the mapping passes over them at once, and
             reads no colors there (the Font window's ink effect mapped its whole cell chart, an island of its
-            own drawn over it after: 2 s with overlaid fonts' colored glyphs, the owner, 2026-11-25)."""
+            own drawn over it after: 2 s with overlaid fonts' colored glyphs, the review of 2026-11-25)."""
             QPainter = _gui("QPainter")
             copy = QPixmap_copy(pixmap)
             painter = QPainter(copy)
@@ -3039,7 +3039,7 @@ def _effect_classes():
                     # A selector or a field with an effect of its own, drawn on nothing, where its parent
                     # paints a light ground under it: left to the parent's mapping. Drawn as it is, the
                     # ground came with it: a white square in the corner of the Glyph window's metrics table
-                    # (the owner, November 24). On a ground dark already (the Font window's bar) it is kept.
+                    # (the review of November 24). On a ground dark already (the Font window's bar) it is kept.
                     continue
                 painter.drawPixmap(area.topLeft(), pixmap, local)
 
@@ -3059,7 +3059,7 @@ def _effect_classes():
                     if not button.isChecked():
                         # where FontLab draws the icon unchecked, found once per tool, a few a paint: FontLab draws
                         # a checked icon elsewhere for some (the slant tool's, a pixel up, in its light look too:
-                        # the owner, November 25), and it is drawn checked where it was unchecked
+                        # the review of November 25), and it is drawn checked where it was unchecked
                         if id(button) not in unchecked_at and found < CHECKED_TOOL_FIND_PER_PAINT:
                             found += 1
                             corner = button.mapTo(owner, QPoint(0, 0))
@@ -3086,7 +3086,7 @@ def _effect_classes():
                             y = corner.y() + offset.y() + (height - picture.height()) // 2
                             # where FontLab drew it: its colored pixels in the button as painted (the slant tool's
                             # picture, 16 by 17, is scaled and placed a pixel off from plain centering, so the icon
-                            # moved as it was checked: the owner, November 25)
+                            # moved as it was checked: the review of November 25)
                             drawn = _colored_box(pixmap.copy(QRect(corner.x(), corner.y(), width, height)).toImage())
                             before = unchecked_at.get(id(button))
                             if before is not None and drawn is not None and abs(before[0] - drawn[0]) <= 2 \
@@ -3105,7 +3105,7 @@ def _effect_classes():
         def picker_source(effect, pixmap):
             """The picture a color picker's effect maps: while its popup is open, the one it drew before. Open, FontLab
             draws its arrow's side with a light face and a white arrow, which mapped came out a gray face with a dark
-            arrow (the owner's images 227 and 228, 2026-11-27: "dropdown arrows reinvert themselves"); its color only
+            arrow (images 227 and 228, 2026-11-27: "dropdown arrows reinvert themselves"); its color only
             changes once the popup closes."""
             try:
                 widget = effect.freelab_widget
@@ -3123,7 +3123,7 @@ def _effect_classes():
         def draw_item_checks(effect, painter, pixmap, offset):
             """Each checkable row's check box drawn as the application draws its own (a QCheckBox's), in place of
             the small picture FontLab's delegate draws: its blue box and the light-mode box's notched corners stood
-            apart from every other check box (the owner's images 211 and 235, 2026-11-27: "you see how janky it
+            apart from every other check box (images 211 and 235, 2026-11-27: "you see how janky it
             looks"). The picture's place in its row is measured once for each row's left edge and height (a tree's
             deeper row starts further right, as Qt's visualItemRect gives it; a row of another height, after a change of
             font or style, places it otherwise: one measure for every row, kept from the first, put the check boxes
@@ -3272,7 +3272,7 @@ def _effect_classes():
                     try:
                         painter.translate(offset.x() + cx, offset.y() + cy)
                         if pressed:
-                            # held down: a lighter rounded square, and the cross a little smaller (the owner,
+                            # held down: a lighter rounded square, and the cross a little smaller (the review of
                             # November 25: the feedback FontLab's own gives as the cross is clicked)
                             painter.setRenderHint(QPainter.Antialiasing, True)
                             painter.setPen(Qt.NoPen)
@@ -3355,13 +3355,13 @@ def _paint_hold():
 
 
 # While a menu or a dropdown list is open, the widgets under it are held too: FontLab repaints its windows as
-# the mouse moves over a menu's entries, and each repaint drew and mapped a Font window anew (the owner,
+# the mouse moves over a menu's entries, and each repaint drew and mapped a Font window anew (the review of
 # November 24: with many cells selected, "menus and such laggy and mostly unresponsive"). The popup's own
 # widgets are never held: its rows change as the mouse moves.
 POPUP_HOLD = "popup"
 # While a modal dialog is open, the windows behind it cannot be scrolled or clicked, and FontLab repaints them as
 # the dialog changes what they show: dragging a color in Overlay Fonts repainted the Font window's cells at each
-# step, each drawn by FontLab and mapped anew, and FontLab stopped answering, then died (the owner, 2026-11-25;
+# step, each drawn by FontLab and mapped anew, and FontLab stopped answering, then died (the review of 2026-11-25;
 # laggy with dark mode off too, less). Their large widgets are held as for a menu, and drawn again at most every
 # MODAL_REFRESH seconds, and once after the last change, so they still follow the dialog. The dialog's own
 # widgets are painted as ever.
@@ -3423,7 +3423,7 @@ def _held_picture(effect, hold, rect, paint):
     now = time.time()
     if refresh is not None and _mouse_held():
         # A color dragged: not drawn anew until the mouse is let go. Drawn every 0.15 s, FontLab's drag still
-        # nested its message handling inside the paints until it stopped answering and died (the owner, 2026-11-25;
+        # nested its message handling inside the paints until it stopped answering and died (the review of 2026-11-25;
         # it died once with dark mode off too): no widget of FontLab's is drawn for the effects during the drag.
         refresh = float("inf")
     if kept is None or kept[0] != hold or kept[1] != rect or (refresh is not None and now - kept[4] >= refresh):
@@ -3485,7 +3485,7 @@ def _release_held():
 # A large widget's repaint whose pixels are what they were at its last repaint (FontLab repaints its canvas, its
 # cell chart, and its docks as a menu opens and closes, as the window is activated, as focus moves) is drawn
 # from the mapping kept then: mapping the 1702 by 1134 glyph canvas took 50 ms each time, against 7 ms for
-# FontLab to paint it, and opening a menu took 65 ms where light mode takes 13 (the owner, 2026-11-25: menus
+# FontLab to paint it, and opening a menu took 65 ms where light mode takes 13 (the review of 2026-11-25: menus
 # lag). Small widgets too: a panel's repaint remapped each of its hundreds of small ink effects (the main
 # window's repaint: 74 ms, against 16 in light mode). Two images compare in about 1 ms for the canvas, far less
 # for a button. Kept up to MAP_CACHE_PIXELS pixels (each kept twice, as drawn and as mapped), the least
@@ -3947,7 +3947,7 @@ def _light_field_text(widget):
             originals[name] = QColor(color)
             if name == "Disabled":
                 # (dim, as the palette's disabled text: mapped light, a field that takes no typing looked like one
-                # that does, the owner's images 222 to 231)
+                # that does, images 222 to 231)
                 mapped = QColor(_disabled_text())
             else:
                 r, g, b = map_rgb(color.red(), color.green(), color.blue())
@@ -4029,7 +4029,7 @@ def recolor_html(html):
 
 
 def _show_page(widget):
-    """A page turned dark (PAGE_NAMES): its HTML recolored as a stylesheet is, its effect taken out. The owner, of a
+    """A page turned dark (PAGE_NAMES): its HTML recolored as a stylesheet is, its effect taken out. The review, of a
     light page in the dark window (image 204): "no way to remove the white base without affecting the text badly?"
     Mapping its pixels garbled the text on its banners (image 203); its own colors, recolored, keep it clean."""
     browser = widget.parentWidget() if _prop(widget, "objectName") == "qt_scrollarea_viewport" else widget
@@ -4041,7 +4041,7 @@ def _show_page(widget):
     page = _record(browser)
     if "page_slot" not in page:
         # FontLab sets the page's HTML after the window shows (fetched from its server): it stood white for ten seconds
-        # and more, until a sweep came by (the owner's images 208 and 210, 2026-11-27). Its every new text is turned
+        # and more, until a sweep came by (images 208 and 210, 2026-11-27). Its every new text is turned
         # dark as it comes (our own setHtml comes back here, finds its dark HTML, and does nothing).
         def changed(browser=browser):
             try:
@@ -4120,7 +4120,7 @@ def _colored_part(image, area):
 
 # A text button FontLab paints itself, light whatever its stylesheet says (Replace Element's Elements and
 # Glyphs: white, pale blue when checked), with its text in the color the stylesheet gives, which dark mode
-# has made light: light on light, and mapped, dark on dark (the owner, November 24: "two bad buttons"). Its
+# has made light: light on light, and mapped, dark on dark (the review of November 24: "two bad buttons"). Its
 # text is made dark by a rule of its own, so that it is the light button FontLab meant, and it is mapped
 # whole, as an island.
 BUTTON_INK = u"\nQToolButton{color:#000000;}"
@@ -4129,7 +4129,7 @@ BUTTON_INK = u"\nQToolButton{color:#000000;}"
 # Icon buttons FontLab paints itself, white, and gray when checked (the Font window's five view buttons). Their
 # icons were mapped for a dark face, the buttons kept as drawn for their white marks, and so they stood white
 # in the dark bar, or dark once something else mapped them: "the only buttons that still keep stale painting"
-# (the owner, November 24). One found white marks its siblings too: a checked one is gray when looked at.
+# (the review of November 24). One found white marks its siblings too: a checked one is gray when looked at.
 LIGHT_FACE_PROP = "freelab_light_face"
 LIGHT_FACE_SHARE = 0.6  # of its opaque pixels near white: a white face (a checked one, gray under a white icon: 0.37)
 
@@ -4178,7 +4178,7 @@ def _own_sheet_ground(widget):
 
 # Text Qt draws itself, outside any effect, gets Windows' ClearType: each stroke's sides in orange and blue,
 # meant for dark text on light. On the dark interface they show as colored edges around every word of the
-# menu bar, the buttons, the labels (the owner's most frequent complaint, November 24 and 25; counted with
+# menu bar, the buttons, the labels (the most frequent complaint, November 24 and 25; counted with
 # tools/find_fringes.py: 2,878 pairs of opposite hues on the main window, 807 once the menu bar and buttons
 # went through an effect). Drawn through an effect, text gets grayscale smoothing, and the defringe effect
 # makes what ClearType is left gray. Not a widget that paints a light face of its own (a tool button FontLab
@@ -4266,7 +4266,7 @@ def _in_freelab_window(widget):
         if window is not None and _class_name(window) == "QComboBoxPrivateContainer" and window.parentWidget() is not None:
             # A dropdown's list, a window of its own: the dialog of its dropdown's. Taken for one of FontLab's, its
             # list got the ink effect, which drew Quick Overlay's flag colors twice, a bar beside each square (the
-            # owner's image 215, 2026-11-27)
+            # image 215, 2026-11-27)
             return _in_freelab_window(window.parentWidget())
         return window is not None and window.property(FREELAB_WINDOW_PROP) is not None
     except Exception:
@@ -4380,14 +4380,14 @@ def _in_fontlab_view(widget):
 
 # FontLab's cursors are left as FontLab has them, its black arrow and tools with their white glow, whatever the
 # canvas. Dark mode once made copies of all of them for the dark canvas (the glow made a shadow, the arrow turned white
-# with black edges), which looked inverted and bad (the owner, 2026-11-26: "they should probably be safeguarded to
+# with black edges), which looked inverted and bad (the review of 2026-11-26: "they should probably be safeguarded to
 # never be altered"); only the three of CURSOR_TREATMENTS are replaced, at the canvas' cursor change
 # (CURSOR_CHANGE_EVENT), and FontLab's own comes back as dark mode switches off.
 CURSOR_CHANGE_EVENT = 183  # QEvent::CursorChange
 BITMAP_CURSOR = 24  # Qt::BitmapCursor: a cursor made of a picture
 
 
-# Three exceptions, at the owner's request (2026-11-26): the Contour and Eraser tools' cursors carry a wide white
+# Three exceptions, on request (2026-11-26): the Contour and Eraser tools' cursors carry a wide white
 # glow that reads as a jarring light halo on the dark canvas, and the TrueType Hinting tool's white outline is rough.
 # Each is known by its pixels (the hash of FontLab's own picture, 0xAARRGGBB, row by row), so no other cursor is ever
 # touched: "shadow" takes the light glow out and gives the shape a soft standard drop shadow; "invert" turns the
@@ -4396,7 +4396,7 @@ BITMAP_CURSOR = 24  # Qt::BitmapCursor: a cursor made of a picture
 CURSOR_TREATMENTS = {
     "b06ff714172f45d24fc438352410e791": "shadow",  # Contour (32 px)
     # TrueType Hinting (32 px): a drawing of the arrow, which the Element tool shows as the system's own; alike in light
-    # mode, the system's looked substantially better on the dark canvas (the owner, 2026-11-27): it takes its place
+    # mode, the system's looked substantially better on the dark canvas (the review of 2026-11-27): it takes its place
     "207990417a87cfdce111db75d3a21776": "arrow",
 }
 CURSOR_SHADOW_ALPHA = 0.55  # the drop shadow at its densest
@@ -4431,7 +4431,7 @@ def treated_cursor_pixels(pixels, width, height, treatment):
         if a == 255 or (a and not light(v)):
             shape[k] = a / 255.0
     # Its edge where the glow was: opaque grays, the black outline smoothed over the white glow, a light fringe once the
-    # glow is gone (the owner's note on the Contour cursor, 2026-11-27). Each is black at the coverage its gray shows.
+    # glow is gone (the note on the Contour cursor, 2026-11-27). Each is black at the coverage its gray shows.
     pixels = list(pixels)
     edge = []
     for y in range(height):
@@ -4542,7 +4542,7 @@ def _restore_cursor(widget, record):
 
 # A canvas' pictures (a scan or a screenshot placed in a glyph, to trace or to compare) are pixels like the rest
 # of the canvas, and the canvas is mapped whole: a picture came out as its negative, and whatever FontLab draws
-# over it with it (the owner, November 25: "inverted images also mess up with other stuff"). FontLab says where
+# over it with it (the review of November 25: "inverted images also mess up with other stuff"). FontLab says where
 # each picture is: an element whose image is not null, in the shown layer of each glyph of the canvas' text;
 # the element's transform, the glyph's place in its line, and the canvas' own transform take it to the screen.
 # Its area is drawn as it is, over the mapping, with what FontLab draws on it in its light colors.
@@ -4606,7 +4606,7 @@ def _frame_picker(widget):
         return
     # (declarations with no selector, as Overlay Fonts' "color: lightGray;": followed by a rule, Qt reads
     # neither, the picker was drawn as a plain button from the dark palette, and its effect turned that light:
-    # the owner, November 24, "the opacity dropdown still being white")
+    # the review of November 24, "the opacity dropdown still being white")
     framed = (u"QtColorPicker{%s}" % own if own.strip() and u"{" not in own else own) + PICKER_FRAME
     widget.setProperty(SHEET_PROP, own)
     widget.setProperty(NOTED_PROP, None)
@@ -4770,7 +4770,7 @@ FREELAB_WINDOW_PROP = "freelab_window"  # on a FreeLab tool's window (the shared
 
 def _freelab_caption(widget):
     """A label of a FreeLab tool's window: drawn from the palette, so it has no fixed dark ink to map. One
-    was taken for ink all the same (Font Builder's Ink darker than:, the owner, November 24: read live, it
+    was taken for ink all the same (Font Builder's Ink darker than:, the review of November 24: read live, it
     had the ink effect and the caption beside it had none), and text drawn through an effect loses
     ClearType: it looked blurrier than its neighbors. Never raises."""
     try:
@@ -4989,7 +4989,7 @@ def _chart_fill_rule(widget):
     """The stylesheet rule that fills a cell chart in FontLab's light window color (which the chart's island
     effect maps to the dark one), or None for any other widget. In the stylesheet, since a color given through
     the palette does not outlast a repolish: a font window merged back into the main window came out with its
-    room under the cells light (the owner, November 24; read live: the palette's window color back at the
+    room under the cells light (the review of November 24; read live: the palette's window color back at the
     dark one after a repolish, which the effect then mapped light, and still the light one with this rule)."""
     try:
         name = _class_name(widget)
@@ -5005,7 +5005,7 @@ def _fill_chart(widget, record):
     WA_StyledBackground; Qt takes autoFillBackground off a widget whose stylesheet has a background). The
     chart paints its cells only: where a strip has fewer glyphs than it has room for (the glyph window's bar
     of glyphs), the light background of the widget behind showed through as a white band, since an effect
-    leaves the place of an inner effect's widget unmapped (the owner, November 24; tried live: the band read
+    leaves the place of an inner effect's widget unmapped (the review of November 24; tried live: the band read
     #f4f4f4, and #2a2a2a, the bar's own, once the chart filled itself). Taken back with the island (the
     record's "styled"). Never raises."""
     try:
@@ -5161,7 +5161,7 @@ def _process_windows():
 def caption_color(dark=True):
     """The color asked of Windows for a title bar, as a COLORREF (0x00bbggrr): the shade's window gray, a
     little darker (TITLE_BAR_PERCENT), so that the bar stands apart from its window by the same step in
-    both shades (the owner, November 23 and 24, images 28, 32, and 33: Windows' own dark bar was far from
+    both shades (the review of November 23 and 24, images 28, 32, and 33: Windows' own dark bar was far from
     the medium shade's windows, and bluish against the dark shade's). Windows' own in light mode."""
     if not dark:
         return DWMWA_COLOR_DEFAULT
@@ -5227,7 +5227,7 @@ def dark_title_bars(dark):
 # Widgets never rendered to see what they paint. FontLab's blue drop highlight, made anew at each drag,
 # grows over the document area step by step: at each size it was one not looked at yet, and was rendered and
 # its pixels counted again, 82 ms each time, some 26 times: every drag of a window over the main window
-# stalled for 2.1 to 2.2 seconds as the highlight came up (profiled live in the owner's drag, November 24:
+# stalled for 2.1 to 2.2 seconds as the highlight came up (profiled live during a drag, November 24:
 # 4.6 of 7.4 seconds in ink_count). It paints a translucent blue and nothing to map.
 NEVER_DETECTED = ("YDropHighlight",)
 
@@ -5269,7 +5269,7 @@ def process(widget):
     if _freelab_text_box(widget):
         # The text area of a FreeLab tool's text box (a Code preview, a log): no effect, the box's text smoothed in
         # grays. Through the defringe effect, colored code came out gray inside each letter, its color left only at
-        # the edges (the owner's images 165 and 166, 2026-11-26): thin colored strokes are all edge pixels, which the
+        # the edges (images 165 and 166, 2026-11-26): thin colored strokes are all edge pixels, which the
         # effect could not tell from ClearType's fringes. Drawn in grays, there are no fringes to take out.
         _forget_effect(widget)
         _gray_text(widget.parentWidget())
@@ -5302,7 +5302,7 @@ def process(widget):
         # A field FontLab puts on a canvas (the Glyph window's width and sidebearing fields, as they are
         # typed in): a field like any other, its stylesheet darkened and its text drawn in grays, kept out of
         # the canvas' mapping, which keeps colors and so kept ClearType's orange and blue around the digits
-        # (the owner, November 24).
+        # (the review of November 24).
         island = None
     if island is not None:
         _undo_widget(widget, keep_props=True, keep_placeholder=True)  # the island maps it as drawn in light mode
@@ -5332,7 +5332,7 @@ def process(widget):
     if _own_sheet_ground(widget):
         # Its stylesheet gives it a ground of its own, dark now: kept out of the mapping of any effect above
         # it. Inside a table mapped as ink on its light paper, the dark block was ink, and came out light
-        # (the three buttons at the right of the Glyph window's metrics table, in a light box: the owner,
+        # (the three buttons at the right of the Glyph window's metrics table, in a light box: the review of
         # November 25).
         _protect(widget)
     if widget.inherits("QsciScintilla"):
@@ -5342,9 +5342,9 @@ def process(widget):
     if kind == "ink" and widget.inherits("QLineEdit") and _native_hooked() and _dark_field(widget):
         # Under the native engine, a field on a dark ground is drawn by Qt right as it is, its text grayed by its font
         # (_gray_text) rather than by an effect. The ink effect mapped Qt's light caret, repainted alone as it blinks,
-        # to the field's ground: no caret to be seen in some fields (the owner's image 198, 2026-11-27).
+        # to the field's ground: no caret to be seen in some fields (image 198, 2026-11-27).
         # FontLab gives most of its fields a palette of their own with black text, which the ink effect mapped: without
-        # the effect it stood black on the dark ground (the owner's images 205 to 207 and 214, 2026-11-27). Its dark
+        # the effect it stood black on the dark ground (images 205 to 207 and 214, 2026-11-27). Its dark
         # text colors are mapped light in its palette instead, again whenever FontLab sets its palette (_light_field_text).
         record = _record(widget)
         _clear_effect(widget, record)
@@ -5704,7 +5704,7 @@ def _menu_hook(menu):
 # A page: a hidden widget holding others (one of Preferences' pages, a stacked widget's), watched for its Show
 # event (sent once it and its children are shown, before they paint): its widgets are processed then, not at the
 # next sweep. What is decided only once a widget is visible (Preferences' icon toggles) flashed light each time a
-# page was first shown (the owner, with images 232 and 233, 2026-11-27).
+# page was first shown (the review of 2026-11-27, with images 232 and 233).
 PAGE_SHOW_PROP = "freelab_page_show"
 SHOW_EVENT = 17  # QEvent::Show
 
@@ -6002,7 +6002,7 @@ PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
 def engine_setting(settings):
-    """The engine chosen, native unless the pixel ("script") engine was (the owner, 2026-11-26: the canvas's marks,
+    """The engine chosen, native unless the pixel ("script") engine was (the review of 2026-11-26: the canvas's marks,
     each recognized after the fact by the pixel rules, never came out right together; the pixel engine is the
     fallback, and what runs wherever the hooks do not reach)."""
     engine = settings.get("engine", "native")
@@ -6205,11 +6205,11 @@ def _island(widget):
     if state.get("engine") == "native" and state.get("hooked") and _qt_drawn_styled(widget):
         # Qt draws it (Qt5Widgets, which the hooks do not map) from its stylesheet: hooked, it stayed as light as
         # FontLab styled it. FontLab's segmented buttons (Anchors and Pins, the Font Info panel's Change...) came out
-        # white once FontLab restyled them, as a toggle or a refresh does, and a sweep found them light (the owner's
-        # images 193 to 196, 2026-11-27). Their stylesheet is darkened instead, as any widget's.
+        # white once FontLab restyled them, as a toggle or a refresh does, and a sweep found them light
+        # (images 193 to 196, 2026-11-27). Their stylesheet is darkened instead, as any widget's.
         # An island look given before (the script engine's: its ancestors' light sheets copied onto it, kept as dark
         # mode's own, and mapped by an effect) is undone first: Font Info's Change... came out dim, its text the effect's
-        # mapping of light text on light, and its sheet, taken for ours, was never darkened (the owner's image 223)
+        # mapping of light text on light, and its sheet, taken for ours, was never darkened (image 223)
         _forget_effect(widget)
         own = widget.property(SHEET_PROP)
         if own is not None and widget.property(DARK_SHEET_PROP) == _prop(widget, "styleSheet"):
@@ -6234,7 +6234,7 @@ def _qt_drawn_styled(widget):
         return True
     # A text button styled by its ancestors' sheets (Font Info's Change..., Preferences' Check now): Qt draws it from them
     # too. Not one showing a picture: Preferences' icon toggles have light pictures of FontLab's, which the island maps
-    # (taken for Qt's drawing, they stood light: the owner's images 232 and 233, 2026-11-27).
+    # (taken for Qt's drawing, they stood light: images 232 and 233, 2026-11-27).
     try:
         icon = _prop(widget, "icon")
         return (widget.inherits("QAbstractButton") and type(widget.style()).__name__ == "QStyleSheetStyle"
@@ -6319,7 +6319,7 @@ def _gray_text(widget):
 
 
 # ClearType drawn light on dark by Qt itself, on the surfaces the hooks map: its colored subpixel edges came out deep
-# blue and brown, read as breaks inside the letters (the Fonts panel's names, the owner's image 148, 2026-11-26; seen
+# blue and brown, read as breaks inside the letters (the Fonts panel's names, image 148, 2026-11-26; seen
 # in a screen copy, "Essential" broken). Grayscale smoothing, as dark applications draw light text, is clean.
 NATIVE_GRAY_TEXT = True
 
@@ -6351,7 +6351,7 @@ def _hook_island(widget):
         _send_canvas(state)
     if pointer and widget.inherits("QTabBar") and pointer not in state.setdefault("ink_addresses", []):
         # A tab bar's names are drawn by Qt (Qt5Widgets), whose dark pens the hooks map only on the ink list: the
-        # document tabs' names came out black on the dark bar, a relaunch or not (the owner's image 179)
+        # document tabs' names came out black on the dark bar, a relaunch or not (image 179)
         state["ink_addresses"].append(pointer)
         _send_ink(state)
     if pointer and _picked_surface(widget) and pointer not in state.setdefault("picked_addresses", []):
@@ -6363,7 +6363,7 @@ def _hook_island(widget):
 
 # Hooked islands whose text keeps ClearType, its colored edges grayed by a defringe effect over the hooks' mapping: the
 # Fonts panel's style letters (I, B, BI) in grayscale smoothing came out thin and dim, a thin italic I barely seen, and
-# the R on its disc faint (the owner's image 199, 2026-11-27: "passable, but leaves much to be desired"). ClearType alone
+# the R on its disc faint (image 199, 2026-11-27: "passable, but leaves much to be desired"). ClearType alone
 # had its blue and brown edges read as breaks in the letters (image 148).
 DEFRINGED_ISLANDS = ("CIconView",)
 
@@ -6371,7 +6371,7 @@ def _island_overlay(widget):
     """The effect a hooked island also gets, drawn over the hooks' mapping, or None: "defringe" (DEFRINGED_ISLANDS), or
     "crosses" for a tab bar with close crosses. The document tabs' cross dark mode draws (its fading, its highlight on
     the cross, its square while held: draw_tab_crosses) was an effect's, and the native engine's tab bars had none:
-    FontLab's own cross came back (the owner's image 192, 2026-11-27: "not as good as what you built yesterday")."""
+    FontLab's own cross came back (image 192, 2026-11-27: "not as good as what you built yesterday")."""
     if _class_name(widget) in DEFRINGED_ISLANDS:
         return "defringe"
     if widget.inherits("QTabBar") and _prop(widget, "tabsClosable"):
@@ -6386,7 +6386,7 @@ FRAME_KINDS = ("title", "keyed")  # the panels (TITLE_CLASSES) and the dock (KEY
 # the hooks set it on the font FontLab hands to the painter, as it is drawn (freelab_hooks_set_text_strategy). Set on
 # the panel's own font, it reached the title only as the panel was next laid out (FontLab keeps a copy of the font),
 # and changed the text inside the panel too. ClearType, as the tab titles: of seven smoothings compared side by side
-# (grayscale, ClearType, each with three hintings, and none), the owner chose ClearType (image 182, 2026-11-26).
+# (grayscale, ClearType, each with three hintings, and none), ClearType was chosen (image 182, 2026-11-26).
 TITLE_TEXT_STRATEGY = 1  # QFont::PreferDefault (ClearType)
 
 
@@ -6465,7 +6465,7 @@ def _send_swatches(state):
 
 def _mark_swatches(picker):
     """A color picker's palette swatches to the hooks (see SWATCH_PROP): their light checkerboard no longer shows at
-    the corners of an opaque color (the owner's image 187). Found through children(), level by level: findChildren(QWidget)
+    the corners of an opaque color (image 187). Found through children(), level by level: findChildren(QWidget)
     returns [] under PythonQt, so no swatch was ever marked (dark mode review, round 2, #2), and _descendants
     (isAncestorOf) stops at a window, as the picker's popup (ColorPickerPopup), which holds them, is one."""
     state = _state()
@@ -6776,13 +6776,13 @@ def _framed_style(fusion):
                 which = -2
                 try:
                     which = int(element)
-                    # A menu's tick, as FontLab's light look has it (the owner, November 23): the mark alone, in
+                    # A menu's tick, as FontLab's light look has it (the review of November 23): the mark alone, in
                     # the text's color, and nothing for an entry not ticked. Fusion's own is a filled box.
                     if which == check and _in_menu(widget) and dark(option) and _menu_tick(option, painter, widget):
                         return
                     # No focus frame around the current row of FontLab's lists: Fusion draws it dark, and the
                     # list's mapping, which turns dark ink light, made it a white frame around the row last
-                    # clicked (the Actions list: the owner, November 24). The row's highlight shows where it is.
+                    # clicked (the Actions list: the review of November 24). The row's highlight shows where it is.
                     if which == focus_rect and which >= 0 and _in_fontlab_view(widget):
                         return
                 except Exception as exc:  # (drawn as the style draws it, below)
@@ -6843,7 +6843,7 @@ MENU_TICK = ((0.20, 0.52), (0.42, 0.74), (0.82, 0.26))  # a menu's tick across i
 MENU_TICK_WIDTH = 1.4  # pixels: the tick's stroke
 MENU_GUTTER = 23  # pixels at 96 dpi from a menu's left edge to the line beside its ticks and icons (Fusion's text: 27)
 # A menu's frame and the line beside its ticks share one color, near the menu's own, and the line is thicker
-# than the separators between entries, as in FontLab's light look (the owner, November 23, images 23 and 24):
+# than the separators between entries, as in FontLab's light look (the review of November 23, images 23 and 24):
 # the window color this much lighter (the separators: SEPARATOR_LIGHTER, plainer).
 MENU_FRAME_LIGHTER = 145
 MENU_GUTTER_WIDTH = 2  # pixels
@@ -6886,7 +6886,7 @@ def _gutter_offset(menu):
 
 
 def _menu_gutter(option, painter, widget):
-    """The line beside a menu's ticks and icons, which FontLab's light look has and Fusion does not (the owner,
+    """The line beside a menu's ticks and icons, which FontLab's light look has and Fusion does not (the review of
     November 23): drawn over the menu's panel, before its entries, in the color of the menu's frame and from
     one edge of it to the other. A highlighted entry covers it, as it covers the panel."""
     QPalette, QColor, QPointF = _gui("QPalette"), _qt()[2], _core("QPointF")

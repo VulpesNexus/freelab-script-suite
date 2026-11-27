@@ -101,7 +101,7 @@ class ImageMemoryTests(unittest.TestCase):
 
 
 class BusyTests(unittest.TestCase):
-    """Owner's image 178: Measuring... held the window until Windows called it Not Responding. The long steps
+    """Image 178: Measuring... held the window until Windows called it Not Responding. The long steps
     now run under the window's top-row progress (ak.busy_*), stoppable; the write never is."""
 
     def test_the_measuring_tells_its_progress_and_can_be_stopped(self):
@@ -145,7 +145,7 @@ class BusyTests(unittest.TestCase):
         self.assertFalse(dialog.composites_note.visible)
 
     def test_cancel_sits_before_close_usable_while_it_measures(self):
-        """The owner, 2026-11-24: a Cancel left of Close, grayed but while work that can stop runs (ak.cancel_button),
+        """The review of 2026-11-24: a Cancel left of Close, grayed but while work that can stop runs (ak.cancel_button),
         as Esc stops it; its help says what a stop leaves."""
         with io.open(sp.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
             source = handle.read()
@@ -182,7 +182,7 @@ class BusyTests(unittest.TestCase):
 
 
 class FailureTests(unittest.TestCase):
-    """Owner's images 218, 224, and 253: "No halo makes ll, nn, oo agree" in red, said nothing; the top line
+    """Images 218, 224, and 253: "No halo makes ll, nn, oo agree" in red, said nothing; the top line
     went blank; Analyze stayed clickable though nothing could be done."""
 
     def test_the_failure_is_said_in_plain_words(self):
@@ -304,7 +304,7 @@ class OverhangTests(unittest.TestCase):
         self.assertEqual(sp.mark_overhang(acute, -20, -40), 0.0)
 
     def test_a_zero_width_mark_is_placed_by_its_components_transform(self):
-        # (owner's images 144/146: ucircumflexbelow was named as sticking out, its mark well inside its 451
+        # (images 144/146: ucircumflexbelow was named as sticking out, its mark well inside its 451
         # units: the mark's box was read in its own units, where a zero-width mark lies left of its origin)
         class Rect(object):
             def __init__(self, left, right):
@@ -355,7 +355,7 @@ class OverhangTests(unittest.TestCase):
         self.assertEqual(sp.shape_span(_Shape(10, 20), boxes.get), (10.0, 20.0), "a drawn shape: its own box")
 
     def test_a_glyph_named_in_the_log_opens_between_its_references(self):
-        # (the owner could not see the diacritics the log named: each opened alone)
+        # (the diacritics the log named could not be seen: each opened alone)
         opened = []
         dialog = sp.AutoSpacingDialog.__new__(sp.AutoSpacingDialog)
 
@@ -467,7 +467,7 @@ class SpacingTests(unittest.TestCase):
         self.assertEqual(sp.references_to_space(sides, 1000), [])
         sides[u"n"] = ("n", 0, 2, 500)
         self.assertEqual(sp.references_to_space(sides, 1000), [u"H", u"n", u"o"], "Latin's alone")
-        # (owner's image 335: n and o spaced from the corpus without l, ll no longer agreed with nn and oo,
+        # (image 335: n and o spaced from the corpus without l, ll no longer agreed with nn and oo,
         # and nothing could be spaced after: l is spaced with them)
         sides[u"l"] = ("l", 3, 4, 200)
         self.assertEqual(sp.references_to_space(sides, 1000), [u"H", u"l", u"n", u"o"])
@@ -483,7 +483,7 @@ class SpacingTests(unittest.TestCase):
         self.assertIn(u'ak.error_sentence(u"Stopped by an error", error)', source)
 
     def test_a_write_that_leaves_the_font_unmeasurable_says_it_once(self):
-        # (owner's image 335: "Stopped by an error" with the analysis's own message, then that message again)
+        # (image 335: "Stopped by an error" with the analysis's own message, then that message again)
         source = io.open(os.path.join(HERE, os.pardir, "spacing", "freelab_auto_spacing.py"), encoding="utf-8").read()
         write = source[source.index(u"except CannotSpace:\n                pass"):]
         self.assertLess(write.index(u"except CannotSpace:"), write.index(u"except Exception as exc:  # what was changed"))
@@ -555,7 +555,7 @@ class SpacingTests(unittest.TestCase):
 
 
 class TableTests(unittest.TestCase):
-    """The owner: "Maybe this table should be aligned in terms of layout with the other ones?" The glyph
+    """The review: "Maybe this table should be aligned in terms of layout with the other ones?" The glyph
     drawn from the font beside its character, its name, its code point, then its numbers."""
 
     def dialog(self):
@@ -598,14 +598,14 @@ class ChoiceAndCheckTests(unittest.TestCase):
             return handle.read()
 
     def test_the_dropdown_starts_on_everything(self):
-        # (owner's report 143)
+        # (report 143)
         self.assertEqual(sp.GROUPS[sp.default_group()], ("everything", "Everything"))
         source = self.source()
         self.assertLess(source.index(u"self.group.setCurrentIndex(default_group())"),
                         source.index(u'self.group.connect("currentIndexChanged(int)"'), "set before it is heard")
 
     def test_check_all_and_check_none_say_how_many(self):
-        # (owner's report 118: these buttons left no line in the log)
+        # (report 118: these buttons left no line in the log)
         class Item(object):
             def __init__(self, state):
                 self.state = state
@@ -632,7 +632,7 @@ class ChoiceAndCheckTests(unittest.TestCase):
         ak._qt = lambda: (type("Core", (), {"Qt": type("Qt", (), {"Checked": 2, "Unchecked": 0})}), None)
         self.addCleanup(lambda: setattr(ak, "_qt", old))
         dialog.check_all(True)
-        # (Tick, not Check, for check boxes: owner's image 261)
+        # (Tick, not Check, for check boxes: image 261)
         self.assertEqual(logged, [u"<i>Tick all</i> ticked <b>2 glyphs</b>."])
         dialog.check_all(False)
         self.assertEqual(logged[-1], u"<i>Untick all</i> unticked <b>3 glyphs</b>.")
@@ -725,7 +725,7 @@ class HistoryFailureTests(unittest.TestCase):
         self.assertFalse(any(stoppable for name, _, _, stoppable in self.busy_calls if name in ("start", "progress")))
 
     def test_cancel_is_grayed_while_it_spaces(self):
-        # (the owner, 2026-11-24: Cancel usable only while work that can stop runs; a write is one History step)
+        # (the review of 2026-11-24: Cancel usable only while work that can stop runs; a write is one History step)
         dialog, steps = self.dialog(refuse_before=False, refuse_after=False)
         qtfakes.cancel_made(ak, dialog, sp.CANCEL_NOTE, (sp.APPLY_BUTTON,))
         seen = qtfakes.follow_cancel(self, ak)
@@ -830,7 +830,7 @@ class WriteFailureTests(unittest.TestCase):
 
 
 class WordingTests(unittest.TestCase):
-    """The owner's rules for interface texts, read from the script (its dialog needs FontLab)."""
+    """The rules for interface texts, read from the script (its dialog needs FontLab)."""
 
     def source(self):
         import io
@@ -843,7 +843,7 @@ class WordingTests(unittest.TestCase):
             self.assertNotIn(mark, self.source())
 
     def test_a_check_box_sentence_ends_with_a_period(self):
-        # (owner's image 324: a tick's caption that is a sentence takes its period)
+        # (image 324: a tick's caption that is a sentence takes its period)
         self.assertIn(u"QCheckBox(\"Glyphs built from components follow the glyphs they are built on.\")", self.source())
 
     def test_the_units_box_follows_its_number(self):
@@ -851,7 +851,7 @@ class WordingTests(unittest.TestCase):
         self.assertIn(u"counted_suffix(self.tolerance, u\"unit\")", self.source())
 
     def test_the_composites_note_says_none_or_hides(self):
-        # (owner's image 188: "0 glyphs built from components follow the listed glyphs.")
+        # (image 188: "0 glyphs built from components follow the listed glyphs.")
         self.assertEqual(sp.composites_text(0, 0), u"", "hidden: nothing to say")
         self.assertEqual(sp.composites_text(1, 0), u"1 glyph built from components follows the listed glyphs.")
         self.assertEqual(sp.composites_text(3, 0), u"3 glyphs built from components follow the listed glyphs.")
@@ -862,7 +862,7 @@ class WordingTests(unittest.TestCase):
         self.assertNotIn(u"QApplication.processEvents", self.source(), "the top row's progress lets events through")
 
     def test_the_options_row_holds_the_tick_and_analyze_inline(self):
-        # (owner's images 254 and 262: the tick above the list beside "List changes of at least"; Analyze at the
+        # (images 254 and 262: the tick above the list beside "List changes of at least"; Analyze at the
         # end of its options, not at the window's right edge; "Show: [Everything]", brief's captions)
         source = self.source()
         init = source.split(u"class AutoSpacingDialog")[1].split(u"\n    def current_font")[0]
@@ -887,12 +887,12 @@ class WordingTests(unittest.TestCase):
         self.assertNotIn(u"drawText", picture, "the caption is the label over the picture")
 
     def test_tick_not_check(self):
-        # (owner's image 261)
+        # (image 261)
         source = self.source()
         for old in (u'"Check all"', u'"Check none"', u"Space checked glyphs", u"Checks restored"):
             self.assertNotIn(old, source)
         self.assertEqual(sp.APPLY_BUTTON, u"Space ticked glyphs")
-        # (a tool named in the log is a link that opens it: owner's image 220)
+        # (a tool named in the log is a link that opens it: image 220)
         self.assertIn(u'ak.tool_link(u"Auto Kerning")', source)
 
     def test_the_status_counts_right_at_zero_one_and_two(self):
@@ -916,7 +916,7 @@ class WordingTests(unittest.TestCase):
         self.assertEqual(sp.apply_note(1, 0, 2), u"")
 
     def test_counts_are_bold_with_their_nouns(self):
-        # Round 3's convention 18 (owner's images 297 and 301): a count bold together with its noun, a number
+        # Round 3's convention 18 (images 297 and 301): a count bold together with its noun, a number
         # with no noun of its own bold alone; never only the number when its noun follows
         self.assertEqual(sp.apply_note(3, 2, 2, 20, ak.b),
                          u"The references were spaced first, and the other <b>20 glyphs</b> measured against them "

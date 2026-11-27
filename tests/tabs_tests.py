@@ -758,7 +758,7 @@ class DragTests(StateCase):
         return page
 
     def test_no_undock_keeps_the_press_from_fontlabs_tab_bar(self):
-        """The owner, 2026-11-23: put back after the drop, a tab could still be grabbed. The press on a main
+        """The review of 2026-11-23: put back after the drop, a tab could still be grabbed. The press on a main
         window tab is kept from the bar (the filter returns what on_pressed says), and the release that ends
         it kept too. Nothing is chosen at the press (the view changed under a tab being moved)."""
         chosen = []
@@ -769,7 +769,7 @@ class DragTests(StateCase):
         self.assertEqual(chosen, [], "not chosen while the button is held")
         self.assertTrue(ft.on_released(), "a release with the button still held is kept, and is no click")
         self.run_later()
-        self.assertEqual(chosen, [], "the owner, 2026-11-23: a tab held some two seconds was shown, unmoved")
+        self.assertEqual(chosen, [], "the review of 2026-11-23: a tab held some two seconds was shown, unmoved")
         self.assertEqual([what for when, what in sys._freelab_tabs_state["notes"]],
                          ["a release came with the button still held"])
         self.down = False
@@ -807,9 +807,9 @@ class DragTests(StateCase):
         return BarWithCrosses()
 
     def test_a_click_on_a_tabs_close_cross_closes_it(self):
-        """The owner, 2026-11-23 and 24: the close cross took two clicks, and was not shown on main window
+        """The review of 2026-11-23 and 24: the close cross took two clicks, and was not shown on main window
         tabs (FontLab shows none on tabs whose presses it never gets). Its place is the tab's left end, read
-        from the owner's own closing clicks. A press there is kept like any other; released there, the tab
+        from closing clicks made by hand. A press there is kept like any other; released there, the tab
         is closed by FontLab's own slot; released elsewhere, it is a click on the tab."""
         bar = self.cross_bar()
         closed, chosen = [], []
@@ -849,7 +849,7 @@ class DragTests(StateCase):
         self.assertFalse(ft.on_pressed(area, 2, bar, Point(210, 5)), "undockable: the cross is FontLab's own")
 
     def test_the_tab_under_the_mouse_shows_a_close_cross(self):
-        """The owner, 2026-11-24: main window tabs showed no cross. FreeLab shows its own while the mouse is
+        """The review of 2026-11-24: main window tabs showed no cross. FreeLab shows its own while the mouse is
         over the main tab bar (no_undock), and takes it away as the mouse leaves."""
         class Label(object):
             def __init__(self):
@@ -905,7 +905,7 @@ class DragTests(StateCase):
         self.assertEqual((label.visible, timer.active), (False, False))
 
     def test_a_click_chooses_its_tab_at_the_release(self):
-        """The owner, 2026-11-23: the view changed at the press, under a tab being moved. A click chooses its tab
+        """The review of 2026-11-23: the view changed at the press, under a tab being moved. A click chooses its tab
         at its release; a drag moves it."""
         chosen = []
         self.main_area.indexOf, self.main_area.currentIndex = self.pages.index, 0
@@ -942,7 +942,7 @@ class DragTests(StateCase):
         self.assertEqual(chosen, [2], "once")
 
     def test_fontlabs_drop_highlight_left_showing_is_hidden(self):
-        """The owner, 2026-11-23: the blue highlight stayed over the document area after a merge."""
+        """The review of 2026-11-23: the blue highlight stayed over the document area after a merge."""
         class Child(object):
             def __init__(self, kind, visible):
                 self.kind, self.visible = kind, visible
@@ -993,7 +993,7 @@ class DragTests(StateCase):
         return frame, timer, light
 
     def test_a_tab_dragged_out_gets_no_drop_highlight_at_first(self):
-        """The owner, 2026-11-24: the blue highlight came up over the area the tab had just left, and made
+        """The review of 2026-11-24: the blue highlight came up over the area the tab had just left, and made
         undocking hard; hidden for the whole drag, it flashed and went each time FontLab showed it. It is hidden
         while the drag is young, and FontLab's own once the tab has been held a while or the mouse has left the
         document area."""
@@ -1021,7 +1021,7 @@ class DragTests(StateCase):
         ft.follow_drop({"from_main": True})  # (no main window: nothing raised)
 
     def test_a_drag_tells_dark_mode_to_hold_its_pictures(self):
-        """The owner, 2026-11-24: a window dragged over the main window stalled for seconds with dark mode on."""
+        """The review of 2026-11-24: a window dragged over the main window stalled for seconds with dark mode on."""
         import sys as system
         import time as clock
         saved = getattr(system, "_freelab_paint_hold", None)
@@ -1049,7 +1049,7 @@ class DragTests(StateCase):
         self.assertEqual((timer.calls, light.visible), ([], True), "reorder off: FontLab's own drop")
 
     def test_a_held_tab_is_not_shown_before_the_release(self):
-        """The owner, 2026-11-23 and 24: a tab held some two seconds was shown, unmoved, without a release."""
+        """The review of 2026-11-23 and 24: a tab held some two seconds was shown, unmoved, without a release."""
         chosen = []
         area = self.main_area
         area.count, area.currentIndex = 4, 0
@@ -1097,7 +1097,7 @@ class DragTests(StateCase):
         self.assertEqual((self.docked, chosen), ([], [2]), "no_undock alone: not moved, chosen at the release")
 
     def test_a_window_dragged_by_its_title_bar_onto_the_tab_bar_docks(self):
-        """The owner, 2026-11-23: FontLab's own blue highlight was hard to get. A window of its own moved with the
+        """The review of 2026-11-23: FontLab's own blue highlight was hard to get. A window of its own moved with the
         button held is followed as a tab's drag is, and docks when released on the main tab bar."""
         page = Page()
         frame = Frame(window=True)

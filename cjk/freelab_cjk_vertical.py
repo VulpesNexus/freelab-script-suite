@@ -69,7 +69,7 @@ CORE_RANGES = ((0x2010, 0x2027), (0x3000, 0x30FF), (0x31F0, 0x31FF), (0xFE10, 0x
 # What makes a font a CJK font here: a glyph in one of these blocks (Hangul Jamo, the radicals and ideographic
 # description characters, CJK punctuation, kana, bopomofo, Hangul compatibility jamo, kanbun, CJK strokes,
 # enclosed and compatibility CJK, the ideographs, the Hangul syllables and their extended jamo, the vertical,
-# compatibility, half-width, and full-width forms, the kana supplements). A font with none (the owner's Noto
+# compatibility, half-width, and full-width forms, the kana supplements). A font with none (Noto
 # Sans) is not set in vertical CJK text: it is offered nothing, as CJK Spacing offers it no trim. Its em-wide
 # HORIZONTAL BAR (U+2015, General Punctuation: the dash Japanese text turns) had been offered a vertical form.
 CJK_RANGES = ((0x1100, 0x11FF), (0x2E80, 0x2FDF), (0x2FF0, 0x303F), (0x3040, 0x30FF), (0x3100, 0x31FF),
@@ -96,7 +96,7 @@ VHEA_FIELDS = (("vhea_ascent", "openTypeVheaVertTypoAscender", u"vhea ascender")
                ("vhea_descent", "openTypeVheaVertTypoDescender", u"vhea descender"),
                ("vhea_line_gap", "openTypeVheaVertTypoLineGap", u"vhea line gap"))
 VHEA_DEFAULTS = {"vhea_ascent": 0.5, "vhea_descent": -0.5, "vhea_line_gap": 0.0}
-OWN_DEFAULTS = ("vhea_line_gap",)  # FreeLab's own value, not the corpus's median (0.15 em): the owner's choice, 0
+OWN_DEFAULTS = ("vhea_line_gap",)  # FreeLab's own value, not the corpus's median (0.15 em): the choice made, 0
 # A sample for vertical text, written for FreeLab (GPL-3 with the code): brackets, small kana, the long
 # vowel mark, the comma and full stop, a question mark, parentheses, and a dash, each of which turns or moves.
 SAMPLE_JA = (u"「ちょっとコーヒーでも飲みますか"
@@ -505,7 +505,7 @@ def plan_metrics(upm, info, without_height, model=None):
     """The vertical metrics to set: the advance heights of the glyphs that have none (without_height:
     how many), and vhea's values (info: {field: value now or None}), each from the corpus's medians
     (shares of the em) where the font has none; a value the font has is listed, unchecked. The line gap
-    is 0, as the owner chose (the corpus's median is 0.15 em; IBM Plex Sans JP and Source Han Sans have
+    is 0, as chosen (the corpus's median is 0.15 em; IBM Plex Sans JP and Source Han Sans have
     none)."""
     metrics = (model or {}).get("metrics") or {}
     found = [Metric("advance_height", u"Advance heights", None, int(round(upm * (metrics.get("advance_height") or 1.0))),
@@ -943,7 +943,7 @@ def preview_column(text, names, own, chosen, trims, kerns, height, upm):
     form} of the font's code; chosen: {glyph: Form} checked; trims: {glyph shown: (y placement, y
     advance)} of vpal; kerns: {(upper glyph shown, lower glyph shown): y advance change} of vkrn, which
     the upper glyph takes in its height. A character the font lacks is left out, as CJK Spacing's previews
-    leave it (the owner, of Noto Sans's: rows of empty boxes, where CJK Spacing "only shows the glyphs it
+    leave it (the review, of Noto Sans's: rows of empty boxes, where CJK Spacing "only shows the glyphs it
     can display")."""
     placed, chars, heights, previous = [], [], [], None
     for code, ch in code_points(text):
@@ -990,7 +990,7 @@ def character_words(chars, most=SAMPLE_SHOWN_MOST):
     """A few characters named in words, the distinct ones in their order: a punctuation mark or a symbol
     by its name ("the comma", "the period", "the left corner bracket"), anything else between quotation
     marks; "and others" past most, for two or more left (one left is named: "and others" stood for a single
-    mark, owner's image 169). A bare mark in parentheses, "(, .)", read oddly (live pass)."""
+    mark, image 169). A bare mark in parentheses, "(, .)", read oddly (live pass)."""
     import unicodedata
     distinct = []
     for ch in chars:
@@ -1016,14 +1016,14 @@ def character_words(chars, most=SAMPLE_SHOWN_MOST):
 
 
 def preview_note(text, names, bold=lambda text: text, escape=lambda text: text):
-    """What the previews show of a sample, where the font lacks some of its characters (owner's report
+    """What the previews show of a sample, where the font lacks some of its characters (report
     148: on Bellefair, the Korean sample's previews held a comma and a period only, and nothing said
     why): the characters the font has, and what it lacks, by kind (its Hangul, its CJK punctuation
     marks, named), said in the window's log (CJK Spacing's LacksNote). Empty where the font has every
     character. names: {code point: glyph}; bold: how a
-    count is set off, with its noun (owner's images 297 and 301); escape: the sample's characters made
+    count is set off, with its noun (images 297 and 301); escape: the sample's characters made
     safe in rich text (ak.html), as bold makes it rich."""
-    # Each character once: the counts are of characters, as the parentheses name them (owner's image 168: "12 CJK
+    # Each character once: the counts are of characters, as the parentheses name them (image 168: "12 CJK
     # punctuation marks" named six, each used twice in the sample; image 169: "2 characters (the horizontal bar)")
     shown, lacking, seen = [], [], set()
     for code, ch in code_points(text):
@@ -1058,7 +1058,7 @@ def ink_overflow(items, origin, height):
     """How far a column's glyphs' ink reaches past their squares, in font units: (above the first square's
     top, below the last square's bottom), each 0 or more. items: [(ink box (x0, y0, x1, y1) or None, y
     placement, y advance change)], each glyph's square height + its advance change tall, its vertical origin
-    at the square's top (baseline_y). Taken over every item (each could end a column). Owner's image 181:
+    at the square's top (baseline_y). Taken over every item (each could end a column). Image 181:
     the columns' last glyphs were cut at the bottom, the picture as tall as the squares alone."""
     above = below = 0.0
     for box, placement, advance in items:
@@ -1081,8 +1081,8 @@ def origin_from_ink(origin, boxes, height, upm, slack=ORIGIN_SLACK, others=()):
     ascender) under which it does sit centered (height: the square's height). Never a value of FreeLab's
     own: an ink-centered origin made up overrode valid metrics of fonts drawn off-center (review 12). Live,
     07LightNovelPOP: FontLab's typographic ascender 1048 (its OS/2 says 860), its ascender and VORG 860,
-    ideographs' ink -110 to 833: under 1048 they sat too low and the columns' last glyphs were cut (owner's
-    image 181); under 860 they are centered."""
+    ideographs' ink -110 to 833: under 1048 they sat too low and the columns' last glyphs were cut
+    (image 181); under 860 they are centered."""
     centers = sorted((box[1] + box[3]) / 2.0 for box in boxes if box is not None)
     if len(centers) < 3:
         return origin, False
@@ -1230,7 +1230,7 @@ the font info back as it was before the last write (FontLab's History does not h
 Click this help's button, then anything in the window, for what it does (or right-click it: <i>What's This?</i>)."""
 
 
-PREVIEW_CAPTIONS = (u"Now (the font's own code)", u"With what is ticked")  # (Tick, not Check: owner's image 261)
+PREVIEW_CAPTIONS = (u"Now (the font's own code)", u"With what is ticked")  # (Tick, not Check: image 261)
 CODE_PREVIEW_WHAT = (u"The code <i>Write</i> would write, as the ticks and options stand: vert, vrt2, vpal, and vkrn "
                      u"whole, FreeLab's block between its marker lines, the rest of each feature as it is (a feature "
                      u"that would not change is left out), then, in comments, the glyphs it builds and the metrics it "
@@ -1295,7 +1295,7 @@ class CJKVerticalDialog(object):
         self.status.setWordWrap(True)
         self.status.connect("linkActivated(QString)", self.status_link)  # (List again, once a listing was stopped)
         layout.addWidget(self.status)
-        layout.addWidget(ak.header_separator())  # (always shown, as every window's: owner's images 222 and 223)
+        layout.addWidget(ak.header_separator())  # (always shown, as every window's: images 222 and 223)
         self.log = ak.Log()
         row = QtGui.QHBoxLayout()
         self.forms_box = QtGui.QCheckBox(u"Vertical forms (vert, vrt2)")
@@ -1323,10 +1323,10 @@ class CJKVerticalDialog(object):
             row.addWidget(box)
         row.addStretch(1)
         layout.addLayout(row)
-        # (long work's progress is in the window's top row, ak.busy_start: owner's image 180, its own bar under
+        # (long work's progress is in the window's top row, ak.busy_start: image 180, its own bar under
         # the settings, "Listing...")
         # The list, the previews, and the Code preview share the height in a splitter, as CJK Spacing's and
-        # Feature Code's parts: drag a handle to see more of one (owner's image 310)
+        # Feature Code's parts: drag a handle to see more of one (image 310)
         self.splitter = QtGui.QSplitter(QtCore.Qt.Vertical)
         self.splitter.setChildrenCollapsible(False)
         layout.addWidget(self.splitter, 1)
@@ -1362,7 +1362,7 @@ class CJKVerticalDialog(object):
         self.sample.setWhatsThis(u"The text the previews set in vertical columns, right to left.")
         sample_row.addWidget(self.sample, 1)
         preview_part.addLayout(sample_row)
-        # The previews side by side, a line between them as CJK Spacing's stacked ones (owner's image 219), each
+        # The previews side by side, a line between them as CJK Spacing's stacked ones (image 219), each
         # under its caption (the shared preview_caption: smaller, in the quiet text color)
         previews = QtGui.QHBoxLayout()
         self.previews, self.preview_captions = [], []
@@ -1395,7 +1395,7 @@ class CJKVerticalDialog(object):
         # What the previews show of the sample where the font lacks some of it (preview_note): said in the log, no
         # longer in a line under the previews (CJK Spacing's LacksNote)
         self.lacks_note = self.cj.LacksNote(ak, self.log, dialog)
-        # The Code preview, last, as Feature Code's code under its lists (owner's image 305)
+        # The Code preview, last, as Feature Code's code under its lists (image 305)
         self.code_preview = self.cj.CodePreview(ak, reader(), self.splitter, CODE_PREVIEW_WHAT, 2)
         try:  # (the splitter's hint on its handles, as Feature Code's: not on every label inside it)
             reader().describe_handles(self.splitter, u"Drag the space between two parts up or down to give one more "
@@ -1430,7 +1430,7 @@ class CJKVerticalDialog(object):
             buttons.addWidget(button)
         buttons.addStretch(1)
         self.compile_box = ak.compile_box()
-        for widget in self.bottom_right():  # (owner's image 298: the compile tick by the write it is about)
+        for widget in self.bottom_right():  # (image 298: the compile tick by the write it is about)
             buttons.addWidget(widget)
         ak.cancel_button(self, buttons, self.close_button, CANCEL_NOTE)  # (right before Close)
         layout.addLayout(buttons)
@@ -1471,7 +1471,7 @@ class CJKVerticalDialog(object):
         self.watch_previews()
 
     def bottom_right(self):
-        """The bottom row's right group, in the suite's order (owner's image 298): the compile tick, the write
+        """The bottom row's right group, in the suite's order (image 298): the compile tick, the write
         button it is about, the other buttons that change the font or a file (Put back vhea, Add vertical
         metrics to an exported font...), then Close."""
         return [self.compile_box, self.write_button, self.put_back_button, self.export_button, self.close_button]
@@ -1506,7 +1506,7 @@ class CJKVerticalDialog(object):
 
     def fit_previews(self):
         """Each preview's last picture shown whole at the previews' size now (CJK Spacing's shown_whole), while a
-        resize waits for the previews to be drawn again (owner's image 356: a drag cut their ends off)."""
+        resize waits for the previews to be drawn again (image 356: a drag cut their ends off)."""
         shown = getattr(self.cj, "shown_whole", None)
         if shown is None:
             return
@@ -1547,7 +1547,7 @@ class CJKVerticalDialog(object):
 
     def set_busy(self, on, steps=(), at_once=False, stoppable=True):
         """Long work begun (its steps: (label, share of the bar at its end)) or over, its progress in the
-        window's top row (ak.busy_start: owner's images 176 and 180, the bar this window had under its settings
+        window's top row (ak.busy_start: images 176 and 180, the bar this window had under its settings
         moved there). While busy, the History watcher, dark mode, and the window's release wait, and so does
         another read of the list (run once the work is over). The bar and the grayed controls show at once
         (at_once: a write, an export), or once the work has taken SHOW_AFTER (a list read again for a small font
@@ -1673,7 +1673,7 @@ class CJKVerticalDialog(object):
         except Exception:
             pass
         self.forms, self.trims, self.metrics, self.turned, self.kerns, self.first_checks = [], [], [], [], [], []
-        # (the font line kept: owner's image 224)
+        # (the font line kept: image 224)
         self.status.setText(self.cj.head_join(self.ak, self.cj.font_line(self.ak, self.package), self.cj.stopped_line()))
         self.seen_history = self.ak.history_mark(self.package)
 
@@ -1756,12 +1756,12 @@ class CJKVerticalDialog(object):
         finally:
             self.set_busy(False)
             # (whatever the read found, even a font with nothing to list: Put back vhea only for the font it
-            # wrote to; the window that had moved to a font with no CJK kept it usable, owner's image 361)
+            # wrote to; the window that had moved to a font with no CJK kept it usable, image 361)
             self.cjk_states()
 
     def cjk_states(self):
         """Put back vhea for the font it wrote to only, and the options and the sample grayed for a font with no
-        kana, Hangul, ideographs, or CJK punctuation: nothing they act on (owner's images 379 and 380). After a
+        kana, Hangul, ideographs, or CJK punctuation: nothing they act on (images 379 and 380). After a
         read, and at each update_buttons: the shared no_font_states gives every control back once the window
         has its font, after the read had grayed these (live 2026-11-19, Bellefair: all of them clickable).
         Never raises."""
@@ -1795,7 +1795,7 @@ class CJKVerticalDialog(object):
             self.status.setText(ak.no_font_line())
             self.update_buttons()
             return
-        if not self.model:  # (the font line kept, the reason in the log: owner's image 224)
+        if not self.model:  # (the font line kept, the reason in the log: image 224)
             self.status.setText(self.cj.head_join(ak, self.cj.font_line(ak, package), u"Could not list the vertical forms: the log says why."))
             self.log.add(u"The corpus's vertical forms (vertical_model.json) are missing beside this script: reinstall "
                          u"FreeLab.", "error")
@@ -1881,7 +1881,7 @@ class CJKVerticalDialog(object):
         self.metrics = self.plan_metrics(package) if self.cjk else []
         for item, on in zip(self.all_rows(), [kept.get(self.row_key(row), row.checked) for row in self.all_rows()]):
             item.checked = on
-        # (a sample in a writing the font has none of grayed, as CJK Spacing's: owner's image 304)
+        # (a sample in a writing the font has none of grayed, as CJK Spacing's: image 304)
         offered = self.cj.offered_samples(self.samples, set(self.char_names))
         self.cj.offer_samples(self.sample_box, self.samples, offered, QtCore)
         if u"%s" % self.sample.text in [text for _, _, text in self.samples]:  # (text of one's own is kept)
@@ -2172,7 +2172,7 @@ class CJKVerticalDialog(object):
 
     def check_all(self, on):
         """Tick all, Untick all: every checkable row, the log told how many it ticked or unticked, and
-        how many of them were in closed groups (owner's report 118)."""
+        how many of them were in closed groups (report 118)."""
         QtCore, QtGui = _qt()
         self.tree.blockSignals(True)
         try:
@@ -2241,7 +2241,7 @@ class CJKVerticalDialog(object):
         problem = self.reader_problem()
         writable = bool(cjk and (new or builds or metrics) and not problem)
         ak.enable(self.write_button, writable)
-        # Compile after writing, grayed with the button (owner's image 195), and while the write would change
+        # Compile after writing, grayed with the button (image 195), and while the write would change
         # no feature code (forms or metrics alone: nothing to compile)
         ak.enable(self.compile_box, writable and bool(new))
         if problem and problem != getattr(self, "problem_said", None):
@@ -2399,7 +2399,7 @@ class CJKVerticalDialog(object):
     def picture(self, columns_of, size, columns=True):
         """Glyphs [(name, transform or None, y placement, y advance change)] set top to bottom in columns
         right to left (columns_of: a list of columns), each square an em, in the dialog's text color. The
-        picture is as tall as the squares and whatever ink reaches past them (owner's image 181: as tall as
+        picture is as tall as the squares and whatever ink reaches past them (image 181: as tall as
         the squares alone, it cut the ink under a column's last one)."""
         QtCore, QtGui = _qt()
         if self.package is None:
@@ -2482,7 +2482,7 @@ class CJKVerticalDialog(object):
             placed, chars, heights = preview_column(text, names, own, chosen if index else {}, trims if index else {},
                                                     kerns if index else {}, self.height, upm)
             width = self.pane_width(label)
-            # (each column broken with room for its glyphs' ink past their squares: owner's image 181)
+            # (each column broken with room for its glyphs' ink past their squares: image 181)
             above, below = ink_overflow([(self.preview_box(name, matrix), placement, advance)
                                          for name, matrix, placement, advance in placed], self.origin, self.height)
             extra = (above + below) / upm
@@ -2500,7 +2500,7 @@ class CJKVerticalDialog(object):
         # of, draws nothing; with the pictures hidden, show_font_parts shows them together)
         self.previews_drawn = any(pixmap is not None for pixmap in self.preview_pixmaps)
         self.parts_filled(self.previews_drawn and getattr(self, "pictures_shown", True))
-        if lacks is not None:  # (counts bold: owner's images 297, 301)
+        if lacks is not None:  # (counts bold: images 297, 301)
             lacks.show(self.package, preview_note(text, names, self.ak.b, self.ak.html), typed)
 
     # -- writing --------------------------------------------------------------------
@@ -2550,12 +2550,12 @@ class CJKVerticalDialog(object):
         # (Feature Check: the whole font's code with it, the forms to build counted as there)
         refusal = getattr(self.ak, "feature_code_refusal", lambda *a, **k: None)(package, new, None, list(names))
         if refusal:
-            self.log.add(u"Nothing was written: %s. %s lists every finding." % (  # (a link: owner's image 220)
+            self.log.add(u"Nothing was written: %s. %s lists every finding." % (  # (a link: image 220)
                 self.ak.html(refusal), self.ak.tool_link(u"Feature Check")), "error")
             return
         heights = [m for m in metrics if m.key == "advance_height"]
         vhea = [m for m in metrics if m.key != "advance_height"]
-        # Never stoppable while it writes (one step of FontLab's History, never half written: owner's image 183,
+        # Never stoppable while it writes (one step of FontLab's History, never half written: image 183,
         # several seconds; a click on Close, a tool, or an arrow is done once it is over); the list read again
         # after it is (stoppable set again there)
         self.set_busy(True, WRITE_STEPS, at_once=True, stoppable=False)

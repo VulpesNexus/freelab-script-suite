@@ -354,7 +354,7 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(rgb_at(buf, 0), paper)
 
     def test_cleartype_fringes_of_dark_red_text_stay_dark(self):
-        # Owner's report 155: FontLab's Output panel writes compiler errors in a dark red (about #8b0000) on its
+        # Report 155: FontLab's Output panel writes compiler errors in a dark red (about #8b0000) on its
         # dark paper. The red is made lighter as ink; its ClearType fringes, each channel at its own coverage
         # (#340c00: little red, more green and blue gone), were mapped alone as dark ink and turned light pink
         # (#eac2b6), light dots inside every letter. They are drawn again, channel by channel, from the paper
@@ -879,7 +879,7 @@ class ReviewOfNovember24Tests(unittest.TestCase):
         self.assertLess(sum(out[1][1]), 3 * 100, "and the canvas dark")
 
     def test_a_name_on_a_pill_a_guide_crosses_stays_light(self):
-        """The owner, 2026-11-25: a name on a pill a guide crosses had its letters dark. The pill is translucent:
+        """The review of 2026-11-25: a name on a pill a guide crosses had its letters dark. The pill is translucent:
         over the canvas' two grounds it is two shades of warm gray, each in two steps, the guide's dashes and a
         side line run under it, and the canvas' own light grays came first among the badge colors."""
         above, below, guide, name = (212, 212, 212), (232, 232, 234), (80, 78, 74), (236, 236, 235)
@@ -910,7 +910,7 @@ class ReviewOfNovember24Tests(unittest.TestCase):
             self.assertGreater(sum(out[y][x]), sum(out[y][pill_x]) + 150, "the name lighter than its pill at %d,%d" % (x, y))
 
     def test_a_name_on_a_pill_over_the_baseline_stays_light_below_it(self):
-        """The owner, November 25: names on the pills along the baseline were still muddled. The pill over the
+        """The review of November 25: names on the pills along the baseline were still muddled. The pill over the
         canvas' white above the baseline and its band below is two warm grays 10 apart per channel, the letters
         below the line faint; a dashed sidebearing line, one pixel wide, was taken for a pill; and a glyph's
         slanted contour under a stem ended the walk down."""
@@ -945,7 +945,7 @@ class ReviewOfNovember24Tests(unittest.TestCase):
                                "the name lighter than its pill at %d,%d" % (x, y))
 
     def test_colored_text_keeps_its_own_color_over_the_mapped_paper(self):
-        """The owner, November 25: in Overlay Fonts, a dark red sample came out pink with light dots, and the mess
+        """The review of November 25: in Overlay Fonts, a dark red sample came out pink with light dots, and the mess
         changed as the color was dragged. The text is drawn again in its own color, its smoothing at the same
         share over the paper as mapped; a pill's gray and black text keep the mapping."""
         paper, red, gray, black = (255, 255, 255), (98, 0, 21), (176, 174, 170), (0, 0, 0)
@@ -1009,7 +1009,7 @@ class ReviewOfNovember24Tests(unittest.TestCase):
         return written, before, bytes(mapped), at
 
     def test_a_light_color_picked_keeps_its_own_color_in_a_sample(self):
-        """The owner, November 26: #e7e3d7 picked in Overlay Fonts came out hollow on the selected row (#e9f0ff): too
+        """The review of November 26: #e7e3d7 picked in Overlay Fonts came out hollow on the selected row (#e9f0ff): too
         weak to pass for colored text, it was mapped with the paper, and only its smoothing came out light. In the
         samples, a light color whose edges blend into the paper is text; the pill's white name, on its gray, is not."""
         paper, text, gray, white = (0xe9, 0xf0, 0xff), (0xe7, 0xe3, 0xd7), (0x9d, 0x9d, 0x9d), (255, 255, 255)
@@ -1045,7 +1045,7 @@ class ReviewOfNovember24Tests(unittest.TestCase):
             self.assertEqual(at(after, x, y), at(before, x, y), "the pill and its name as mapped at %d,%d" % (x, y))
 
     def test_any_color_picked_is_text_by_one_rule_or_the_other(self):
-        """The owner, November 26: a pale yellow (#dfde92) fell between the strong-color rule and the light one, and
+        """The review of November 26: a pale yellow (#dfde92) fell between the strong-color rule and the light one, and
         "two rules are fine, but they should meet at a crossroad that leaves no possible value uncovered". Every
         pick, light or dark, comes out in its own color; a pill of the pick's own gray stays the pill."""
         paper, gray = (0xe9, 0xf0, 0xff), (0x9d, 0x9d, 0x9d)
@@ -1075,7 +1075,7 @@ class ReviewOfNovember24Tests(unittest.TestCase):
                                  "the pill as mapped at %d,%d with #%02x%02x%02x" % ((x, y) + text))
 
     def test_a_sample_drawn_on_a_dark_ground_is_kept_as_drawn(self):
-        """The owner, November 26: Overlay Fonts' preview, which FontLab draws on the dark palette already (#e7e3d7 on
+        """The review of November 26: Overlay Fonts' preview, which FontLab draws on the dark palette already (#e7e3d7 on
         #2d2d30), came out dark olive on dark once mapped. With no light paper and a dark ground, it is kept."""
         ground, text = (0x2d, 0x2d, 0x30), (0xe7, 0xe3, 0xd7)
         width = 30
@@ -1111,7 +1111,7 @@ class ReviewOfNovember24Tests(unittest.TestCase):
         self.assertEqual(bytes(mapped), bytes(drawn), "as drawn")
 
     def test_a_letter_on_a_colored_disc_keeps_the_disc_around_it(self):
-        """The owner, November 25: the Fonts panel's selected style, a dark "R" on a light-blue disc, came out with
+        """The review of November 25: the Fonts panel's selected style, a dark "R" on a light-blue disc, came out with
         a gray block beside the letter: the disc's pixels by the strokes were taken for the letter's ClearType
         edges and made gray. A flat surface of a strong color nearby keeps its pixels."""
         # FontLab's own pixels: the disc's top, its "R" (ClearType), and the row's light ground around it
@@ -1140,7 +1140,7 @@ class ReviewOfNovember24Tests(unittest.TestCase):
                 self.assertEqual(got, rows[y][x], "the disc as drawn at %d,%d" % (x, y))
 
     def test_an_anchors_pill_is_drawn_again_whole_over_what_runs_under_it(self):
-        """The owner, November 25: on a pill, anything a contour or a line drew under it made its name a mess. The
+        """The review of November 25: on a pill, anything a contour or a line drew under it made its name a mess. The
         pill is drawn again plain in its gray as mapped, its name from its coverage; a line under the pill is gone,
         and outside the pill it is mapped as before."""
         ground, upper, lower, line, name = (240, 240, 240), (176, 174, 170), (166, 164, 160), (60, 58, 54), (239, 238, 238)
@@ -1192,7 +1192,7 @@ class ReviewOfNovember24Tests(unittest.TestCase):
         return found, at
 
     def test_a_pills_half_over_the_template_glyphs_and_a_hovered_pill_keep_their_names_light(self):
-        """The owner, November 26: a pill's name broke over its half that lies over the template glyphs (the
+        """The review of November 26: a pill's name broke over its half that lies over the template glyphs (the
         translucent pill there #9c9a9a, near neutral, beside #a09e9c), and the darker pill of an anchor under the
         mouse (#7e7a72) was no pill at all. Smoothed gray lines above them, by the hundred, take no slot."""
         ground, name = (240, 240, 240), (239, 238, 238)
@@ -1221,7 +1221,7 @@ class ReviewOfNovember24Tests(unittest.TestCase):
             self.assertGreater(sum(at(x, y)), 3 * 200, "the name light, at %d,%d" % (x, y))
 
     def test_a_selected_cells_name_is_drawn_again_from_its_coverage(self):
-        """The owner, November 25: a selected cell's name, white on the selection's blue, was fringed, with a black
+        """The review of November 25: a selected cell's name, white on the selection's blue, was fringed, with a black
         pixel in its g. Each pixel of light text on the band: its channels' mean share of the way from the band to
         white, in gray; the band, and dark marks on it, as mapped."""
         band, white, cyan, pink, dark = (31, 98, 162), (255, 255, 255), (180, 255, 224), (255, 229, 239), (20, 20, 40)
@@ -1258,7 +1258,7 @@ class ReviewOfNovember24Tests(unittest.TestCase):
         self.assertEqual(at(mapped, 5, 10), at(before, 5, 10), "the band as mapped")
 
     def test_a_colored_lines_smoothing_fades_to_the_paper_on_a_canvas(self):
-        """The owner, 2026-11-25: every colored contour had a jagged edge. A line's full pixels were kept, light
+        """The review of 2026-11-25: every colored contour had a jagged edge. A line's full pixels were kept, light
         and red, and its smoothing, judged pixel by pixel, was turned over to a dark red: steps and dots."""
         paper, full, half, faint = (240, 240, 240), (255, 70, 70), (248, 155, 155), (243, 205, 205)
         rows = [[paper] * 60 for _ in range(40)]

@@ -1,6 +1,6 @@
 # Feature survey
 
-What already exists for the features the owner asked for, surveyed on 2026-11-06 before anything was built, and again for kerning on 2026-11-08. A research agent did the survey; the licenses and activity dates of the repositories below, TypeRig's tags, and the FontLab 7 calls named here were checked again against GitHub and FontLab's FontLab 7 reference. The judgments about how good each tool is come from forum posts and manuals, and are marked where unverified.
+What already exists for the features that were planned, surveyed on 2026-11-06 before anything was built, and again for kerning on 2026-11-08. A research agent did the survey; the licenses and activity dates of the repositories below, TypeRig's tags, and the FontLab 7 calls named here were checked again against GitHub and FontLab's FontLab 7 reference. The judgments about how good each tool is come from forum posts and manuals, and are marked where unverified.
 
 ## Dark mode
 
@@ -28,7 +28,7 @@ A FreeLab kerner would be its own: a minimum-distance or bubble model over outli
 
 | Method | Standing | How it measures |
 |---|---|---|
-| FontLab 7's own autokern (`flPackage.autoKern(left, right, master)`) | built in | returns its suggestion as text (−29 for *To* on the owner's test font) without writing it; the "K1" of FontLab 8 |
+| FontLab 7's own autokern (`flPackage.autoKern(left, right, master)`) | built in | returns its suggestion as text (−29 for *To* on the test font) without writing it; the "K1" of FontLab 8 |
 | Neville and Fox, [US 5,803,629](https://patents.google.com/patent/US5803629) (1997) | patent expired 2017: free to implement | each outline sampled at 100 heights; the gaps between the facing intercepts, filtered to the nearer ones (a 33% or 78% cut), set the spacing from their mean less their standard deviation |
 | Karow and MacMillan (Adobe), [US 6,624,814](https://patents.google.com/patent/US6624814) | expired 2016 | optical margins and size-dependent metrics; its kerning values come from Karow's automatic method, EP 0 465 704 (URW, 1991, expired) |
 | Refstrup and others (Apple), [US 9,208,589](https://patents.google.com/patent/US9208589) | **active until 2033: not to be implemented** | the closest distance between the facing edges, kept above a threshold |

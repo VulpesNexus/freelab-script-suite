@@ -45,8 +45,8 @@ PARTS = ("names", "other_names", "orthographies", "sets")
 # layout's 9,378 glyphs). Each bound leaves about a fifth of room: a build past one is one whose data
 # or sources grew, and is to be looked at before it ships.
 # Since 2026-11-14 (every script but Han drawn whole, the Han repertoires from Noto and Jigmo, 90,078
-# characters): Essential 1.9 MB, CJK 18.0 MB, FreeLang+ General 10.5 MB; the owner lifted the bound on
-# size, but not the one on glyphs (no sixth font). Plangothic's subsets, which replaced Jigmo's the same
+# characters): Essential 1.9 MB, CJK 18.0 MB, FreeLang+ General 10.5 MB; the bound on size was
+# lifted, but not the one on glyphs (no sixth font). Plangothic's subsets, which replaced Jigmo's the same
 # day, are smaller.
 MAX_SIZES = {u"Essential": 2400 * 1024, u"CJK": 22000 * 1024, u"General": 13000 * 1024,
              u"Mongolian-Tibetan": 1050 * 1024, u"Duployan": 1900 * 1024}
@@ -62,8 +62,8 @@ MAX_LOOKUP_BYTES = 65535  # and its lookups are reached by 16-bit offsets (check
 OWN_LAYOUT = {u"Noto Sans Mongolian": u"Mongolian-Tibetan", u"Noto Sans Duployan": u"Duployan"}
 # The one source in two fonts: Unicodia Funky's four combining parentheses are in the Essential font,
 # where Noto Sans's letters take them; the rest of it is in the FreeLang+ General font.
-# Plangothic P2 likewise: its characters of other scripts than the CJK ones (taken under its OFL, the owner's
-# word, 2026-11-14: Syriac Supplement, Arabic signs, Tai Yo, Tangut's newest, legacy computing symbols, where
+# Plangothic P2 likewise: its characters of other scripts than the CJK ones (taken under its OFL, as
+# decided on 2026-11-14: Syriac Supplement, Arabic signs, Tai Yo, Tangut's newest, legacy computing symbols, where
 # only Unifont's pixels or nothing drew them) are in the FreeLang+ General font, the rest in the CJK font.
 PLANGOTHIC_ELSEWHERE = (u"0860-086A 088F 0897 FBC3-FBD2 FD90-FD91 FDC8-FDCE 10EC2-10EC7 10ED0-10ED8 10EFA-10EFC "
                         u"187F8-187FF 18D09-18D1E 18D80-18DF2 1CCFA-1CCFB 1CEBA-1CEBF 1E6C0-1E6DE 1E6E0-1E6F5 1E6FE-1E6FF")
@@ -99,7 +99,7 @@ LEGACY_LEFT_OUT = (u"Arabic Presentation Forms-A (Unicode block)", u"CJK Compati
 # What comes from fonts other than Noto's, by the family language_font.json names: the build looks in
 # them last, for what no Noto font has, and a top-up that takes more from them fails here until it is
 # looked at and listed. Until 2026-11-13 sixteen characters came from GNU Unifont, a bitmap's pixels;
-# they come from Unicodia Funky's outlines. Since 2026-11-14 Unifont is back, under the owner's rule,
+# they come from Unicodia Funky's outlines. Since 2026-11-14 Unifont is back, under the rule,
 # for what no outline font under a license FreeLang can take has (PIXEL_SOURCES). Three sources supply
 # too many characters to list: their rule is in OTHER_SOURCES_BY_RULE.
 OTHER_SOURCES = {
@@ -174,7 +174,7 @@ OTHER_SOURCES_BY_RULE = {
     u"Plangothic P2": ((0x30000, 0x3FFFF), u"Hani", u"332C 1AFF0-1AFF3 1AFF5-1AFFB 1AFFD-1AFFE 1B000-1B122 1B132 "
                                                    u"1B150-1B152 1B155 1B164-1B167 1F260-1F265 " + PLANGOTHIC_ELSEWHERE),
     u"NewGardiner": ((0x13440, 0x143FF), u"Egyp", u"")}
-# GNU Unifont's two fonts, the one pixel source (the owner, 2026-11-14: only where no outline source has
+# GNU Unifont's two fonts, the one pixel source (the review of 2026-11-14: only where no outline source has
 # the character), dual-licensed and taken under the OFL.
 PIXEL_SOURCES = (u"Unifont Upper",)  # (Unifont's BMP font supplies nothing since Plangothic P2)
 # The fonts the CJK font holds besides Noto's (RULES: "cjk")
@@ -419,7 +419,7 @@ def required_characters():
 
 def tool_characters():
     """What Glyph Compose's lists show beyond the data files, as checks/train/language_font.py's
-    tool_characters reads it (owner's images 316 and 317, 2026-11-18: its lists draw their characters in
+    tool_characters reads it (images 316 and 317, 2026-11-18: its lists draw their characters in
     FreeLang): Glyph generation's rows and what they are made of, and the Diacritics tab's letters with
     diacritics and their parts (in this Python's Unicode: FontLab's 5.2 knows fewer of them)."""
     compose = os.path.join(HERE, os.pardir, "compose")
@@ -605,7 +605,7 @@ class ListFontTests(unittest.TestCase):
         self.assertEqual(sum(self.info["not_covered_blocks"].values()), len(not_supplied))
 
     def test_glyph_compose_characters_drawn(self):
-        """Owner's images 316 and 317: Glyph generation's list drew \u33de and \u33ff as boxes. FreeLang CJK has them
+        """Images 316 and 317: Glyph generation's list drew \u33de and \u33ff as boxes. FreeLang CJK has them
         (the list drew in the dialog's font: Glyph Compose now draws its lists in FreeLang), but the Kangxi
         radicals Glyph generation lists since 2026-11-18 were in none of the five fonts: every character
         Glyph Compose's lists show is drawn (checks/train/language_font.py's tools part)."""
@@ -784,7 +784,7 @@ class ListFontTests(unittest.TestCase):
         """Sixteen glyphs were a 16 by 16 bitmap's pixels (GNU Unifont) until outline fonts replaced
         them: no source is a bitmap font by its name, and each font of OTHER_SOURCES draws curves,
         which a bitmap's pixels never are; but PIXEL_SOURCES, GNU Unifont again since 2026-11-14 for
-        what no outline font under a license FreeLang can take has (the owner's rule), whose
+        what no outline font under a license FreeLang can take has (the rule), whose
         characters OTHER_SOURCES lists one by one."""
         for source in self.info["fonts"]:
             if source["family"] in PIXEL_SOURCES:
@@ -1296,7 +1296,7 @@ class TooltipFontTests(unittest.TestCase):
         self.assertGreater(len(shown), 12000, "the Hangul syllables, ideographs, cuneiform, and hieroglyphs among them")
         inuktitut = [l for l in languages if l.iso == u"ike"][0]
         tip = fc.coverage_tip(fc.check_language(inuktitut, font))
-        self.assertTrue(all(self.drawn(code) for code in fc.code_points(tip)), "the tooltip the owner saw as boxes")
+        self.assertTrue(all(self.drawn(code) for code in fc.code_points(tip)), "the tooltip seen as boxes")
 
     def test_large_sets_by_code_point_without_their_files(self):
         """The CJK and FreeLang+ General files are optional: without one, a set past the first bounds
@@ -1353,7 +1353,7 @@ class TooltipFontTests(unittest.TestCase):
 
 
 class OptionalCharactersTests(unittest.TestCase):
-    """The owner: presentation forms and compatibility ideographs must not count towards the script
+    """The review: presentation forms and compatibility ideographs must not count towards the script
     they belong to. checks/character_sets.json lists them as optional: a set's in "optional" (by its
     id), a script row's in its last column. They stay listed (and drawn where they were); the Arabic
     signs typed in their own right stay required."""
@@ -1368,7 +1368,7 @@ class OptionalCharactersTests(unittest.TestCase):
         self.assertEqual(self.data["scripts"]["columns"], [u"name", u"characters", u"shared", u"since", u"optional"])
         held = dict((name, len(codes_of(row[4]))) for name, row in self.scripts.items() if row[4])
         self.assertEqual(held, {u"Arabic": 728, u"Armenian": 5, u"Greek": 1, u"Han": 1002, u"Hebrew": 45, u"Latin": 9})
-        # (the owner: "Let's include all Greek polytonic letters (oxia)": required; the Ohm sign is optional)
+        # (the review: "Let's include all Greek polytonic letters (oxia)": required; the Ohm sign is optional)
         self.assertEqual(codes_of(self.scripts[u"Greek"][4]), set([0x2126]))
         for polytonic in (0x1F71, 0x1FBB, 0x1FBE, 0x1FEE, 0x1FEF, 0x1FFD, 0x0374):
             self.assertNotIn(polytonic, codes_of(self.scripts[u"Greek"][4]), "U+%04X" % polytonic)

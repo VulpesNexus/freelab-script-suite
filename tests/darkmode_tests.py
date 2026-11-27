@@ -236,7 +236,7 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertEqual(self.content.styleSheet, PANEL_SHEET)
 
     def test_a_page_is_recolored_as_its_html(self):
-        """The owner's images 203 and 204, 2026-11-27: Software Update's page, mapped, garbled the text on its banners;
+        """Images 203 and 204, 2026-11-27: Software Update's page, mapped, garbled the text on its banners;
         shown as designed, it was a white block in the dark window. Its own colors are recolored."""
         page = (u'<body style=" background-color:#ffffff;"><p style=" color:#000000;">FontLab 8</p>'
                 u'<span style=" color:#ffffff; background-color:#e8112d;">Upgrade</span><td bgcolor="#f0f0f0">x</td>')
@@ -248,7 +248,7 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertIn(u"Upgrade", dark)
 
     def test_a_dark_fields_text_is_mapped_light_and_put_back(self):
-        """The owner's images 205 to 207 and 214, 2026-11-27: a field on a dark ground, drawn as it is (no effect, for
+        """Images 205 to 207 and 214, 2026-11-27: a field on a dark ground, drawn as it is (no effect, for
         its caret), kept the black text FontLab gives its palette. Its dark text is mapped light, again when FontLab
         sets its palette, and FontLab's colors come back as dark mode goes off."""
         field = FakeWidget("YLineEditSuffix", inherits=("QLineEdit",))
@@ -270,7 +270,7 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertIsNone(field.property(dm.FIELD_TEXT_PROP))
 
     def test_a_page_filled_later_turns_dark_once(self):
-        """The owner's images 208 and 210, 2026-11-27: Software Update's page, filled after its window shows, stayed white
+        """Images 208 and 210, 2026-11-27: Software Update's page, filled after its window shows, stayed white
         until a sweep came by; it turns dark as its text changes. Qt sends textChanged from inside setHtml: handled there,
         the page was set again without end, and FontLab closed (2026-11-27)."""
         sets = []
@@ -302,7 +302,7 @@ class ShadeAndPickerTests(DarkModeCase):
 
     def test_a_field_whose_reads_stay_dark_is_set_once(self):
         """2026-11-27: Qt sends the palette change from inside setPalette; a field whose palette still read dark was set
-        again from that event, without end, and Python's stack ran out (FontLab closed under the owner's work)."""
+        again from that event, without end, and Python's stack ran out (FontLab closed with work open)."""
         sets = []
 
         class Stubborn(FakeWidget):
@@ -322,7 +322,7 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertEqual(len(sets), 2)
 
     def test_a_page_is_processed_as_it_is_shown(self):
-        """The owner, with images 232 and 233, 2026-11-27: Preferences' icon toggles flashed light for a sweep each
+        """The review of 2026-11-27, with images 232 and 233: Preferences' icon toggles flashed light for a sweep each
         time a page was first shown. The page's visible widgets not yet looked at are processed at its Show event;
         hidden ones and ones already looked at are left; a Show sent from inside processing (busy) is left to the
         outer loop, and nothing happens with dark mode off."""
@@ -385,7 +385,7 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertTrue(page.property(dm.PAGE_SHOW_PROP))
 
     def test_lists_drawing_check_pictures_get_the_checks_overlay(self):
-        """The owner's images 211 and 235, 2026-11-27: FontAudit's and the OCR languages' lists draw their check boxes
+        """Images 211 and 235, 2026-11-27: FontAudit's and the OCR languages' lists draw their check boxes
         as FontLab's pictures (LanguagesDelegate), unlike every other check box; their viewports get the "checks"
         overlay. Other lists' viewports keep no effect."""
         calls = []
@@ -406,7 +406,7 @@ class ShadeAndPickerTests(DarkModeCase):
                          "a view with no delegate (a header's) is native ink too, not an error")
 
     def test_disabled_text_is_dimmed_in_sheets(self):
-        """The owner's images 222 to 231, 2026-11-27: FontLab grays disabled fields and labels with #a0a0a0 and #b0b0b0,
+        """Images 222 to 231, 2026-11-27: FontLab grays disabled fields and labels with #a0a0a0 and #b0b0b0,
         faint on white; kept on dark, they looked enabled. A :disabled rule's text takes the palette's disabled gray."""
         sheet = (u"QWidget:disabled{color:#a0a0a0;}\nQLineEdit:disabled{color: #b0b0b0;background-color:transparent;"
                  u"border-color:#d0d0d0;}\nQLabel{color:#202020;}")
@@ -417,7 +417,7 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertNotIn(u"QLabel{color:#7f7f7f", dark, "enabled rules as mapped")
 
     def test_a_button_styled_by_its_ancestors_leaves_its_island_look(self):
-        """The owner's image 223, 2026-11-27: Font Info's Change..., styled by its dialog's sheets, was made an island:
+        """Image 223, 2026-11-27: Font Info's Change..., styled by its dialog's sheets, was made an island:
         its ancestors' light sheets copied onto it, kept as dark mode's own, and an effect mapping it, its text dim. It
         is Qt's own drawing: its own sheet back, darkened, no effect."""
         light = u"QToolButton{background-color: white;}"
@@ -433,7 +433,7 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertIsNone(button.effect)
 
     def test_typing_areas_are_never_held(self):
-        """The owner's video of 2026-11-27: in Font Info's Font Lib, the text vanished while the mouse was held, the
+        """Video of 2026-11-27: in Font Info's Font Lib, the text vanished while the mouse was held, the
         editor held as a modal dialog's large widget is during a color drag (and its picture from an earlier press)."""
         editor = FakeWidget("QsciScintilla", inherits=("QsciScintilla",))
         self.assertTrue(dm._typing_area(FakeWidget("QWidget", u"qt_scrollarea_viewport", parent=editor)))
@@ -443,7 +443,7 @@ class ShadeAndPickerTests(DarkModeCase):
                          "Overlay Fonts' list still held during a color drag")
 
     def test_a_freelab_dropdowns_list_is_in_its_window(self):
-        """The owner's image 215, 2026-11-27: Quick Overlay's flag dropdown, its list a window of its own, was taken for
+        """Image 215, 2026-11-27: Quick Overlay's flag dropdown, its list a window of its own, was taken for
         one of FontLab's and given the ink effect, which drew each flag color twice."""
         dialog = FakeWidget("QDialog", window=True)
         dialog.setProperty(dm.FREELAB_WINDOW_PROP, True)
@@ -457,7 +457,7 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertFalse(dm._in_freelab_window(other), "a dropdown of FontLab's own")
 
     def test_lists_are_not_let_go_of_for_their_sheet(self):
-        """The owner's image 213, 2026-11-27: the History list, a Qt list with a stylesheet, was let go of by the hooks,
+        """Image 213, 2026-11-27: the History list, a Qt list with a stylesheet, was let go of by the hooks,
         and its rows' own light backgrounds stood white. Lists stay hooked; Qt's buttons and fields with a sheet do not."""
         history = FakeWidget("QListWidget", sheet=u"QListWidget{background: white;}",
                              inherits=("QAbstractScrollArea", "QAbstractItemView"))
@@ -466,7 +466,7 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertTrue(dm._qt_drawn_styled(button))
 
     def test_the_flag_bars_tools_are_not_swatches(self):
-        """The owner's image 216, 2026-11-27: the flag bar's clear-flag cross and arrows, black on the dark bar, were left
+        """Image 216, 2026-11-27: the flag bar's clear-flag cross and arrows, black on the dark bar, were left
         alone with the flag swatches."""
         bar = FakeWidget("QWidget", u"widgetFlags")
         for name in (u"flagRed", u"flagNone", u"flagUp", u"flagDown"):
@@ -479,7 +479,7 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertIn(u"in FLAG_TOOL_NAMES:\n            _swap_icon(widget)", source)
 
     def test_a_sheet_noted_as_seen_is_fontlabs_not_ours(self):
-        """The owner's image 193, 2026-11-27: the Font Info panel's Change... button white. FontLab's sheet, noted as
+        """Image 193, 2026-11-27: the Font Info panel's Change... button white. FontLab's sheet, noted as
         seen, passed for one dark mode had darkened; and switching off put back an original kept from an earlier sheet
         of ours over it, an empty one, taking FontLab's away."""
         light = u"QToolButton{background-color: white;border:1 solid white;}"
@@ -496,10 +496,10 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertEqual(button.styleSheet, dark, "ours is not darkened again")
 
     def test_fontlabs_cursors_are_left_alone_but_two(self):
-        """The owner, 2026-11-26: the tools' cursors, all turned for the dark canvas, looked inverted and bad; "leave
+        """The review of 2026-11-26: the tools' cursors, all turned for the dark canvas, looked inverted and bad; "leave
         cursors up to FontLab", except the Contour tool's (a jarring light glow: a standard drop shadow, its edge
         without the light fringe of 2026-11-27) and TrueType Hinting's (the system arrow the Element tool shows, which
-        looked better). The Eraser's cross is FontLab's again: the owner meant its drop. Known by their pixels' hash."""
+        looked better). The Eraser's cross is FontLab's again: the review meant its drop. Known by their pixels' hash."""
         with open(os.path.join(os.path.dirname(HERE), "darkmode", "freelab_dark_mode.py"), "rb") as handle:
             source = handle.read().decode("utf-8")
         self.assertNotIn("glow_to_shadow", source)
@@ -531,7 +531,7 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertTrue(80 <= (edge >> 24) <= 130, "at its coverage (1 - 0x9f / 255), over a trace of shadow")
 
     def test_an_effect_drawn_again_from_inside_its_own_drawing_draws_its_widget_as_it_is(self):
-        """The owner, November 25: dragging a color in Overlay Fonts ran FontLab's stack out after a few seconds,
+        """The review of November 25: dragging a color in Overlay Fonts ran FontLab's stack out after a few seconds,
         each nested paint starting the next. An effect re-entered while it draws, or nested past MAX_DRAW_DEPTH,
         draws its widget as it is."""
         self.patch("_paint_hold", lambda: None)
@@ -558,7 +558,7 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertEqual(calls, ["as it is"], "nested too deep: as it is")
 
     def test_under_a_modal_dialog_a_large_widget_is_drawn_again_at_most_every_refresh(self):
-        """The owner, November 25: dragging a color in Overlay Fonts repainted the Font window at each step, and
+        """The review of November 25: dragging a color in Overlay Fonts repainted the Font window at each step, and
         FontLab stopped answering, then died. Under a modal dialog, a large widget's picture is held, drawn anew
         at most every MODAL_REFRESH seconds, and once more after the last change."""
         clock = [100.0]
@@ -616,7 +616,7 @@ class ShadeAndPickerTests(DarkModeCase):
         dm._held().clear()
 
     def test_a_tabs_faint_close_cross_is_made_stronger_as_fontlab_draws_it(self):
-        """The owner, November 25: a document tab's close cross was nearly invisible, then, drawn by dark mode where
+        """The review of November 25: a document tab's close cross was nearly invisible, then, drawn by dark mode where
         FontLab's was found, halved or missing as FontLab faded it. FontLab's own is kept: each pixel's share of the
         way from its tab's ground to the cross' color, on a selected tab (220 on 226) and on another (220 on 203)."""
         class Color(object):
@@ -663,7 +663,7 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertEqual(dm._tab_cross_shares(Picture({(5, 9): 221}, 221), 220), [], "a ground as light as the cross")
 
     def test_a_canvas_pictures_are_found_where_fontlab_draws_them(self):
-        """The owner, November 25: a picture in a glyph came out as its negative. Its place comes from FontLab:
+        """The review of November 25: a picture in a glyph came out as its negative. Its place comes from FontLab:
         the element's transform, the glyph's place in its line, the canvas' transform."""
         import sys as system
         import types
@@ -756,7 +756,7 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertEqual(dm._find_picture_rects("elsewhere"), [], "no canvas: none")
 
     def test_a_pickers_bare_declarations_are_wrapped(self):
-        """The owner, November 24: Overlay Fonts' opacity dropdown stayed white. Its stylesheet is "color:
+        """The review of November 24: Overlay Fonts' opacity dropdown stayed white. Its stylesheet is "color:
         lightGray;", declarations with no selector: with the frame's rule after them Qt read neither, drew a plain
         button from the dark palette, and the picker's effect turned that light."""
         picker = FakeWidget("QtColorPicker", "buttonColor", parent=self.content, sheet=u"color: lightGray;")
@@ -766,7 +766,7 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertEqual(picker.styleSheet, u"color: lightGray;")
 
     def test_a_fields_ground_decides_whether_it_is_mapped(self):
-        """The owner, November 24: Actions' "Glyph" and "Baseline", a unit beside a field, and text typed in the
+        """The review of November 24: Actions' "Glyph" and "Baseline", a unit beside a field, and text typed in the
         Glyph window's fields came out heavy or fringed; a white square stood in the corner of the metrics table."""
         class Color(object):
             def __init__(self, value):
@@ -830,7 +830,7 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertFalse(dm.light_ground(Picture([bare, bare, bare, bare]), Rect()))
 
     def test_a_lists_wide_picture_is_no_logo(self):
-        """The owner, November 24: Overlay Fonts' sample text. A line of text drawn as a list's picture is mapped
+        """The review of November 24: Overlay Fonts' sample text. A line of text drawn as a list's picture is mapped
         with its row; drawn from its icon in a logo's square, it came out dark."""
         class Size(object):
             def __init__(self, w, h):
@@ -856,7 +856,7 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertTrue(dm._logo_icon(Icon([Size(32, 32)]), state), "a square picture goes on to the logo rules")
 
     def test_a_menu_holds_the_pictures_under_it_but_not_its_own(self):
-        """The owner, November 24: menus slow to answer over a Font window. FontLab repaints its windows as the mouse
+        """The review of November 24: menus slow to answer over a Font window. FontLab repaints its windows as the mouse
         moves over a menu's entries."""
         import sys as system
         saved = getattr(system, "_freelab_paint_hold", None)
@@ -1458,7 +1458,7 @@ class FakeHooks(object):
 
 
 class SwatchRectTests(DarkModeCase):
-    """The owner, November 26 (a recording): Overlay Fonts' color slot showed a black pick in a white frame. Its picker
+    """The review of November 26 (a recording): Overlay Fonts' color slot showed a black pick in a white frame. Its picker
     paints the swatch 21 by 18 pixels; the picker effect kept a 14-pixel square as drawn and mapped the rest."""
 
     class Picker(object):
@@ -2065,7 +2065,7 @@ class EngineTests(DarkModeCase):
         self.assertIsNone(self.kind(self.search), "no script effects over the hooks")
 
     def test_hooked_islands_draw_their_text_with_grayscale_smoothing(self):
-        """The owner, November 26: under the native engine, the Fonts panel's names, light ClearType on dark, had
+        """The review of November 26: under the native engine, the Fonts panel's names, light ClearType on dark, had
         deep blue and brown edges that broke the letters. A hooked island's font asks for grayscale smoothing, and
         only that (it still takes the rest from its parent); switched off, it inherits again."""
         hooks = FakeHooks()
@@ -2080,7 +2080,7 @@ class EngineTests(DarkModeCase):
         self.assertFalse(self.search.testAttribute(qtfakes.Qt.WA_SetFont), "inherited again")
 
     def test_overlay_samples_are_hooked_and_shown_as_picked(self):
-        """The owner, November 26 (images 150 to 152): Overlay Fonts' samples showed a black pick white, and white
+        """The review of November 26 (images 150 to 152): Overlay Fonts' samples showed a black pick white, and white
         picks hollow or not at all. Under the native engine, its preview and its list's rows (FontLab paints them) are
         hooked, and the hooks draw their samples' colors as picked."""
         hooks = FakeHooks()
@@ -2313,7 +2313,7 @@ class OnOffTests(DarkModeCase):
         self.assertTrue(seen and all(seen))
 
     def test_fontlabs_drop_highlight_is_never_rendered_to_be_looked_at(self):
-        """The owner, November 24: every drag of a window over the main window stalled for two seconds as the
+        """The review of November 24: every drag of a window over the main window stalled for two seconds as the
         blue highlight came up. It grows step by step, and at each size it was rendered and its pixels counted."""
         self.on()
         looked = []
@@ -2675,14 +2675,14 @@ class TitleBarTests(DarkModeCase):
         self.assertEqual(calls, [(101, True), (102, True), (103, True), (101, False), (103, False)])
 
     def test_a_cell_chart_fills_the_room_its_cells_leave(self):
-        """The owner, November 24: a white band beside the glyph window's few cells. The chart fills itself in
+        """The review of November 24: a white band beside the glyph window's few cells. The chart fills itself in
         FontLab's light window color, which its island effect maps dark; taken back with dark mode."""
         cells = FakeWidget("FontCellChart", "fontChartView", parent=self.odd, inherits=("FontCellChart",))
         QPalette = dm._gui("QPalette")
         self.on()
         self.assertIsNotNone(cells.effect)
         # (in its stylesheet, drawn by the style: the palette's color did not outlast a repolish, and a font
-        # window merged back into the main window came out light under its cells, the owner, November 24)
+        # window merged back into the main window came out light under its cells, the review of November 24)
         light = dm._state()["saved"]["palette"].color(QPalette.Window).name()
         self.assertIn(u"FontCellChart{background-color:%s;}" % light, cells.styleSheet)
         styled = dm._core("Qt").WA_StyledBackground
@@ -2693,7 +2693,7 @@ class TitleBarTests(DarkModeCase):
         self.assertNotIn(u"background-color:%s" % light, cells.styleSheet or u"")
 
     def test_a_freelab_windows_caption_is_never_taken_for_ink(self):
-        """The owner, November 24: Font Builder's Ink darker than: looked blurrier than Make: beside it. It had
+        """The review of November 24: Font Builder's Ink darker than: looked blurrier than Make: beside it. It had
         been given the ink effect, and text drawn through an effect loses ClearType."""
         class Label(object):
             width, height = 120, 20
@@ -2723,7 +2723,7 @@ class TitleBarTests(DarkModeCase):
             dm._shows_picture, dm.own_render = saved
 
     def test_large_widgets_pictures_are_held_for_the_length_of_a_drag(self):
-        """The owner, November 24: dragging a window over the main window stalled for seconds as FontLab's blue
+        """The review of November 24: dragging a window over the main window stalled for seconds as FontLab's blue
         highlight came up, and not with dark mode off. Each repaint under the highlight drew and mapped the
         widget anew (111 ms for a font window, read live); Qt keeps no picture of a widget for its effect."""
         import sys as system
@@ -2763,7 +2763,7 @@ class TitleBarTests(DarkModeCase):
         self.assertEqual(dm._release_held(), 0)
 
     def test_whats_this_help_has_no_dashed_edge(self):
-        """The owner, November 23 (image 22): the help's right and bottom sides were dashed. Qt dots its shadow
+        """The review of November 23 (image 22): the help's right and bottom sides were dashed. Qt dots its shadow
         color over the frame there: the help's own palette has it in the frame's color."""
         self.on()
         QPalette = dm._gui("QPalette")
@@ -2775,7 +2775,7 @@ class TitleBarTests(DarkModeCase):
         self.assertEqual(self.app.class_palettes, {}, "gone with dark mode")
 
     def test_a_medium_shades_title_bars_take_the_windows_gray(self):
-        """The owner, November 23 (image 28): Windows' dark title bar on a medium gray window."""
+        """The review of November 23 (image 28): Windows' dark title bar on a medium gray window."""
         state = dm._state()
         saved = (state.get("shade"), state.get("title_shade"), state.get("dark_windows"))
 
@@ -3041,7 +3041,7 @@ class ReviewTests(DarkModeCase):
 
 class InterfaceTextTests(DarkModeCase):
     """Text Qt draws on the dark interface goes through the defringe effect (ClearType's colored edges, the
-    owner's most frequent complaint, November 24 and 25)."""
+    most frequent complaint, November 24 and 25)."""
 
     def freelab_window(self):
         window = FakeWidget("QDialog", "fontCheck", window=True, width=800, height=600, inherits=("QDialog",))
@@ -3112,7 +3112,7 @@ class InterfaceTextTests(DarkModeCase):
         self.assertIs(viewport.effect, effect)
 
     def test_a_freelab_text_box_has_no_effect_and_gray_smoothing(self):
-        """The owner's images 165 and 166: the Code preview's colored code came out gray inside each letter through
+        """Images 165 and 166: the Code preview's colored code came out gray inside each letter through
         the defringe effect. A FreeLab text box's text area has no effect; the box smooths its text in grays."""
         viewport = self.freelab_window()
         window = viewport.parentWidget().parentWidget()
@@ -3469,7 +3469,7 @@ class MenuTickFrameTests(unittest.TestCase):
         return dm._framed_style("fusion"), option
 
     def test_a_ticked_menu_entry_shows_the_mark_alone_in_the_texts_color(self):
-        """The owner, November 23: the tick FontLab's light look has (the mark alone), in the text's color."""
+        """The review of November 23: the tick FontLab's light look has (the mark alone), in the text's color."""
         style, option = self.framed()
         painter, menu = self.Painter(), self.Widget("QMenu", self.Action(True))
         style.drawPrimitive(7, option, painter, menu)
@@ -3500,7 +3500,7 @@ class MenuTickFrameTests(unittest.TestCase):
         self.assertEqual(painter.drawn, [("fusion", 9)], "no line beside the ticks either")
 
     def test_a_dark_menu_gets_the_line_beside_its_ticks(self):
-        """The owner, November 23: FontLab's light look has a line beside a menu's ticks; Fusion draws none."""
+        """The review of November 23: FontLab's light look has a line beside a menu's ticks; Fusion draws none."""
         style, option = self.framed()
         option.rect = self.Rect(0, 0, 176, 375)
         painter = self.Painter()
@@ -3511,7 +3511,7 @@ class MenuTickFrameTests(unittest.TestCase):
                          "over the panel, before the entries are drawn: two pixels wide, from the frame to the frame")
         frame_color = (dm.lighter_name(u"#1e1e1e", dm.MENU_FRAME_LIGHTER),)
         self.assertEqual([pen.args for pen in painter.pens], [frame_color, frame_color],
-                         "the owner, November 23 (images 23 and 24): the line and the frame share one color")
+                         "the review of November 23 (images 23 and 24): the line and the frame share one color")
         self.assertLess(dm.MENU_FRAME_LIGHTER, dm.SEPARATOR_LIGHTER, "nearer the menu's own than the separators'")
         painter = self.Painter()
         style.drawPrimitive(10, option, painter, self.Widget("QMenu"))

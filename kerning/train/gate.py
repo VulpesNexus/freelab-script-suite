@@ -11,7 +11,7 @@ count as one).
 - Another script needs at least MIN_DESIGNS designs (one design cannot show that a method holds for
   designs it never saw), and the model must beat the default suggestion over all pairs and on kerned
   pairs.
-- With BEAT_NO_KERNING (off: the owner's decision, pending), another script must also beat no kerning
+- With BEAT_NO_KERNING (off: the decision, pending), another script must also beat no kerning
   on kerned pairs: on the pairs fonts do kern, a suggestion no closer than leaving them alone tells the
   designer nothing (Devanagari, 2026-11-14: 26.0 against 25.7, where every method was further from the
   fonts than no kerning at all). Over all pairs no kerning is never asked to be beaten: most pairs are

@@ -405,7 +405,7 @@ class BuildTests(unittest.TestCase):
         d.build_glyphs()
         self.assertEqual(glyph.layers["Regular"].removals, 0)
         self.assertTrue(any("Left as drawn" in line for line in self.logged))
-        # The glyph's name in italics, a link that opens it (owner's request of 2026-11-24)
+        # The glyph's name in italics, a link that opens it (the request of 2026-11-24)
         self.assertIn(u'redraw them): <a href="glyphname:A"><i>A</i></a>.', [line for line in self.logged
                                                                              if "Left as drawn" in line][0])
 
@@ -674,7 +674,7 @@ class FontLabCallTests(unittest.TestCase):
 
 
 class UiRoundTests(unittest.TestCase):
-    """The owner's UI round of 2026-11-17 (images 216, 239 to 241, 266 to 268, 274, 280) on Font Builder."""
+    """The UI round of 2026-11-17 (images 216, 239 to 241, 266 to 268, 274, 280) on Font Builder."""
 
     def setUp(self):
         self.saved = fb._qt
@@ -734,7 +734,7 @@ class UiRoundTests(unittest.TestCase):
         self.assertIn(("setVisible", (False,)), calls)
 
     def test_a_tab_switch_hides_the_other_tabs_buttons_first(self):
-        """Round 3's convention 24 (owner's image 284): the bottom row's buttons swapped through the shared
+        """Round 3's convention 24 (image 284): the bottom row's buttons swapped through the shared
         show_only, which hides the other tab's before it shows this one's (shown first, the row held both a
         moment and Qt widened the window for good)."""
         d = fb.FontBuilderDialog.__new__(fb.FontBuilderDialog)
@@ -754,7 +754,7 @@ class UiRoundTests(unittest.TestCase):
         self.assertEqual(swaps[0][0], {0: [], 1: [d.build_button]}, "Build ticked glyphs is the Build tab's")
 
     def test_the_rows_above_the_tabs_frames_are_as_tall(self):
-        """Round 3's convention 23 (owner's images 285 and 286): the Template tab's row (a dropdown) and the
+        """Round 3's convention 23 (images 285 and 286): the Template tab's row (a dropdown) and the
         Build tab's (two buttons) made as tall as the taller, so the frame under them never shifts as the tabs
         switch; again at each switch and as the window shows."""
 
@@ -926,7 +926,7 @@ class FakeReader(object):
 
 
 class SheetFileTests(unittest.TestCase):
-    """The sheets' files: the save dialog's type (owner's image 374), the sheets picked (image 376: one file read
+    """The sheets' files: the save dialog's type (image 374), the sheets picked (image 376: one file read
     as 20 sheets, a character each), SVG sheets read back, and the log's link to the folder (image 375)."""
 
     def setUp(self):
@@ -1006,7 +1006,7 @@ class SheetFileTests(unittest.TestCase):
         self.assertEqual(fb.template_ext("C:/Temp/a/Hand.v2"), ("C:/Temp/a/Hand.v2", ".svg"), "a dot in the name kept")
 
     def test_each_file_types_label_still_gives_its_extension(self):
-        """The owner's labels of 2026-11-24 hold two groups in parentheses ("SVG drawings (vector) (*.svg)"): Qt's
+        """The labels of 2026-11-24 hold two groups in parentheses ("SVG drawings (vector) (*.svg)"): Qt's
         own regular expression takes the last as the patterns (greedy on the name), as Windows' dialog helper takes
         the text after the last "(", so each label's type still gives its extension, and a name typed with it is
         written in its format."""
@@ -1095,16 +1095,16 @@ class SheetFileTests(unittest.TestCase):
         """Saving the template again as Hand.svg replaced Hand-2-of-2.svg, drawn in place, with an empty sheet
         without a word: the dialog asked of Hand.svg, which was never written (adversarial review 2). Every file
         the save would replace is named in one question; Cancel leaves them all as they were."""
-        self.write("Hand-2-of-2.svg", "OWNER DRAWING")
+        self.write("Hand-2-of-2.svg", "EXISTING DRAWING")
         d, asked, logged = self.saving_dialog(None)
         d.save_template()
         self.assertEqual(asked, ["Hand-2-of-2.svg already exists. Replace it with a new sheet?"])
         self.assertEqual([kind for kind, _w in self.marked], ["script", "risky"],
                          "FreeLab's own question for FreeLab MCP, its Replace needing risky mode")
-        self.assertEqual(self.read("Hand-2-of-2.svg"), "OWNER DRAWING", "canceled: left as it was")
+        self.assertEqual(self.read("Hand-2-of-2.svg"), "EXISTING DRAWING", "canceled: left as it was")
         self.assertFalse(os.path.exists(os.path.join(self.folder, "Hand-1-of-2.svg")), "and nothing else written")
         self.assertEqual(logged, [("warning", "The operation was interrupted. Nothing was saved or overwritten.")])
-        self.write("Hand-1-of-2.svg", "OWNER DRAWING")
+        self.write("Hand-1-of-2.svg", "EXISTING DRAWING")
         d, asked, logged = self.saving_dialog("Replace")
         d.save_template()
         self.assertEqual(asked, ["Hand-1-of-2.svg and Hand-2-of-2.svg already exist. Replace them with new sheets?"],
@@ -1115,33 +1115,33 @@ class SheetFileTests(unittest.TestCase):
         self.assertEqual(logged[-1][0], "done")
 
     def test_the_name_typed_is_asked_of_by_freelab_unless_windows_asked(self):
-        """Windows' own "Confirm Save As" box is light in dark mode (owner's report, 2026-11-24): the dialog is told
+        """Windows' own "Confirm Save As" box is light in dark mode (report, 2026-11-24): the dialog is told
         not to ask, and FreeLab's own question names the file typed too, once. Where this PythonQt takes no options,
         Windows' box asked of it, as before, and FreeLab asks of the others only."""
-        self.write("Hand.svg", "OWNER DRAWING")
+        self.write("Hand.svg", "EXISTING DRAWING")
         d, asked, logged = self.saving_dialog(None, sheets=1)
         d.save_template()
         self.assertEqual(asked, ["Hand.svg already exists. Replace it with a new sheet?"])
         self.assertEqual([kind for kind, _w in self.marked], ["script", "risky"])
-        self.assertEqual(self.read("Hand.svg"), "OWNER DRAWING", "canceled: left as it was")
+        self.assertEqual(self.read("Hand.svg"), "EXISTING DRAWING", "canceled: left as it was")
         self.assertEqual(logged, [("warning", "The operation was interrupted. Nothing was saved or overwritten.")])
         d, asked, logged = self.saving_dialog("Replace", sheets=1)
         d.save_template()
         self.assertEqual(len(asked), 1, "asked once")
         self.assertIn("<svg", self.read("Hand.svg"))
         # Options refused: the plain call, Windows' box asked of Hand.svg, FreeLab asks nothing more
-        self.write("Hand.svg", "OWNER DRAWING")
+        self.write("Hand.svg", "EXISTING DRAWING")
         d, asked, logged = self.saving_dialog(None, sheets=1, options=False)
         d.save_template()
         self.assertEqual(asked, [])
         self.assertIn("<svg", self.read("Hand.svg"))
         # (and of the numbered sheets, which Windows never asked of, as before)
-        self.write("Hand-2-of-2.svg", "OWNER DRAWING")
+        self.write("Hand-2-of-2.svg", "EXISTING DRAWING")
         d, asked, logged = self.saving_dialog(None, options=False)
         d.save_template()
         self.assertEqual(asked, ["Hand-2-of-2.svg already exists. Replace it with a new sheet?"])
         # Every sheet's file there, with options taken: one question for all (Hand.svg, not written, not named)
-        self.write("Hand-1-of-2.svg", "OWNER DRAWING")
+        self.write("Hand-1-of-2.svg", "EXISTING DRAWING")
         d, asked, logged = self.saving_dialog(None)
         d.save_template()
         self.assertEqual(len(asked), 1)
@@ -1224,7 +1224,7 @@ class SheetFileTests(unittest.TestCase):
         real = fb.render_sheet
         fb.render_sheet = render
         try:
-            self.write("Hand-1-of-2.psd", "OWNER DRAWING")
+            self.write("Hand-1-of-2.psd", "EXISTING DRAWING")
             d, asked, logged = self.saving_dialog("Replace", ext=".psd")
             d.save_template()
         finally:
@@ -1257,7 +1257,7 @@ class SheetFileTests(unittest.TestCase):
         self.assertEqual((image.args, why), (("drawn.psd",), None), "its flattened picture, as Qt reads it")
 
     def test_a_sheet_that_cannot_be_written_leaves_the_file_there_as_it_was(self):
-        self.write("Hand-1-of-2.svg", "OWNER DRAWING")
+        self.write("Hand-1-of-2.svg", "EXISTING DRAWING")
         d, asked, logged = self.saving_dialog("Replace")
         saved = fb.sheet_svg
 
@@ -1268,7 +1268,7 @@ class SheetFileTests(unittest.TestCase):
             d.save_template()
         finally:
             fb.sheet_svg = saved
-        self.assertEqual(self.read("Hand-1-of-2.svg"), "OWNER DRAWING", "the write failed before it took the file's place")
+        self.assertEqual(self.read("Hand-1-of-2.svg"), "EXISTING DRAWING", "the write failed before it took the file's place")
         self.assertEqual(os.listdir(self.folder), ["Hand-1-of-2.svg"], "the staged file removed")
         self.assertEqual(logged[-1], ("error", "%s could not be written. Nothing was saved or overwritten." %
                                       os.path.join(self.folder, "Hand-1-of-2.svg")))
@@ -1291,7 +1291,7 @@ class SheetFileTests(unittest.TestCase):
     def three_sheets_there(self):
         """Hand-1-of-3.svg and Hand-3-of-3.svg drawn already (Hand-2-of-3.svg not there): {name: bytes}."""
         for name in ("Hand-1-of-3.svg", "Hand-3-of-3.svg"):
-            self.write(name, "OWNER DRAWING %s" % name)
+            self.write(name, "EXISTING DRAWING %s" % name)
         return self.contents()
 
     def contents(self):
@@ -1303,10 +1303,10 @@ class SheetFileTests(unittest.TestCase):
         return out
 
     def test_a_save_stopped_after_two_sheets_of_three_leaves_nothing_behind(self):
-        """The owner, 2026-11-24: "Cancelling should probably delete what was already exported; I managed to cancel
+        """The review of 2026-11-24: "Cancelling should probably delete what was already exported; I managed to cancel
         by hitting Close, and that left partial exports behind." Every sheet is staged beside its file until all are
         written: stopped at the third (Cancel, Esc, Close, the tools menu, or an arrow: one path), the files there
-        are byte for byte as they were, no staged file is left, and the log says so in the owner's words."""
+        are byte for byte as they were, no staged file is left, and the log says so in the words."""
         before = self.three_sheets_there()
         d, asked, logged = self.saving_dialog("Replace", sheets=3)
         staged_seen = []
@@ -1366,7 +1366,7 @@ class SheetFileTests(unittest.TestCase):
                                                    "Hand-1-of-3.svg. Not saved, any file there left as it was: "
                                                    "Hand-2-of-3.svg and Hand-3-of-3.svg."))
             # The first move failing: nothing saved at all
-            self.write("Hand-1-of-3.svg", "OWNER DRAWING Hand-1-of-3.svg")
+            self.write("Hand-1-of-3.svg", "EXISTING DRAWING Hand-1-of-3.svg")
             fb.put_in_place = lambda staged, name: locked(staged, name, "Hand-1-of-3.svg")
             d, asked, logged = self.saving_dialog("Replace", sheets=3)
             d.save_template()
@@ -1468,7 +1468,7 @@ class SheetFileTests(unittest.TestCase):
         line = fb.saved_line(ak, [first, os.path.join(self.folder, "Hand-2-of-2.svg")])
         link = ak.reveal_link(first, os.path.normpath(self.folder))
         self.assertEqual(line, "Saved <b>2 sheets</b> in %s: Hand-1-of-2.svg and Hand-2-of-2.svg." % link)
-        # Their size together, in the suite's words (the owner, 2026-11-24); a long list named in part
+        # Their size together, in the suite's words (the review of 2026-11-24); a long list named in part
         line = fb.saved_line(ak, [first, os.path.join(self.folder, "Hand-2-of-2.svg")], size=1717986918)
         self.assertEqual(line, "Saved <b>2 sheets</b> (1.6 GB) in %s: Hand-1-of-2.svg and Hand-2-of-2.svg." % link)
         many = [os.path.join(self.folder, "Big-%d-of-131.png" % (k + 1)) for k in range(131)]
@@ -1493,7 +1493,7 @@ class SheetFileTests(unittest.TestCase):
 
 
 class RevealTests(unittest.TestCase):
-    """The shared module's link to a file saved (owner's image 375): Explorer on Windows (explorer /select,
+    """The shared module's link to a file saved (image 375): Explorer on Windows (explorer /select,
     no shell, no console window), the Finder on macOS (open -R), the folder elsewhere."""
 
     def setUp(self):
@@ -1604,7 +1604,7 @@ class TextTests(unittest.TestCase):
 
     def test_the_em_size_help_is_worked_out_from_the_default(self):
         self.assertEqual(fb.EM_PIXELS, 500)
-        # (the owner asked whether the font's metrics affect the em size: they do not, and the help says what they do)
+        # (it was asked whether the font's metrics affect the em size: they do not, and the help says what they do)
         self.assertEqual(fb.EM_HELP, u"The em's size on the sheet, in pixels (500 at first, which draws well on a screen), "
                                      u"whatever the font's units per em: the font's metrics set where its lines fall "
                                      u"within the em, and how tall a box is. Printed at 300 dpi, 118 pixels make a "
@@ -1644,7 +1644,7 @@ class TextTests(unittest.TestCase):
         self.assertIn(u'self.close_button.setWhatsThis("Closes the window.', self.source())
 
     def test_the_ink_threshold_says_where_the_risk_begins_from_the_grays_themselves(self):
-        """The owner, 2026-11-24: the lines read at about 205 and the guide characters at about 235, and the setting
+        """The review of 2026-11-24: the lines read at about 205 and the guide characters at about 235, and the setting
         stops at 185; the numbers come from the constants, never typed in the text."""
         for text in (fb.THRESHOLD_TIP, fb.THRESHOLD_HELP):
             for value in (fb.GUIDE_GRAY, fb.GUIDE_INK_GRAY, fb.THRESHOLD_MAX):
@@ -1766,7 +1766,7 @@ def preview_dialog(fc, text="ABC", points=12):
 
 
 class TemplatePreviewTests(unittest.TestCase):
-    """The owner's review of the Template tab (2026-11-24): the box under Glyphs drew Yi's 1,220 characters as
+    """The review of the Template tab (2026-11-24): the box under Glyphs drew Yi's 1,220 characters as
     boxes (the window's font has no Yi), its dropdown's line sat tight between the rows, and its text size
     could not be changed."""
 
@@ -1909,7 +1909,7 @@ class TemplatePreviewTests(unittest.TestCase):
         self.assertEqual(fc.registered, 0, "a size alone registers nothing")
 
     def test_the_text_size_stands_right_of_the_sets_dropdown_with_its_help(self):
-        """The owner, 2026-11-24: "Character set: [dropdown]   Text size: [14 pt]", the row's spacing between the
+        """The review of 2026-11-24: "Character set: [dropdown]   Text size: [14 pt]", the row's spacing between the
         dropdown and the next caption, the dropdown as wide as its widest choice as before."""
         source = builder_source()
         page = source[source.index("    def template_page(self, QtCore, QtGui):"):source.index("    def preview_font(")]
@@ -1950,7 +1950,7 @@ YI = "\N{YI SYLLABLE IT}\N{YI SYLLABLE IX}"
 
 
 class SavedSetTests(unittest.TestCase):
-    """The owner's review of 2026-11-24: the characters of the template were kept, the set picked was not,
+    """The review of 2026-11-24: the characters of the template were kept, the set picked was not,
     and the window reopened on Characters typed below as if they had been typed."""
 
     def setUp(self):
@@ -1995,7 +1995,7 @@ class SavedSetTests(unittest.TestCase):
         self.assertEqual(written[-1], {"typed": YI}, "no set kept; the characters as they were")
 
     def test_a_new_font_is_named_before_its_window_opens(self):
-        """The owner, 2026-11-24: a font FreeLab made came up in a tab titled Unnamed. Read live: a new font's own
+        """The review of 2026-11-24: a font FreeLab made came up in a tab titled Unnamed. Read live: a new font's own
         names (tfn, tsn, ffn, psn) stay Unnamed whatever its font info says, and the tab is titled by them."""
         import inspect
         source = inspect.getsource(fb.FontBuilderDialog.new_font)
@@ -2206,7 +2206,7 @@ SODIPODI = 'xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"'
 
 
 def svg_before_marks_group(text):
-    """An SVG sheet as sheet_svg wrote it before its marks had a group of their own (the owner, 2026-11-24): the
+    """An SVG sheet as sheet_svg wrote it before its marks had a group of their own (the review of 2026-11-24): the
     marks' path back as the template group's last element, the sodipodi namespace on that group. Nothing else
     moved, so this gives the text as it was, byte for byte."""
     lines = text.split("\n")
@@ -2378,7 +2378,7 @@ SCANS = {  # (realistic sheets back from paper: a flatbed scan, a phone photo, a
 
 
 class GuideReadingTests(unittest.TestCase):
-    """The guide characters never become part of a glyph read back (the owner's request, 2026-11-24): on a
+    """The guide characters never become part of a glyph read back (the request, 2026-11-24): on a
     screen's sheet, a scanned one, a photographed one, and a scanner's 1 bit, at the default and the highest
     ink threshold, in outlines and images alike."""
 
@@ -2710,7 +2710,7 @@ class GuideFileTests(unittest.TestCase):
         self.assertEqual(hashlib.sha1(text.encode("utf-8")).hexdigest(), BASELINE_SVG)
 
     def test_an_svg_sheets_marks_are_a_locked_group_of_their_own_over_the_template(self):
-        """The owner, 2026-11-24: the boxes and guides may be hidden before a sheet is saved, the marks kept. The
+        """The review of 2026-11-24: the boxes and guides may be hidden before a sheet is saved, the marks kept. The
         marks' group holds the corner squares and the bands alone, drawn last as they always were (a title wider
         than a small sheet runs under them), and the template's holds no black."""
         import xml.etree.ElementTree as ET
@@ -2883,7 +2883,7 @@ class GuideFileTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# PSD sheets (the owner, 2026-11-24), read back by a parser of this file's own after Adobe's Photoshop File
+# PSD sheets (the review of 2026-11-24), read back by a parser of this file's own after Adobe's Photoshop File
 # Format (version 1), every length checked against the bytes after it; then by Pillow and psd-tools where
 # this Python has them
 # ---------------------------------------------------------------------------
@@ -3107,7 +3107,7 @@ def read_planes(planes, width, height, threshold):
 
 
 class PsdTests(unittest.TestCase):
-    """A template saved as PSD (the owner, 2026-11-24): the flattened picture, then three layers, bottom to top,
+    """A template saved as PSD (the review of 2026-11-24): the flattened picture, then three layers, bottom to top,
     Marks (keep visible), Template, and Draw here, every channel in PackBits, written in pure Python."""
 
     def test_packbits_comes_back_and_a_white_row_is_short(self):
@@ -3190,7 +3190,7 @@ class PsdTests(unittest.TestCase):
                 under = below[c][k]
                 shown = strong[c][k] * opacity + under * (1 - opacity) if alpha[k] else under
                 self.assertLessEqual(abs(shown - plane[k]), 1, "pixel %d, channel %d" % (k, c))
-        # Raised to full opacity, the Template's colors are the strong ones (the owner, 2026-11-24): the lines and
+        # Raised to full opacity, the Template's colors are the strong ones (the review of 2026-11-24): the lines and
         # labels at full strength, the guide characters as much lighter than them as they were
         pixels = set(zip(red, green, blue))
         self.assertIn(fb.GUIDE_RGB, pixels)
@@ -3205,7 +3205,7 @@ class PsdTests(unittest.TestCase):
         self.assertEqual(progress, [256.0 * k / height for k in range((height + 255) // 256)], "a call a band of rows")
 
     def test_with_the_template_hidden_the_sheet_reads_as_with_it_shown(self):
-        """The owner, 2026-11-24: a sheet saved with the Template layer hidden (the marks on white, and the strokes
+        """The review of 2026-11-24: a sheet saved with the Template layer hidden (the marks on white, and the strokes
         drawn) is found, its layout read from a band, and its boxes read exactly as with the template shown: the
         reading uses the corner squares, the bands, and the boxes' ink, never the lines or the labels."""
         sheet = psd_sheet()
@@ -3397,7 +3397,7 @@ def estimate_sheet(em, boxes):
 
 
 class EstimateTests(unittest.TestCase):
-    """The size a save will take, said in the log as it starts (the owner, 2026-11-24: "for PSD size risks, is it
+    """The size a save will take, said in the log as it starts (the review of 2026-11-24: "for PSD size risks, is it
     doable to estimate required size before writing?"): PSD by PackBits' own costs, calibrated here on the
     writer's output; PNG, TIFF, and SVG roughly; nothing said under ESTIMATE_QUIET, a warning past ESTIMATE_WARN
     that names a lighter format."""
